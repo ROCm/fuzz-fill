@@ -1,5 +1,6 @@
 import json
 import argparse
+import subprocess
 from pathlib import Path
 
 from utils import get_repo_base, get_file, get_line_number, abort_at_line
@@ -12,18 +13,42 @@ def main():
                         help='Target: spirv or amd (default: spirv)')
     parser.add_argument('--llvm-project', type=Path, default=None,
                         help='Path to llvm-project root (default: base/llvm-project)')
+    parser.add_argument('--reverse', '-r', action='store_true',
+                        help='Reverse: git restore each file that had an abort added')
     args = parser.parse_args()
 
     target = args.target
     llvm_project = args.llvm_project if args.llvm_project is not None else base / 'llvm-project'
-
-    gaps_file = base / 'coverage' / 'coverage-info' / f'coverage_gaps_{target}.json'
+    fuzzer_test_dir = base / 'fuzzer-tests' / args.target
+    gaps_file = fuzzer_test_dir / f'coverage_gaps_{target}.json'
 
     # Load coverage gaps
     with open(gaps_file, 'r') as f:
         raw_gaps: dict[str, str] = json.load(f)
 
     gap_files: dict = { x : {'file' : get_file(llvm_project, x), 'line' : get_line_number(x), 'replace':  v} for x, v in raw_gaps.items()}
+
+    if args.reverse:
+        # Restore each unique file that was modified (had an abort added)
+        seen = set()
+        for info in gap_files.values():
+            path = info.get('file')
+            if path is None:
+                continue
+            path = Path(path)
+            if not path.is_absolute():
+                path = llvm_project / path
+            try:
+                rel = path.relative_to(llvm_project)
+            except ValueError:
+                continue
+            key = rel.as_posix()
+            if key in seen:
+                continue
+            seen.add(key)
+            print(f'Restoring {rel}')
+            subprocess.run(['git', 'restore', str(rel)], cwd=llvm_project, check=True)
+        return
 
     for id, info in gap_files.items():
         print(f'File-line: {id}')
