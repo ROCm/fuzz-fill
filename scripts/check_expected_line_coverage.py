@@ -23,7 +23,7 @@ def parse_args(base: Path) -> argparse.Namespace:
                         help='Directory for ASan coverage output (default: base/coverage_output/<target>_<timestamp>)')
     args = parser.parse_args()
     args.llvm_project = args.llvm_project or base / 'llvm-project'
-    args.build_dir = args.llvm_project / (args.build_dir or Path('build/bin'))
+    args.build_dir = args.llvm_project / (args.build_dir / 'bin' or Path('build/bin'))
     if args.coverage_dir is not None:
         args.coverage_dir = Path(args.coverage_dir).resolve()
     else:
@@ -45,7 +45,7 @@ def run_one_test(
     """Run a single llc test with ASan coverage enabled."""
     cmd = [str(llc_bin)] + test_cmd.split()[1:]
     env = os.environ.copy()
-    env['ASAN_OPTIONS'] = f'coverage=1:coverage_dir={coverage_dir}'
+    env['UBSAN_OPTIONS'] = f'coverage=1:coverage_dir={coverage_dir}'
     return subprocess.run(cmd, cwd=fuzzer_test_dir, capture_output=True, text=True, env=env)
 
 
