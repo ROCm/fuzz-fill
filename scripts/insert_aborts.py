@@ -12,9 +12,12 @@ def main():
     parser = argparse.ArgumentParser(description='Insert aborts for coverage gaps.')
     parser.add_argument('--target', '-t', choices=['spirv', 'amd'], default='spirv',
                         help='Target: spirv or amd (default: spirv)')
+    parser.add_argument('--llvm-project', type=Path, default=None,
+                        help='Path to llvm-project root (default: base/llvm-project)')
     args = parser.parse_args()
 
     target = args.target
+    llvm_project = args.llvm_project if args.llvm_project is not None else base / 'llvm-project'
 
     gaps_file = base / 'coverage' / 'coverage-info' / f'coverage_gaps_{target}.json'
 
@@ -22,13 +25,13 @@ def main():
     with open(gaps_file, 'r') as f:
         raw_gaps: dict[str, str] = json.load(f)
 
-    gap_files: dict = { x : {'file' : get_file(base, x), 'line' : get_line_number(x), 'replace':  v} for x, v in raw_gaps.items()}
+    gap_files: dict = { x : {'file' : get_file(llvm_project, x), 'line' : get_line_number(x), 'replace':  v} for x, v in raw_gaps.items()}
 
     for id, info in gap_files.items():
         print(f'File-line: {id}')
         abort_at_line(info)
 
-def get_file(base: Path, url: str) -> Path:
+def get_file(llvm_project: Path, url: str) -> Path:
     parts = PurePosixPath(urlparse(url).path).parts
 
     try:
@@ -36,7 +39,7 @@ def get_file(base: Path, url: str) -> Path:
     except ValueError:
         return None
 
-    return Path(base, 'llvm-project', *parts[llvm_idx:])
+    return Path(llvm_project, *parts[llvm_idx:])
 
 def get_line_number(url: str) -> int:
     fragment = urlparse(url).fragment 
