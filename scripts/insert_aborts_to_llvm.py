@@ -1,7 +1,5 @@
 import subprocess
-import csv
 import json
-import os
 import argparse
 from pathlib import PurePosixPath, Path
 from urllib.parse import urlparse
