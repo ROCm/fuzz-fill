@@ -35,6 +35,12 @@ def main():
         default=None,
         help='The line number for which to retain coverage',
     )
+    parser.add_argument(
+        '--symcov',
+        type=Path,
+        default=None,
+        help='The path to the symcov file',
+    )
 
     args = parser.parse_args()
     current_file = Path(__file__).resolve()
@@ -47,8 +53,6 @@ def main():
     args.output_dir = args.output_dir or default_output_dir
     args.output_dir.mkdir(parents=True, exist_ok=True)
     
-    print(args)
-
     tests = [Test(args.original_test, args.interesting, args.line)]
     reducer = Reducer(args.llvm_bin, args.output_dir, tests)
     reducer.reduce()
