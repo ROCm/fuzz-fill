@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fuzz-fill"
+version = "0.1.0"
+description = "Fuzzing to fill test suite gaps"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENCE.txt" }
+dependencies = []
+
+[project.scripts]
+reduce = "reduce.__main__:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
