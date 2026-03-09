@@ -3,9 +3,22 @@ import argparse
 import subprocess
 from pathlib import Path
 
-from utils import get_repo_base, get_file, get_line_number, abort_at_line
+from src.reduce.utils import get_repo_base, get_file, get_line_number
 
-
+def abort_at_line(info: dict) -> None:
+    """Replace the line in info['file'] at info['line'] with info['replace']."""
+    path = info["file"]
+    line = info["line"]
+    replacement_line = info["replace"]
+    lines = path.read_text().splitlines(keepends=True)
+    idx = line - 1
+    lines[idx] = replacement_line
+    path.write_text("".join(lines))
+    cmd = ["git", "diff", path]
+    result = subprocess.run(cmd, cwd=path.parent, capture_output=True, text=True)
+    if result.stdout == "":
+        raise RuntimeError("File not modified!")
+        
 def main():
     base = get_repo_base(__file__)
     parser = argparse.ArgumentParser(description='Insert aborts for coverage gaps.')
