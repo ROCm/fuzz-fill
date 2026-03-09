@@ -2,8 +2,9 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
-from reducer import Reducer, Test
-from utils import run_one_test_with_coverage
+from reduce.reducer import Reducer
+from reduce.test import Test
+from reduce.utils import run_one_test_with_coverage
 
 def main():
     parser = argparse.ArgumentParser()
@@ -41,7 +42,12 @@ def main():
         default=None,
         help='The path to the symcov file',
     )
-
+    parser.add_argument(
+        '--action',
+        choices=['reduce', 'test', 'get_interesting_address'],
+        default='reduce',
+        help='The action to perform',
+    )
     args = parser.parse_args()
     current_file = Path(__file__).resolve()
     default_output_dir = (
@@ -53,9 +59,20 @@ def main():
     args.output_dir = args.output_dir or default_output_dir
     args.output_dir.mkdir(parents=True, exist_ok=True)
     
-    tests = [Test(args.original_test, args.interesting, args.line)]
-    reducer = Reducer(args.llvm_bin, args.output_dir, tests)
-    reducer.reduce()
+    # Just one test for now
+    # TODO: Support multiple tests e.g. using json to load info for each test
+    test = Test(args.original_test, args.interesting, args.line, args.symcov)
+
+    if args.action == 'get_interesting_address':
+        address = test.get_interesting_address()
+        print(f'Address for line {test.line} is {address}')
+        
+    if args.action == 'test':
+        test.run()
+
+    if args.action == 'reduce':
+        reducer = Reducer(args.llvm_bin, args.output_dir, [test])
+        reducer.reduce()
 
 if __name__ == '__main__':
     main()
