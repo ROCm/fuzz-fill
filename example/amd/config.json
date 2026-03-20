@@ -4,5 +4,5 @@
     "line": 646,
     "replacement": "    {assert(0 && \"My crash is here\"); return SILowerI1Copies;}\n",
     "interesting": "interesting_ir.sh",
-    "pipeline": ["snapshot", "llvm_reduce_ir"]
+    "pipeline": ["llvm_reduce_ir"]
 }
