@@ -4,5 +4,5 @@ BASE=/work/agorzyns/local/dev
 FUZZFILL=$BASE/fuzz-fill
 
 python3 -m reduce \
-    --config $FUZZFILL/example/config.json \
+    --config $FUZZFILL/example/spirv/config.json \
     --llvm-bin $BASE/llvm-project/build/bin
