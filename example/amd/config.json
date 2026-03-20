@@ -1,0 +1,8 @@
+{
+    "input": "llc.real.156.ll",
+    "file": "llvm/lib/Target/AMDGPU/SILowerI1Copies.cpp",
+    "line": 646,
+    "replacement": "    {assert(0 && \"My crash is here\"); return SILowerI1Copies;}\n",
+    "interesting": "interesting_ir.sh",
+    "pipeline": ["snapshot", "llvm_reduce_ir"]
+}
