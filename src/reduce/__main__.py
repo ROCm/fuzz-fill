@@ -12,16 +12,17 @@ def main():
         description="Reduce tests using a JSON config (see example/config.json)."
     )
     parser.add_argument(
-        "config",
+        "--config",
+        "-c",
         type=Path,
+        required=True,
         help="Path to config.json (map of original_test path -> file, line, interesting, ...).",
     )
     parser.add_argument(
-        "llvm_bin",
+        "--llvm-bin",
         type=Path,
-        nargs="?",
-        default=None,
-        help="Path to llvm-project bin directory (optional if config sets \"llvm_bin\").",
+        required=True,
+        help="Path to llvm-project bin directory (overrides \"llvm_bin\" in config if set).",
     )
     parser.add_argument(
         "--engine",
@@ -30,7 +31,7 @@ def main():
         help="Reduction backend (default: %(default)s).",
     )
     ns = parser.parse_args()
-    cfg = load_reduce_config(ns.config, llvm_bin_cli=ns.llvm_bin)
+    cfg = load_reduce_config(ns.config, llvm_bin_cli=ns.llvm_bin.resolve())
 
     t = cfg.test
     test = Test(t.original_test, t.interesting, f"/{t.file}", t.line)

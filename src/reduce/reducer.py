@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,16 +43,41 @@ class SnapshotPass(ReducePass):
         return Test(dest, test.interesting, test.file, test.line)
 
 
-class ExampleTransformPass(ReducePass):
-    """
-    Template pass: replace the copy with your transform.
-
-    Read ``test.test_path``, write via ``tmp_pass_path(ctx.tmp_dir, step, "yourslug")``,
-    then return ``Test(new_path, test.interesting, test.file, test.line)``.
-    """
+class LlvmReduceIrPass(ReducePass):
+    """Run ``llvm-reduce`` (IR) with the config interesting-ness script."""
 
     def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
-        dest = tmp_pass_path(ctx.tmp_dir, step, "example")
+        if test.interesting is None:
+            raise SystemExit('llvm-reduce requires an "interesting" script in the config.')
+        exe = ctx.llvm_bin / "llvm-reduce"
+        if not exe.is_file():
+            raise SystemExit(f"llvm-reduce not found: {exe}")
+        out = tmp_pass_path(ctx.tmp_dir, step, "llvmreduce")
+        cmd = [
+            str(exe),
+            f"--test={test.interesting.resolve()}",
+            f"-o={out}",
+            str(test.test_path.resolve()),
+        ]
+        r = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=ctx.tmp_dir,
+        )
+        if r.returncode != 0:
+            msg = (r.stderr or r.stdout or "").strip() or "(no output)"
+            raise SystemExit(f"llvm-reduce failed ({r.returncode}):\n{msg}")
+        if not out.is_file():
+            raise SystemExit(f"llvm-reduce did not write expected output: {out}")
+        return Test(out, test.interesting, test.file, test.line)
+
+
+class LlvmReduceMirPlaceholderPass(ReducePass):
+    """TODO: ``llvm-reduce -x=mir`` with the same ``--test`` pattern as IR."""
+
+    def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
+        dest = tmp_pass_path(ctx.tmp_dir, step, "llvmreduce_mir")
         shutil.copy2(test.test_path, dest)
         return Test(dest, test.interesting, test.file, test.line)
 
@@ -71,11 +97,11 @@ class Reducer:
         self.engine: str = engine
 
     def _passes(self) -> list[ReducePass]:
-        # Later: branch on self.engine for different pipelines.
-        return [
-            SnapshotPass(),
-            ExampleTransformPass(),
-        ]
+        if self.engine == "llvmreduce-ir":
+            return [SnapshotPass(), LlvmReduceIrPass()]
+        if self.engine == "llvm-reduce-mir":
+            return [SnapshotPass(), LlvmReduceMirPlaceholderPass()]
+        raise AssertionError(f"unknown engine: {self.engine!r}")
 
     def reduce(self) -> Test:
         tmp_dir = self.output_dir / "tmp"
