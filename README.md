@@ -19,6 +19,7 @@ For **`action: reduce`** (or default), the tool runs the **`pipeline`**: an orde
 | `snapshot` | `SnapshotPass` | Copies the input `.ll` into `output_dir/tmp/00_snapshot.ll` (step index may differ). |
 | `llvm_reduce_ir` | `LlvmReduceIrPass` | Runs `llvm-reduce` with `--test=<interesting script>`, writes `…/NN_llvmreduce.ll`, cwd `tmp/`. |
 | `llvm_reduce_mir` | `LlvmReduceMirPlaceholderPass` | **Stub** — copies through to `…_llvmreduce_mir.ll` (real `llvm-reduce -x=mir` not implemented yet). |
+| `extract_mir_before_pass` | `ExtractMirBeforePass` | **Stub** — copies through to `…_mir_before_pass.ll`; will use optional `pass_under_test` to dump MIR before that LLVM pass. |
 
 After the last pass, the result is copied to **`output_dir/reduced.ll`**.
 
@@ -38,6 +39,7 @@ One top-level object. **Required:**
 - `replacement` — how the line of interest in LLVM should be replaced to trigger the interestingness test; not consumed by reduction today.
 - `output_dir` — where to write `reduced.ll` and `tmp/`.
 - `action` — e.g. `reduce` or `test`.
+- `pass_under_test` — optional LLVM pass name (string) for passes that need a stop point (e.g. future `extract_mir_before_pass`); ignored if omitted.
 
 LLVM’s `bin` directory is **only** passed on the command line (`--llvm-bin`), not in JSON.
 

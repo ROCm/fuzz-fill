@@ -18,6 +18,7 @@ _TOP_LEVEL_KEYS = frozenset(
         "output_dir",
         "action",
         "pipeline",
+        "pass_under_test",
     }
 )
 
@@ -80,6 +81,7 @@ class ReduceConfig:
     replacement: str | None
     interesting: Path | None
     pipeline: list[str]
+    pass_under_test: str | None
 
 
 def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
@@ -132,6 +134,12 @@ def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
     if replacement is not None and not isinstance(replacement, str):
         raise SystemExit(f'{config_file}: "replacement" must be a string or omitted.')
 
+    pass_under_test = raw.get("pass_under_test")
+    if pass_under_test is not None and not isinstance(pass_under_test, str):
+        raise SystemExit(
+            f'{config_file}: "pass_under_test" must be a string (LLVM pass name) or omitted.'
+        )
+
     return ReduceConfig(
         llvm_bin=llvm_bin,
         output_dir=Path(output_dir) if output_dir else None,
@@ -146,4 +154,5 @@ def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
             else None
         ),
         pipeline=pipeline,
+        pass_under_test=pass_under_test,
     )

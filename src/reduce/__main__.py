@@ -64,7 +64,13 @@ def main():
             f"[main] stage: reduce ({len(pass_ids)} pass(es): {', '.join(pass_ids)})",
             flush=True,
         )
-        reducer = Reducer(cfg.llvm_bin, output_dir, test, pass_ids=pass_ids)
+        reducer = Reducer(
+            cfg.llvm_bin,
+            output_dir,
+            test,
+            pass_ids=pass_ids,
+            pass_under_test=cfg.pass_under_test,
+        )
         reducer.reduce()
 
 

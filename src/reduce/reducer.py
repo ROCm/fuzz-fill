@@ -24,6 +24,7 @@ class ReduceContext:
     llvm_bin: Path
     output_dir: Path
     tmp_dir: Path
+    pass_under_test: str | None
 
 
 class ReducePass(ABC):
@@ -82,11 +83,22 @@ class LlvmReduceMirPlaceholderPass(ReducePass):
         return Test(dest, test.interesting, test.file, test.line)
 
 
+class ExtractMirBeforePass(ReducePass):
+    """Dump MIR immediately before ``ReduceContext.pass_under_test`` (not implemented yet)."""
+
+    def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
+        # TODO: use ctx.pass_under_test (LLVM pass name) to emit MIR before that pass.
+        dest = tmp_pass_path(ctx.tmp_dir, step, "mir_before_pass")
+        shutil.copy2(test.test_path, dest)
+        return Test(dest, test.interesting, test.file, test.line)
+
+
 # Registry of pass ids for config ``pipeline`` arrays (order = run order; repeats allowed).
 _PASS_BY_ID: dict[str, type[ReducePass]] = {
     "snapshot": SnapshotPass,
     "llvm_reduce_ir": LlvmReduceIrPass,
     "llvm_reduce_mir": LlvmReduceMirPlaceholderPass,
+    "extract_mir_before_pass": ExtractMirBeforePass,
 }
 
 
@@ -114,10 +126,12 @@ class Reducer:
         test: Test,
         *,
         pass_ids: list[str],
+        pass_under_test: str | None = None,
     ):
         self.llvm_bin: Path = llvm_bin
         self.output_dir: Path = output_dir
         self.test: Test = test
+        self._pass_under_test: str | None = pass_under_test
         self._pass_ids: list[str] = list(pass_ids)
         self._passes_list: list[ReducePass] = passes_from_ids(pass_ids)
 
@@ -131,6 +145,7 @@ class Reducer:
             llvm_bin=self.llvm_bin,
             output_dir=self.output_dir,
             tmp_dir=tmp_dir,
+            pass_under_test=self._pass_under_test,
         )
         test = self.test
         n = len(self._passes_list)
