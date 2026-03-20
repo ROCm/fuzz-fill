@@ -32,6 +32,7 @@ def main():
         help="Run a single pass by id (input is the original .ll). For debugging.",
     )
     ns = parser.parse_args()
+    print("[main] loading config...", flush=True)
     cfg = load_reduce_config(ns.config, ns.llvm_bin.resolve())
 
     if getattr(ns, "only_pass", None) is not None:
@@ -51,11 +52,18 @@ def main():
     )
     output_dir = cfg.output_dir or default_output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[main] action={cfg.action!r}", flush=True)
 
+    # Run interesting script only (no llvm-reduce).
     if cfg.action == "test":
+        print("[main] stage: test (interesting script)", flush=True)
         test.run()
 
     if cfg.action == "reduce":
+        print(
+            f"[main] stage: reduce ({len(pass_ids)} pass(es): {', '.join(pass_ids)})",
+            flush=True,
+        )
         reducer = Reducer(cfg.llvm_bin, output_dir, test, pass_ids=pass_ids)
         reducer.reduce()
 

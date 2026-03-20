@@ -118,6 +118,7 @@ class Reducer:
         self.llvm_bin: Path = llvm_bin
         self.output_dir: Path = output_dir
         self.test: Test = test
+        self._pass_ids: list[str] = list(pass_ids)
         self._passes_list: list[ReducePass] = passes_from_ids(pass_ids)
 
     def reduce(self) -> Test:
@@ -132,9 +133,12 @@ class Reducer:
             tmp_dir=tmp_dir,
         )
         test = self.test
-        for step, p in enumerate(self._passes_list):
+        n = len(self._passes_list)
+        for step, (pass_id, p) in enumerate(zip(self._pass_ids, self._passes_list)):
+            print(f"[reduce] pass {step + 1}/{n}: {pass_id}", flush=True)
             test = p.run(ctx, test, step=step)
 
         final_path = self.output_dir / FINAL_REDUCED_NAME
         shutil.copy2(test.test_path, final_path)
+        print(f"[reduce] wrote {final_path}", flush=True)
         return Test(final_path, test.interesting, test.file, test.line)
