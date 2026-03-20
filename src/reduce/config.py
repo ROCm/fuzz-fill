@@ -20,7 +20,7 @@ class ReduceConfig:
     llvm_bin: Path
     output_dir: Path | None
     action: str
-    tests: list[TestConfig]
+    test: TestConfig
 
 
 def load_reduce_config(path: Path, llvm_bin_cli: Path | None = None) -> ReduceConfig:
@@ -43,7 +43,7 @@ def load_reduce_config(path: Path, llvm_bin_cli: Path | None = None) -> ReduceCo
             "llvm_bin is required: pass as second argument or set \"llvm_bin\" in config."
         )
 
-    tests: list[TestConfig] = []
+    entries: list[TestConfig] = []
     for path_str, spec in test_map.items():
         if not isinstance(spec, dict):
             raise SystemExit(f"Invalid test entry for {path_str!r}: expected an object.")
@@ -53,7 +53,7 @@ def load_reduce_config(path: Path, llvm_bin_cli: Path | None = None) -> ReduceCo
         except KeyError as e:
             raise SystemExit(f"Test {path_str!r} missing required field: {e.args[0]}") from e
         interesting = spec.get("interesting")
-        tests.append(
+        entries.append(
             TestConfig(
                 original_test=Path(path_str),
                 file=file,
@@ -63,9 +63,16 @@ def load_reduce_config(path: Path, llvm_bin_cli: Path | None = None) -> ReduceCo
             )
         )
 
+    n = len(entries)
+    if n != 1:
+        raise SystemExit(
+            f"Config must define exactly one test (found {n}). "
+            "Use a single key in the test map."
+        )
+
     return ReduceConfig(
         llvm_bin=Path(llvm_bin),
         output_dir=Path(output_dir) if output_dir else None,
         action=action,
-        tests=tests,
+        test=entries[0],
     )

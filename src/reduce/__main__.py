@@ -36,17 +36,14 @@ def main():
     output_dir = cfg.output_dir or default_output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    tests = [
-        Test(t.original_test, t.interesting, f"/{t.file}", t.line)
-        for t in cfg.tests
-    ]
+    t = cfg.test
+    test = Test(t.original_test, t.interesting, f"/{t.file}", t.line)
 
     if cfg.action == "test":
-        for t in tests:
-            t.run()
+        test.run()
 
     if cfg.action == "reduce":
-        reducer = Reducer(cfg.llvm_bin, output_dir, tests)
+        reducer = Reducer(cfg.llvm_bin, output_dir, test)
         reducer.reduce()
 
     if cfg.action == "get_interesting_address":
