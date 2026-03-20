@@ -2,73 +2,56 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
+from reduce.config import load_reduce_config
 from reduce.reducer import Reducer
 from reduce.test import Test
-from reduce.utils import run_one_test_with_coverage
+
 
 def main():
-    parser = argparse.ArgumentParser()
-    
+    parser = argparse.ArgumentParser(
+        description="Reduce tests using a JSON config (see example/config.json)."
+    )
     parser.add_argument(
-        'original_test', 
+        "config",
         type=Path,
-        help='The original test to reduce',
+        help="Path to config.json (map of original_test path -> file, line, interesting, ...).",
     )
     parser.add_argument(
-        'llvm_bin', 
-        type=Path, 
-        help='The path to the llvm-project bin directory')
-    parser.add_argument(
-        '--interesting', 
+        "llvm_bin",
         type=Path,
+        nargs="?",
         default=None,
-        help='The interestingness test to use',
+        help="Path to llvm-project bin directory (optional if config sets \"llvm_bin\").",
     )
-    parser.add_argument(
-        '--output_dir',
-        type=Path,
-        default=None,
-        help='The directory to output the reduced test',
-    )
-    parser.add_argument(
-        '--line',
-        type=int,
-        default=None,
-        help='The line number for which to retain coverage',
-    )
-    parser.add_argument(
-        '--file',
-        type=str,
-        default=None,
-        help='The relative path to the file in the llvm-project repository',
-    )
-    parser.add_argument(
-        '--action',
-        choices=['reduce', 'test', 'get_interesting_address'],
-        default='reduce',
-        help='The action to perform',
-    )
-    args = parser.parse_args()
+    ns = parser.parse_args()
+    cfg = load_reduce_config(ns.config, llvm_bin_cli=ns.llvm_bin)
+
     current_file = Path(__file__).resolve()
     default_output_dir = (
         current_file.parent.parent
-        / 'data'
-        / 'output'
-        / datetime.now().strftime('%Y%m%d-%H%M%S')
+        / "data"
+        / "output"
+        / datetime.now().strftime("%Y%m%d-%H%M%S")
     )
-    args.output_dir = args.output_dir or default_output_dir
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Just one test for now
-    # TODO: Support multiple tests e.g. using json to load info for each test
-    test = Test(args.original_test, args.interesting, f'/{args.file}', args.line)
+    output_dir = cfg.output_dir or default_output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.action == 'test':
-        test.run()
+    tests = [
+        Test(t.original_test, t.interesting, f"/{t.file}", t.line)
+        for t in cfg.tests
+    ]
 
-    if args.action == 'reduce':
-        reducer = Reducer(args.llvm_bin, args.output_dir, [test])
+    if cfg.action == "test":
+        for t in tests:
+            t.run()
+
+    if cfg.action == "reduce":
+        reducer = Reducer(cfg.llvm_bin, output_dir, tests)
         reducer.reduce()
 
-if __name__ == '__main__':
+    if cfg.action == "get_interesting_address":
+        raise SystemExit("action 'get_interesting_address' is not implemented yet.")
+
+
+if __name__ == "__main__":
     main()
