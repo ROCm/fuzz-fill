@@ -15,6 +15,7 @@ _TOP_LEVEL_KEYS = frozenset(
         "line",
         "replacement",
         "interesting",
+        "interesting_mir",
         "output_dir",
         "action",
         "pipeline",
@@ -83,6 +84,7 @@ class ReduceConfig:
     line: int
     replacement: str | None
     interesting: Path | None
+    interesting_mir: Path | None
     pipeline: list[str]
     pass_under_test: str | None
     mtriple: str | None
@@ -126,6 +128,10 @@ def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
     interesting_raw = raw.get("interesting")
     if interesting_raw is not None and not isinstance(interesting_raw, str):
         raise SystemExit(f'{config_file}: "interesting" must be a string path or omitted.')
+
+    interesting_mir_raw = raw.get("interesting_mir")
+    if interesting_mir_raw is not None and not isinstance(interesting_mir_raw, str):
+        raise SystemExit(f'{config_file}: "interesting_mir" must be a string path or omitted.')
 
     pipeline = _parse_pipeline(config_file, raw)
 
@@ -179,6 +185,11 @@ def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
         interesting=(
             _resolve_relative_to_config(config_file, interesting_raw)
             if interesting_raw
+            else None
+        ),
+        interesting_mir=(
+            _resolve_relative_to_config(config_file, interesting_mir_raw)
+            if interesting_mir_raw
             else None
         ),
         pipeline=pipeline,

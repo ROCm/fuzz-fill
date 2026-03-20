@@ -29,7 +29,7 @@ def main():
         default=argparse.SUPPRESS,
         choices=sorted(known_pass_ids()),
         metavar="PASS_ID",
-        help="Run a single pass by id (input is the original .ll). For debugging.",
+        help="Run a single pass by id (input is config input; use .mir for llvm_reduce_mir).",
     )
     ns = parser.parse_args()
     print("[main] loading config...", flush=True)
@@ -73,6 +73,7 @@ def main():
             mtriple=cfg.mtriple,
             llc_O=cfg.llc_O,
             extract_mir_output=cfg.extract_mir_output,
+            interesting_mir=cfg.interesting_mir,
         )
         reducer.reduce()
 

@@ -18,12 +18,12 @@ For **`action: reduce`** (or default), the tool runs the **`pipeline`**: an orde
 |---------|--------|----------|
 | `snapshot` | `SnapshotPass` | Copies the input `.ll` into `output_dir/tmp/00_snapshot.ll` (step index may differ). |
 | `llvm_reduce_ir` | `LlvmReduceIrPass` | Runs `llvm-reduce` with `--test=<interesting script>`, writes `…/NN_llvmreduce.ll`, cwd `tmp/`. |
-| `llvm_reduce_mir` | `LlvmReduceMirPlaceholderPass` | **Stub** — copies through to `…_llvmreduce_mir.ll` (real `llvm-reduce -x=mir` not implemented yet). |
+| `llvm_reduce_mir` | `LlvmReduceMirPass` | Runs `llvm-reduce -x=mir --test=<interesting_mir>`, writes `…/NN_llvmreduce_mir.mir` (input must be MIR, e.g. after `extract_mir_before_pass`). |
 | `extract_mir_before_pass` | `ExtractMirBeforePass` | Runs `llc -o <tmp> <llc_O tokens> -mtriple=<mtriple> -stop-before=<pass_under_test> -simplify-mir <input.ll>`; output is `tmp/NN_mir_before_pass.mir` or `tmp/NN_<extract_mir_output>` (basename only). |
 
 After the last pass, the result is copied to **`output_dir/reduced.ll`** or **`reduced.mir`** (same suffix as the final artifact).
 
-**`--only-pass`** — runs exactly one pass by id; the input IR is always the **original** testcase from the config. Artifact names use step index `0`.
+**`--only-pass`** — runs exactly one pass by id; the input file is always the config **`input`** path. For `llvm_reduce_mir`, that file should be MIR (use a full pipeline first, or point `input` at a `.mir` for debugging).
 
 ### Config JSON
 
@@ -35,7 +35,8 @@ One top-level object. **Required:**
 
 **Optional:**
 
-- `interesting` — path to an executable script **`llvm-reduce` invokes**; it should take the candidate IR path as an argument (e.g. `$1`) and exit `0` if the testcase is still “interesting”, non-zero otherwise.
+- `interesting` — path to an executable script **`llvm-reduce` invokes** for IR; candidate path as `$1`; exit `0` if still “interesting”.
+- `interesting_mir` — same contract for **`llvm_reduce_mir`** (`llvm-reduce -x=mir`); `$1` is the candidate **`.mir`** file.
 - `replacement` — how the line of interest in LLVM should be replaced to trigger the interestingness test; not consumed by reduction today.
 - `output_dir` — where to write `reduced.ll` and `tmp/`.
 - `action` — e.g. `reduce` or `test`.

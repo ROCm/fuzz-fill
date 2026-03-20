@@ -15,6 +15,11 @@ def tmp_pass_path(tmp_dir: Path, step: int, slug: str) -> Path:
     return tmp_dir / f"{step:02d}_{slug}.ll"
 
 
+def tmp_pass_path_mir(tmp_dir: Path, step: int, slug: str) -> Path:
+    """Same as ``tmp_pass_path`` but ``.mir`` for ``llvm-reduce -x=mir`` output."""
+    return tmp_dir / f"{step:02d}_{slug}.mir"
+
+
 @dataclass(frozen=True)
 class ReduceContext:
     """Per-run context. Passes read/write intermediates under ``tmp_dir`` only."""
@@ -26,6 +31,7 @@ class ReduceContext:
     mtriple: str | None
     llc_O: str | None
     extract_mir_output: str | None
+    interesting_mir: Path | None
 
 
 @dataclass(frozen=True)
@@ -53,6 +59,14 @@ def _llc_opt_argv(llc_O: str) -> list[str]:
 def _require_interesting_script(test: Test) -> None:
     if test.interesting is None:
         raise SystemExit('llvm-reduce requires an "interesting" script in the config.')
+
+
+def _require_interesting_mir_script(ctx: ReduceContext) -> Path:
+    if ctx.interesting_mir is None:
+        raise SystemExit(
+            'llvm_reduce_mir requires "interesting_mir" in the config (path to an executable script).'
+        )
+    return ctx.interesting_mir
 
 
 def _require_extract_mir_context(ctx: ReduceContext) -> _ExtractMirLlcOptions:
@@ -120,13 +134,32 @@ class LlvmReduceIrPass(ReducePass):
         return Test(out, test.interesting, test.file, test.line)
 
 
-class LlvmReduceMirPlaceholderPass(ReducePass):
-    """TODO: ``llvm-reduce -x=mir`` with the same ``--test`` pattern as IR."""
+class LlvmReduceMirPass(ReducePass):
+    """Run ``llvm-reduce -x=mir`` with ``--test=<interesting_mir>``."""
 
     def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
-        dest = tmp_pass_path(ctx.tmp_dir, step, "llvmreduce_mir")
-        shutil.copy2(test.test_path, dest)
-        return Test(dest, test.interesting, test.file, test.line)
+        interesting_mir = _require_interesting_mir_script(ctx)
+        exe = _require_tool(ctx.llvm_bin, "llvm-reduce")
+        out = tmp_pass_path_mir(ctx.tmp_dir, step, "llvmreduce_mir")
+        cmd = [
+            str(exe),
+            "-x=mir",
+            f"--test={interesting_mir.resolve()}",
+            f"-o={out}",
+            str(test.test_path.resolve()),
+        ]
+        r = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=ctx.tmp_dir,
+        )
+        if r.returncode != 0:
+            msg = (r.stderr or r.stdout or "").strip() or "(no output)"
+            raise SystemExit(f"llvm-reduce (-x=mir) failed ({r.returncode}):\n{msg}")
+        if not out.is_file():
+            raise SystemExit(f"llvm-reduce (-x=mir) did not write expected output: {out}")
+        return Test(out, test.interesting, test.file, test.line)
 
 
 class ExtractMirBeforePass(ReducePass):
@@ -166,7 +199,7 @@ class ExtractMirBeforePass(ReducePass):
 _PASS_BY_ID: dict[str, type[ReducePass]] = {
     "snapshot": SnapshotPass,
     "llvm_reduce_ir": LlvmReduceIrPass,
-    "llvm_reduce_mir": LlvmReduceMirPlaceholderPass,
+    "llvm_reduce_mir": LlvmReduceMirPass,
     "extract_mir_before_pass": ExtractMirBeforePass,
 }
 
@@ -199,6 +232,7 @@ class Reducer:
         mtriple: str | None = None,
         llc_O: str | None = None,
         extract_mir_output: str | None = None,
+        interesting_mir: Path | None = None,
     ):
         self.llvm_bin: Path = llvm_bin
         self.output_dir: Path = output_dir
@@ -207,6 +241,7 @@ class Reducer:
         self._mtriple: str | None = mtriple
         self._llc_O: str | None = llc_O
         self._extract_mir_output: str | None = extract_mir_output
+        self._interesting_mir: Path | None = interesting_mir
         self._pass_ids: list[str] = list(pass_ids)
         self._passes_list: list[ReducePass] = passes_from_ids(pass_ids)
 
@@ -224,6 +259,7 @@ class Reducer:
             mtriple=self._mtriple,
             llc_O=self._llc_O,
             extract_mir_output=self._extract_mir_output,
+            interesting_mir=self._interesting_mir,
         )
         test = self.test
         n = len(self._passes_list)
