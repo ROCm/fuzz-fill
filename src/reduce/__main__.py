@@ -53,9 +53,5 @@ def main():
         reducer = Reducer(cfg.llvm_bin, output_dir, test, engine=ns.engine)
         reducer.reduce()
 
-    if cfg.action == "get_interesting_address":
-        raise SystemExit("action 'get_interesting_address' is not implemented yet.")
-
-
 if __name__ == "__main__":
     main()
