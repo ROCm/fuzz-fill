@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 from reduce.test import Test
@@ -9,5 +10,6 @@ class Reducer:
         self.test: Test = test
 
     def reduce(self):
-        pass
+        dest = self.output_dir / "reduced.ll"
+        shutil.copy2(self.test.test_path, dest)
 

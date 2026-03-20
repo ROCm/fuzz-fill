@@ -26,18 +26,19 @@ def main():
     ns = parser.parse_args()
     cfg = load_reduce_config(ns.config, llvm_bin_cli=ns.llvm_bin)
 
+    t = cfg.test
+    test = Test(t.original_test, t.interesting, f"/{t.file}", t.line)
+
     current_file = Path(__file__).resolve()
     default_output_dir = (
-        current_file.parent.parent
+        current_file.parent.parent.parent
         / "data"
         / "output"
+        / t.original_test.name
         / datetime.now().strftime("%Y%m%d-%H%M%S")
     )
     output_dir = cfg.output_dir or default_output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    t = cfg.test
-    test = Test(t.original_test, t.interesting, f"/{t.file}", t.line)
 
     if cfg.action == "test":
         test.run()

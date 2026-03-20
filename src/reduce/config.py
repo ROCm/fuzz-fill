@@ -6,6 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _resolve_relative_to_config(config_file: Path, raw: str) -> Path:
+    """Absolute paths unchanged; otherwise resolve relative to the config file's directory."""
+    p = Path(raw)
+    if p.is_absolute():
+        return p
+    return (config_file.resolve().parent / p).resolve()
+
+
 @dataclass(frozen=True)
 class TestConfig:
     original_test: Path
@@ -24,7 +32,9 @@ class ReduceConfig:
 
 
 def load_reduce_config(path: Path, llvm_bin_cli: Path | None = None) -> ReduceConfig:
-    with open(path, encoding="utf-8") as f:
+    config_file = path.expanduser()
+
+    with open(config_file, encoding="utf-8") as f:
         raw: dict = json.load(f)
 
     if "tests" in raw and isinstance(raw["tests"], dict):
@@ -55,11 +65,15 @@ def load_reduce_config(path: Path, llvm_bin_cli: Path | None = None) -> ReduceCo
         interesting = spec.get("interesting")
         entries.append(
             TestConfig(
-                original_test=Path(path_str),
+                original_test=_resolve_relative_to_config(config_file, path_str),
                 file=file,
                 line=line,
                 replacement=spec.get("replacement"),
-                interesting=Path(interesting) if interesting else None,
+                interesting=(
+                    _resolve_relative_to_config(config_file, interesting)
+                    if interesting
+                    else None
+                ),
             )
         )
 
