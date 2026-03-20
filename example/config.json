@@ -2,7 +2,7 @@
     "llc.real.37.ll": {
         "file": "llvm/lib/Target/SPIRV/SPIRVInstructionSelector.cpp",
         "line": 2460, 
-        "replacement": "    {abort(); return SPIRV::OpLogicalEqual;}\n",
+        "replacement": "    {assert(0 && \"My crash is here\"); return SPIRV::OpLogicalEqual;}\n",
         "interesting": "interesting.sh"
     }
 }
