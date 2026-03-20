@@ -19,9 +19,9 @@ For **`action: reduce`** (or default), the tool runs the **`pipeline`**: an orde
 | `snapshot` | `SnapshotPass` | Copies the input `.ll` into `output_dir/tmp/00_snapshot.ll` (step index may differ). |
 | `llvm_reduce_ir` | `LlvmReduceIrPass` | Runs `llvm-reduce` with `--test=<interesting script>`, writes `…/NN_llvmreduce.ll`, cwd `tmp/`. |
 | `llvm_reduce_mir` | `LlvmReduceMirPlaceholderPass` | **Stub** — copies through to `…_llvmreduce_mir.ll` (real `llvm-reduce -x=mir` not implemented yet). |
-| `extract_mir_before_pass` | `ExtractMirBeforePass` | **Stub** — copies through to `…_mir_before_pass.ll`; will use optional `pass_under_test` to dump MIR before that LLVM pass. |
+| `extract_mir_before_pass` | `ExtractMirBeforePass` | Runs `llc -o <tmp> <llc_O tokens> -mtriple=<mtriple> -stop-before=<pass_under_test> -simplify-mir <input.ll>`; output is `tmp/NN_mir_before_pass.mir` or `tmp/NN_<extract_mir_output>` (basename only). |
 
-After the last pass, the result is copied to **`output_dir/reduced.ll`**.
+After the last pass, the result is copied to **`output_dir/reduced.ll`** or **`reduced.mir`** (same suffix as the final artifact).
 
 **`--only-pass`** — runs exactly one pass by id; the input IR is always the **original** testcase from the config. Artifact names use step index `0`.
 
@@ -39,7 +39,10 @@ One top-level object. **Required:**
 - `replacement` — how the line of interest in LLVM should be replaced to trigger the interestingness test; not consumed by reduction today.
 - `output_dir` — where to write `reduced.ll` and `tmp/`.
 - `action` — e.g. `reduce` or `test`.
-- `pass_under_test` — optional LLVM pass name (string) for passes that need a stop point (e.g. future `extract_mir_before_pass`); ignored if omitted.
+- `pass_under_test` — LLVM pass id for `llc --stop-before` when using `extract_mir_before_pass` (e.g. `si-i1-copies`); ignored for other passes.
+- `mtriple` — target triple for `llc` (required with `extract_mir_before_pass`), e.g. `amdgcn-amd-amdhsa`.
+- `llc_O` — string passed through to `llc` before `-mtriple` (required with `extract_mir_before_pass`): e.g. `"-O1"`, `"-Os"`, or `"-O2 -mllvm ..."` (split with shell rules). Use `""` to omit any `-O`/extra flags.
+- `extract_mir_output` — optional MIR filename (basename only); written under `tmp/` as `NN_<name>`. Defaults to `NN_mir_before_pass.mir`.
 
 LLVM’s `bin` directory is **only** passed on the command line (`--llvm-bin`), not in JSON.
 

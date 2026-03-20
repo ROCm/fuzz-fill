@@ -1,9 +1,12 @@
 {
     "input": "llc.real.156.ll",
     "file": "llvm/lib/Target/AMDGPU/SILowerI1Copies.cpp",
-    "line": 646,
-    "replacement": "    {assert(0 && \"My crash is here\"); return SILowerI1Copies;}\n",
+    "line": 627,
+    "replacement": "    assert(0 && \"My crash is here\");\n        SSAUpdater.Initialize(DstReg);\n",
     "interesting": "interesting_ir.sh",
-    "pipeline": ["llvm_reduce_ir"],
-    "pass_under_test": "si-lower-i1-copies"
+    "pipeline": ["llvm_reduce_ir", "extract_mir_before_pass"],
+    "pass_under_test": "si-i1-copies",
+    "mtriple": "amdgcn-amd-amdhsa",
+    "llc_O": "-O1",
+    "extract_mir_output": "before-si-lower-i1-copies.mir"
 }

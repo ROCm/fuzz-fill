@@ -4,7 +4,7 @@ LLVM_BIN=/home/agorzyns/local/dev/llvm-project/build/bin
 
 LLC=$LLVM_BIN/llc
 
-output=$($LLC "$1" 2>&1)
+output=$($LLC -O1 "$1" 2>&1)
 
 exitcode=$?
 

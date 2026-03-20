@@ -19,6 +19,9 @@ _TOP_LEVEL_KEYS = frozenset(
         "action",
         "pipeline",
         "pass_under_test",
+        "mtriple",
+        "llc_O",
+        "extract_mir_output",
     }
 )
 
@@ -82,6 +85,9 @@ class ReduceConfig:
     interesting: Path | None
     pipeline: list[str]
     pass_under_test: str | None
+    mtriple: str | None
+    llc_O: str | None
+    extract_mir_output: str | None
 
 
 def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
@@ -140,6 +146,28 @@ def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
             f'{config_file}: "pass_under_test" must be a string (LLVM pass name) or omitted.'
         )
 
+    mtriple = raw.get("mtriple")
+    if mtriple is not None and not isinstance(mtriple, str):
+        raise SystemExit(f'{config_file}: "mtriple" must be a string or omitted.')
+
+    llc_O_raw = raw.get("llc_O")
+    if llc_O_raw is None:
+        llc_O = None
+    elif isinstance(llc_O_raw, bool):
+        raise SystemExit(f'{config_file}: "llc_O" must be a string (not boolean).')
+    elif isinstance(llc_O_raw, int):
+        raise SystemExit(
+            f'{config_file}: "llc_O" must be a string such as "-O1" or "" (omit -O); got integer.'
+        )
+    elif isinstance(llc_O_raw, str):
+        llc_O = llc_O_raw
+    else:
+        raise SystemExit(f'{config_file}: "llc_O" must be a string or omitted.')
+
+    extract_mir_output = raw.get("extract_mir_output")
+    if extract_mir_output is not None and not isinstance(extract_mir_output, str):
+        raise SystemExit(f'{config_file}: "extract_mir_output" must be a string filename or omitted.')
+
     return ReduceConfig(
         llvm_bin=llvm_bin,
         output_dir=Path(output_dir) if output_dir else None,
@@ -155,4 +183,7 @@ def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
         ),
         pipeline=pipeline,
         pass_under_test=pass_under_test,
+        mtriple=mtriple,
+        llc_O=llc_O,
+        extract_mir_output=extract_mir_output,
     )

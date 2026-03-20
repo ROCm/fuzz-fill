@@ -22,7 +22,7 @@ def main():
         "--llvm-bin",
         type=Path,
         required=True,
-        help="Path to llvm-project bin directory (must contain llvm-reduce).",
+        help="Path to llvm-project bin directory (must contain llvm-reduce; llc for extract_mir_before_pass).",
     )
     parser.add_argument(
         "--only-pass",
@@ -70,6 +70,9 @@ def main():
             test,
             pass_ids=pass_ids,
             pass_under_test=cfg.pass_under_test,
+            mtriple=cfg.mtriple,
+            llc_O=cfg.llc_O,
+            extract_mir_output=cfg.extract_mir_output,
         )
         reducer.reduce()
 
