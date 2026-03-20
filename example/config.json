@@ -1,8 +1,8 @@
 {
-    "example/llc.real.37.ll": {
+    "llc.real.37.ll": {
         "file": "llvm/lib/Target/SPIRV/SPIRVInstructionSelector.cpp",
         "line": 2460, 
         "replacement": "    {abort(); return SPIRV::OpLogicalEqual;}\n",
-        "interesting": "example/interesting.sh"
+        "interesting": "interesting.sh"
     }
 }
