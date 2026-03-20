@@ -23,6 +23,12 @@ def main():
         default=None,
         help="Path to llvm-project bin directory (optional if config sets \"llvm_bin\").",
     )
+    parser.add_argument(
+        "--engine",
+        choices=("llvmreduce-ir", "llvm-reduce-mir"),
+        default="llvmreduce-ir",
+        help="Reduction backend (default: %(default)s).",
+    )
     ns = parser.parse_args()
     cfg = load_reduce_config(ns.config, llvm_bin_cli=ns.llvm_bin)
 
@@ -44,7 +50,7 @@ def main():
         test.run()
 
     if cfg.action == "reduce":
-        reducer = Reducer(cfg.llvm_bin, output_dir, test)
+        reducer = Reducer(cfg.llvm_bin, output_dir, test, engine=ns.engine)
         reducer.reduce()
 
     if cfg.action == "get_interesting_address":
