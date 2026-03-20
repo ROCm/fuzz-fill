@@ -22,7 +22,7 @@ def main():
         "--llvm-bin",
         type=Path,
         required=True,
-        help="Path to llvm-project bin directory (overrides \"llvm_bin\" in config if set).",
+        help="Path to llvm-project bin directory (must contain llvm-reduce).",
     )
     parser.add_argument(
         "--engine",
@@ -31,7 +31,7 @@ def main():
         help="Reduction backend (default: %(default)s).",
     )
     ns = parser.parse_args()
-    cfg = load_reduce_config(ns.config, llvm_bin_cli=ns.llvm_bin.resolve())
+    cfg = load_reduce_config(ns.config, ns.llvm_bin.resolve())
 
     t = cfg.test
     test = Test(t.original_test, t.interesting, f"/{t.file}", t.line)

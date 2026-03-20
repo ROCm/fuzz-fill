@@ -2,8 +2,27 @@
 from __future__ import annotations
 
 import json
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
+
+_WRAPPER_TOP_LEVEL = frozenset({"tests", "output_dir", "action"})
+_TEST_SPEC_KEYS = frozenset({"file", "line", "replacement", "interesting"})
+
+
+def _warn_unknown_keys(
+    *,
+    config_file: Path,
+    keys: set[str],
+    allowed: frozenset[str],
+    where: str,
+) -> None:
+    for key in sorted(keys - allowed):
+        warnings.warn(
+            f"{config_file}: unknown {where} key {key!r} (ignored)",
+            UserWarning,
+            stacklevel=3,
+        )
 
 
 def _resolve_relative_to_config(config_file: Path, raw: str) -> Path:
@@ -31,32 +50,37 @@ class ReduceConfig:
     test: TestConfig
 
 
-def load_reduce_config(path: Path, llvm_bin_cli: Path | None = None) -> ReduceConfig:
+def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
     config_file = path.expanduser()
 
     with open(config_file, encoding="utf-8") as f:
         raw: dict = json.load(f)
 
     if "tests" in raw and isinstance(raw["tests"], dict):
+        _warn_unknown_keys(
+            config_file=config_file,
+            keys=set(raw),
+            allowed=_WRAPPER_TOP_LEVEL,
+            where="top-level",
+        )
         test_map = raw["tests"]
         output_dir = raw.get("output_dir")
         action = raw.get("action", "reduce")
-        llvm_bin = llvm_bin_cli or raw.get("llvm_bin")
     else:
         test_map = raw
         output_dir = None
         action = "reduce"
-        llvm_bin = llvm_bin_cli
-
-    if llvm_bin is None:
-        raise SystemExit(
-            "llvm_bin is required: pass as second argument or set \"llvm_bin\" in config."
-        )
 
     entries: list[TestConfig] = []
     for path_str, spec in test_map.items():
         if not isinstance(spec, dict):
             raise SystemExit(f"Invalid test entry for {path_str!r}: expected an object.")
+        _warn_unknown_keys(
+            config_file=config_file,
+            keys=set(spec),
+            allowed=_TEST_SPEC_KEYS,
+            where=f"test entry {path_str!r}",
+        )
         try:
             file = spec["file"]
             line = spec["line"]
@@ -85,7 +109,7 @@ def load_reduce_config(path: Path, llvm_bin_cli: Path | None = None) -> ReduceCo
         )
 
     return ReduceConfig(
-        llvm_bin=Path(llvm_bin),
+        llvm_bin=llvm_bin,
         output_dir=Path(output_dir) if output_dir else None,
         action=action,
         test=entries[0],
