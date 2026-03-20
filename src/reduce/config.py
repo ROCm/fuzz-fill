@@ -1,4 +1,4 @@
-"""Load reduce settings from JSON (see example/config.json)."""
+"""Load reduce settings from JSON (see README)."""
 from __future__ import annotations
 
 import json
@@ -6,8 +6,20 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
-_WRAPPER_TOP_LEVEL = frozenset({"tests", "output_dir", "action"})
-_TEST_SPEC_KEYS = frozenset({"file", "line", "replacement", "interesting"})
+from reduce.reducer import known_pass_ids
+
+_TOP_LEVEL_KEYS = frozenset(
+    {
+        "input",
+        "file",
+        "line",
+        "replacement",
+        "interesting",
+        "output_dir",
+        "action",
+        "pipeline",
+    }
+)
 
 
 def _warn_unknown_keys(
@@ -33,21 +45,41 @@ def _resolve_relative_to_config(config_file: Path, raw: str) -> Path:
     return (config_file.resolve().parent / p).resolve()
 
 
-@dataclass(frozen=True)
-class TestConfig:
-    original_test: Path
-    file: str
-    line: int
-    replacement: str | None = None
-    interesting: Path | None = None
+def _parse_pipeline(config_file: Path, raw: dict) -> list[str]:
+    try:
+        pl = raw["pipeline"]
+    except KeyError as e:
+        raise SystemExit(
+            f'{config_file}: missing required top-level field "pipeline" '
+            '(JSON array of pass id strings, e.g. ["snapshot", "llvm_reduce_ir"]).'
+        ) from e
+    if not isinstance(pl, list) or not pl:
+        raise SystemExit(
+            f'{config_file}: "pipeline" must be a non-empty JSON array of pass id strings.'
+        )
+    if not all(isinstance(x, str) for x in pl):
+        raise SystemExit(f'{config_file}: "pipeline" must contain only strings.')
+    valid = known_pass_ids()
+    for x in pl:
+        if x not in valid:
+            known = ", ".join(sorted(valid))
+            raise SystemExit(f'{config_file}: unknown pass id {x!r} in "pipeline". Known: {known}')
+    return list(pl)
 
 
 @dataclass(frozen=True)
 class ReduceConfig:
+    """One reduction job: IR input and an ordered pass pipeline."""
+
     llvm_bin: Path
     output_dir: Path | None
     action: str
-    test: TestConfig
+    original_test: Path
+    file: str
+    line: int
+    replacement: str | None
+    interesting: Path | None
+    pipeline: list[str]
 
 
 def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
@@ -56,61 +88,62 @@ def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
     with open(config_file, encoding="utf-8") as f:
         raw: dict = json.load(f)
 
-    if "tests" in raw and isinstance(raw["tests"], dict):
-        _warn_unknown_keys(
-            config_file=config_file,
-            keys=set(raw),
-            allowed=_WRAPPER_TOP_LEVEL,
-            where="top-level",
-        )
-        test_map = raw["tests"]
-        output_dir = raw.get("output_dir")
-        action = raw.get("action", "reduce")
-    else:
-        test_map = raw
-        output_dir = None
-        action = "reduce"
+    if not isinstance(raw, dict):
+        raise SystemExit(f"{config_file}: config must be a JSON object.")
 
-    entries: list[TestConfig] = []
-    for path_str, spec in test_map.items():
-        if not isinstance(spec, dict):
-            raise SystemExit(f"Invalid test entry for {path_str!r}: expected an object.")
-        _warn_unknown_keys(
-            config_file=config_file,
-            keys=set(spec),
-            allowed=_TEST_SPEC_KEYS,
-            where=f"test entry {path_str!r}",
-        )
-        try:
-            file = spec["file"]
-            line = spec["line"]
-        except KeyError as e:
-            raise SystemExit(f"Test {path_str!r} missing required field: {e.args[0]}") from e
-        interesting = spec.get("interesting")
-        entries.append(
-            TestConfig(
-                original_test=_resolve_relative_to_config(config_file, path_str),
-                file=file,
-                line=line,
-                replacement=spec.get("replacement"),
-                interesting=(
-                    _resolve_relative_to_config(config_file, interesting)
-                    if interesting
-                    else None
-                ),
-            )
-        )
+    _warn_unknown_keys(
+        config_file=config_file,
+        keys=set(raw),
+        allowed=_TOP_LEVEL_KEYS,
+        where="top-level",
+    )
 
-    n = len(entries)
-    if n != 1:
+    try:
+        input_raw = raw["input"]
+        file = raw["file"]
+        line = raw["line"]
+    except KeyError as e:
         raise SystemExit(
-            f"Config must define exactly one test (found {n}). "
-            "Use a single key in the test map."
-        )
+            f"{config_file}: missing required top-level field {e.args[0]!r} "
+            '(need "input" path to .ll, "file", "line").'
+        ) from e
+
+    if not isinstance(input_raw, str):
+        raise SystemExit(f'{config_file}: "input" must be a string path to the .ll file.')
+    if not isinstance(file, str):
+        raise SystemExit(f'{config_file}: "file" must be a string.')
+    if not isinstance(line, int):
+        raise SystemExit(f'{config_file}: "line" must be an integer.')
+
+    interesting_raw = raw.get("interesting")
+    if interesting_raw is not None and not isinstance(interesting_raw, str):
+        raise SystemExit(f'{config_file}: "interesting" must be a string path or omitted.')
+
+    pipeline = _parse_pipeline(config_file, raw)
+
+    output_dir = raw.get("output_dir")
+    if output_dir is not None and not isinstance(output_dir, str):
+        raise SystemExit(f'{config_file}: "output_dir" must be a string or omitted.')
+    action = raw.get("action", "reduce")
+    if not isinstance(action, str):
+        raise SystemExit(f'{config_file}: "action" must be a string.')
+
+    replacement = raw.get("replacement")
+    if replacement is not None and not isinstance(replacement, str):
+        raise SystemExit(f'{config_file}: "replacement" must be a string or omitted.')
 
     return ReduceConfig(
         llvm_bin=llvm_bin,
         output_dir=Path(output_dir) if output_dir else None,
         action=action,
-        test=entries[0],
+        original_test=_resolve_relative_to_config(config_file, input_raw),
+        file=file,
+        line=line,
+        replacement=replacement,
+        interesting=(
+            _resolve_relative_to_config(config_file, interesting_raw)
+            if interesting_raw
+            else None
+        ),
+        pipeline=pipeline,
     )

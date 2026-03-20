@@ -82,6 +82,30 @@ class LlvmReduceMirPlaceholderPass(ReducePass):
         return Test(dest, test.interesting, test.file, test.line)
 
 
+# Registry of pass ids for config ``pipeline`` arrays (order = run order; repeats allowed).
+_PASS_BY_ID: dict[str, type[ReducePass]] = {
+    "snapshot": SnapshotPass,
+    "llvm_reduce_ir": LlvmReduceIrPass,
+    "llvm_reduce_mir": LlvmReduceMirPlaceholderPass,
+}
+
+
+def known_pass_ids() -> frozenset[str]:
+    """Ids valid in JSON ``pipeline`` and ``--only-pass``."""
+    return frozenset(_PASS_BY_ID)
+
+
+def passes_from_ids(pass_ids: list[str]) -> list[ReducePass]:
+    out: list[ReducePass] = []
+    for pid in pass_ids:
+        cls = _PASS_BY_ID.get(pid)
+        if cls is None:
+            known = ", ".join(sorted(_PASS_BY_ID))
+            raise SystemExit(f"Unknown pass id {pid!r}. Known ids: {known}")
+        out.append(cls())
+    return out
+
+
 class Reducer:
     def __init__(
         self,
@@ -89,19 +113,12 @@ class Reducer:
         output_dir: Path,
         test: Test,
         *,
-        engine: str = "llvmreduce-ir",
+        pass_ids: list[str],
     ):
         self.llvm_bin: Path = llvm_bin
         self.output_dir: Path = output_dir
         self.test: Test = test
-        self.engine: str = engine
-
-    def _passes(self) -> list[ReducePass]:
-        if self.engine == "llvmreduce-ir":
-            return [SnapshotPass(), LlvmReduceIrPass()]
-        if self.engine == "llvm-reduce-mir":
-            return [SnapshotPass(), LlvmReduceMirPlaceholderPass()]
-        raise AssertionError(f"unknown engine: {self.engine!r}")
+        self._passes_list: list[ReducePass] = passes_from_ids(pass_ids)
 
     def reduce(self) -> Test:
         tmp_dir = self.output_dir / "tmp"
@@ -115,7 +132,7 @@ class Reducer:
             tmp_dir=tmp_dir,
         )
         test = self.test
-        for step, p in enumerate(self._passes()):
+        for step, p in enumerate(self._passes_list):
             test = p.run(ctx, test, step=step)
 
         final_path = self.output_dir / FINAL_REDUCED_NAME

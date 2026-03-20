@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 from reduce.config import load_reduce_config
-from reduce.reducer import Reducer
+from reduce.reducer import Reducer, known_pass_ids
 from reduce.test import Test
 
 
@@ -16,7 +16,7 @@ def main():
         "-c",
         type=Path,
         required=True,
-        help="Path to config.json (map of original_test path -> file, line, interesting, ...).",
+        help='Path to config.json (includes "pipeline": pass ids, plus input/file/line, ...).',
     )
     parser.add_argument(
         "--llvm-bin",
@@ -25,23 +25,28 @@ def main():
         help="Path to llvm-project bin directory (must contain llvm-reduce).",
     )
     parser.add_argument(
-        "--engine",
-        choices=("llvmreduce-ir", "llvm-reduce-mir"),
-        default="llvmreduce-ir",
-        help="Reduction backend (default: %(default)s).",
+        "--only-pass",
+        default=argparse.SUPPRESS,
+        choices=sorted(known_pass_ids()),
+        metavar="PASS_ID",
+        help="Run a single pass by id (input is the original .ll). For debugging.",
     )
     ns = parser.parse_args()
     cfg = load_reduce_config(ns.config, ns.llvm_bin.resolve())
 
-    t = cfg.test
-    test = Test(t.original_test, t.interesting, f"/{t.file}", t.line)
+    if getattr(ns, "only_pass", None) is not None:
+        pass_ids = [ns.only_pass]
+    else:
+        pass_ids = list(cfg.pipeline)
+
+    test = Test(cfg.original_test, cfg.interesting, f"/{cfg.file}", cfg.line)
 
     current_file = Path(__file__).resolve()
     default_output_dir = (
         current_file.parent.parent.parent
         / "data"
         / "output"
-        / t.original_test.name
+        / cfg.original_test.name
         / datetime.now().strftime("%Y%m%d-%H%M%S")
     )
     output_dir = cfg.output_dir or default_output_dir
@@ -51,8 +56,9 @@ def main():
         test.run()
 
     if cfg.action == "reduce":
-        reducer = Reducer(cfg.llvm_bin, output_dir, test, engine=ns.engine)
+        reducer = Reducer(cfg.llvm_bin, output_dir, test, pass_ids=pass_ids)
         reducer.reduce()
+
 
 if __name__ == "__main__":
     main()
