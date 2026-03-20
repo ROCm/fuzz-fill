@@ -23,40 +23,6 @@ def run_one_test(
     env['UBSAN_OPTIONS'] = f'coverage=1:coverage_dir={coverage_dir}'
     return subprocess.run(cmd, cwd=fuzzer_test_dir, capture_output=True, text=True, env=env)
 
-
-def symbolize_coverage(
-    coverage_dir: Path,
-    llc_bin: Path,
-    build_dir: Path,
-    test_cmd: str,
-    fuzzer_test_dir: Path,
-) -> None:
-    """Find the newest .sancov for the binary in coverage_dir and write a .symcov file."""
-    binary_name = llc_bin.name
-    sancov_files = sorted(
-        coverage_dir.glob(f'{binary_name}.*.sancov'),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    if not sancov_files:
-        print('  (no .sancov file found, skipping symbolize)')
-        return
-    latest_sancov = sancov_files[0]
-    safe_name = test_cmd.replace(' ', '_').replace('/', '_').strip()
-    symcov_path = coverage_dir / f'{safe_name}.symcov'
-    sancov_bin = build_dir / 'sancov'
-    if not sancov_bin.exists():
-        print(f'  (sancov not found at {sancov_bin}, skipping symbolize)')
-        return
-    with symcov_path.open('w') as f:
-        subprocess.run(
-            [str(sancov_bin), '-symbolize', str(latest_sancov), str(llc_bin)],
-            cwd=fuzzer_test_dir,
-            check=True,
-            stdout=f,
-        )
-    print(f'  -> {symcov_path}')
-
 def get_repo_base(script_file: str) -> Path:
     """Return the repo root (parent of the scripts/ directory)."""
     return Path(script_file).resolve().parent.parent
@@ -77,15 +43,3 @@ def get_line_number(url: str) -> int | None:
     if fragment.startswith("L") and fragment[1:].isdigit():
         return int(fragment[1:])
     return None
-
-def run_one_test_with_coverage(
-    llc_bin: Path,
-    test_cmd: str,
-    fuzzer_test_dir: Path,
-    coverage_dir: Path,
-) -> subprocess.CompletedProcess:
-    """Run a single llc test with ASan coverage enabled."""
-    cmd = [str(llc_bin)] + test_cmd.split()[1:]
-    env = os.environ.copy()
-    env['UBSAN_OPTIONS'] = f'coverage=1:coverage_dir={coverage_dir}'
-    return subprocess.run(cmd, cwd=fuzzer_test_dir, capture_output=True, text=True, env=env)

@@ -37,10 +37,10 @@ def main():
         help='The line number for which to retain coverage',
     )
     parser.add_argument(
-        '--symcov',
-        type=Path,
+        '--file',
+        type=str,
         default=None,
-        help='The path to the symcov file',
+        help='The relative path to the file in the llvm-project repository',
     )
     parser.add_argument(
         '--action',
@@ -61,12 +61,8 @@ def main():
     
     # Just one test for now
     # TODO: Support multiple tests e.g. using json to load info for each test
-    test = Test(args.original_test, args.interesting, args.line, args.symcov)
+    test = Test(args.original_test, args.interesting, f'/{args.file}', args.line)
 
-    if args.action == 'get_interesting_address':
-        address = test.get_interesting_address()
-        print(f'Address for line {test.line} is {address}')
-        
     if args.action == 'test':
         test.run()
 
