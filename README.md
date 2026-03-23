@@ -6,6 +6,27 @@ Fuzzing to fill test suite gaps.
 
 The `reduce` package drives **LLVM testcase reduction**: it reads a small JSON config, runs a **pass pipeline**, and writes artifacts under an output directory.
 
+### Quick start
+
+Two examples are given in `example/`:
+- The SPIRV example runs `llvm-reduce` in `ir` form, which is the simplest reduction.
+- The AMD exmaple runs `llvm-reduce` in `ir` mode, then extracts the `MIR` from just before the LLVM pass under test, then runs `llfm-reduce` in `mir` mode.
+
+Run them as follows:
+
+```bash
+source venv/bin/activate
+cd src
+../scripts/reduce_spirv_icmp.sh
+```
+
+```bash
+source venv/bin/activate
+cd src
+../scripts/reduce_amd_si_i1.sh
+```
+
+
 ### What it does
 
 1. **Loads config** — One JSON object describes a single testcase. Paths in the JSON are resolved relative to the config file’s directory unless they are absolute.
