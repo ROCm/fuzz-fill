@@ -9,7 +9,7 @@ The `reduce` package drives **LLVM testcase reduction**: it reads a small JSON c
 ### Quick start
 
 Two examples are given in `example/`:
-- The SPIRV example runs `llvm-reduce` in `ir` form, which is the simplest reduction.
+- The SPIRV example runs a dummy `snapshot` pass that does nothing to the file (useful for debug purposes) and then runs `llvm-reduce` in `ir` form, which is the simplest reduction.
 - The AMD exmaple runs `llvm-reduce` in `ir` mode, then extracts the `MIR` from just before the LLVM pass under test, then runs `llfm-reduce` in `mir` mode.
 
 Run them as follows:
