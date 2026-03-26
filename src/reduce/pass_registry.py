@@ -3,19 +3,19 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from reduce.reducer import ReducePass
+    from reduce.reducer_pass import ReducePass
 
 
 def _pass_by_id() -> dict[str, type[ReducePass]]:
     """Built lazily so ``reducer`` can import this module without a cycle."""
-    from reduce import reducer as r
+    from reduce import reducer_pass as rp
 
     return {
-        "snapshot": r.SnapshotPass,
-        "llvm_reduce_ir": r.LlvmReduceIrPass,
-        "llvm_reduce_mir": r.LlvmReduceMirPass,
-        "extract_mir_before_pass": r.ExtractMirBeforePass,
-        "extract_ir_after_pass": r.ExtractIrAfterPass,
+        "snapshot": rp.SnapshotPass,
+        "llvm_reduce_ir": rp.LlvmReduceIrPass,
+        "llvm_reduce_mir": rp.LlvmReduceMirPass,
+        "extract_mir_before_pass": rp.ExtractMirBeforePass,
+        "extract_ir_after_pass": rp.ExtractIrAfterPass,
     }
 
 
