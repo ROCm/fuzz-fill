@@ -1,0 +1,9 @@
+{
+    "input": "llc.real.272.ll",
+    "file": "llvm/lib/Target/AMDGPU/SILowerSGPRSpills.cpp",
+    "line": 344,
+    "replacement": "{    assert(0 && \"My crash is here\");\n       I->second = InsertPt;}\n",
+    "interesting": "interesting_ir.sh",
+    "interesting_mir": "interesting_mir.sh",
+    "pipeline": ["llvm_reduce_ir"]
+}

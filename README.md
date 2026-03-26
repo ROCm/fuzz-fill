@@ -15,13 +15,11 @@ Two examples are given in `example/`:
 Run them as follows:
 
 ```bash
-source venv/bin/activate
 cd src
 ../scripts/reduce_spirv_icmp.sh
 ```
 
 ```bash
-source venv/bin/activate
 cd src
 ../scripts/reduce_amd_si_i1.sh
 ```

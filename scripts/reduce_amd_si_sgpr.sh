@@ -4,5 +4,5 @@ BASE=/work/agorzyns/local/dev
 FUZZFILL=$BASE/fuzz-fill
 
 python3 -m reduce \
-    --config $FUZZFILL/example/amd/si-i1-copies/config.json \
+    --config $FUZZFILL/example/amd/si-sgpr-spills/config.json \
     --llvm-bin $BASE/llvm-project/build/bin
