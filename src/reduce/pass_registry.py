@@ -15,7 +15,7 @@ def _pass_by_id() -> dict[str, type[ReducePass]]:
         "llvm_reduce_ir": rp.LlvmReduceIrPass,
         "llvm_reduce_mir": rp.LlvmReduceMirPass,
         "extract_mir_before_pass": rp.ExtractMirBeforePass,
-        "extract_ir_after_pass": rp.ExtractIrAfterPass,
+        "extract_ir_before_pass": rp.ExtractIrBeforePass,
     }
 
 

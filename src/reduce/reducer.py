@@ -19,6 +19,7 @@ class ReduceContext:
     mtriple: str | None
     llc_O: str | None
     extract_mir_output: str | None
+    extract_ir_before_output: str | None
     interesting_mir: Path | None
 
 
@@ -34,6 +35,7 @@ class Reducer:
         mtriple: str | None = None,
         llc_O: str | None = None,
         extract_mir_output: str | None = None,
+        extract_ir_before_output: str | None = None,
         interesting_mir: Path | None = None,
     ):
         self.llvm_bin: Path = llvm_bin
@@ -43,6 +45,7 @@ class Reducer:
         self._mtriple: str | None = mtriple
         self._llc_O: str | None = llc_O
         self._extract_mir_output: str | None = extract_mir_output
+        self._extract_ir_before_output: str | None = extract_ir_before_output
         self._interesting_mir: Path | None = interesting_mir
         self._pass_ids: list[str] = list(pass_ids)
         self._passes_list = passes_from_ids(pass_ids)
@@ -61,6 +64,7 @@ class Reducer:
             mtriple=self._mtriple,
             llc_O=self._llc_O,
             extract_mir_output=self._extract_mir_output,
+            extract_ir_before_output=self._extract_ir_before_output,
             interesting_mir=self._interesting_mir,
         )
         test = self.test

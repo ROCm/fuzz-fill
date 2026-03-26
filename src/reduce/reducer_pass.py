@@ -4,6 +4,7 @@ import shlex
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,7 +24,7 @@ def tmp_pass_path_mir(tmp_dir: Path, step: int, slug: str) -> Path:
 
 @dataclass(frozen=True)
 class _ExtractMirLlcOptions:
-    """Validated fields from ``ReduceContext`` for ``extract_mir_before_pass``."""
+    """Validated fields from ``ReduceContext`` for ``extract_*_before_pass`` llc invocations."""
 
     pass_under_test: str
     mtriple: str
@@ -57,24 +58,53 @@ def _require_interesting_mir_script(ctx: ReduceContext) -> Path:
 
 
 def _require_extract_mir_context(ctx: ReduceContext) -> _ExtractMirLlcOptions:
+    _pass = "extract_mir_before_pass and extract_ir_before_pass"
     if ctx.pass_under_test is None:
         raise SystemExit(
-            'extract_mir_before_pass requires "pass_under_test" in the config (LLVM pass id, '
+            f'{_pass} require "pass_under_test" in the config (LLVM pass id, '
             'e.g. "si-i1-copies").'
         )
     if ctx.mtriple is None:
         raise SystemExit(
-            'extract_mir_before_pass requires "mtriple" in the config (e.g. "amdgcn-amd-amdhsa").'
+            f'{_pass} require "mtriple" in the config (e.g. "amdgcn-amd-amdhsa").'
         )
     if ctx.llc_O is None:
         raise SystemExit(
-            'extract_mir_before_pass requires "llc_O" in the config (e.g. "-O1", or "" to omit -O).'
+            f'{_pass} require "llc_O" in the config (e.g. "-O1", or "" to omit -O).'
         )
     return _ExtractMirLlcOptions(
         pass_under_test=ctx.pass_under_test,
         mtriple=ctx.mtriple,
         llc_O=ctx.llc_O,
     )
+
+
+def _run_llc_extract_core(
+    ctx: ReduceContext,
+    test: Test,
+    llc_opts: _ExtractMirLlcOptions,
+    *,
+    dest: Path,
+    what: str,
+    pass_specific_args: Sequence[str],
+) -> Test:
+    exe = _require_tool(ctx.llvm_bin, "llc")
+    cmd = [
+        str(exe),
+        "-o",
+        str(dest.resolve()),
+        *_llc_opt_argv(llc_opts.llc_O),
+        f"-mtriple={llc_opts.mtriple}",
+        *pass_specific_args,
+        str(test.test_path.resolve()),
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=ctx.tmp_dir)
+    if r.returncode != 0:
+        msg = (r.stderr or r.stdout or "").strip() or "(no output)"
+        raise SystemExit(f"llc ({what}) failed ({r.returncode}):\n{msg}")
+    if not dest.is_file():
+        raise SystemExit(f"llc did not write expected output ({what}): {dest}")
+    return Test(dest, test.interesting, test.file, test.line)
 
 
 class ReducePass(ABC):
@@ -154,36 +184,41 @@ class ExtractMirBeforePass(ReducePass):
 
     def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
         llc_opts = _require_extract_mir_context(ctx)
-
         if ctx.extract_mir_output:
             name = Path(ctx.extract_mir_output).name
             dest = ctx.tmp_dir / f"{step:02d}_{name}"
         else:
             dest = ctx.tmp_dir / f"{step:02d}_mir_before_pass.mir"
 
-        exe = _require_tool(ctx.llvm_bin, "llc")
-
-        cmd = [
-            str(exe),
-            "-o",
-            str(dest.resolve()),
-            *_llc_opt_argv(llc_opts.llc_O),
-            f"-mtriple={llc_opts.mtriple}",
-            f"-stop-before={llc_opts.pass_under_test}",
-            "-simplify-mir",
-            str(test.test_path.resolve()),
-        ]
-        r = subprocess.run(cmd, capture_output=True, text=True, cwd=ctx.tmp_dir)
-        if r.returncode != 0:
-            msg = (r.stderr or r.stdout or "").strip() or "(no output)"
-            raise SystemExit(f"llc (extract MIR) failed ({r.returncode}):\n{msg}")
-        if not dest.is_file():
-            raise SystemExit(f"llc did not write expected MIR output: {dest}")
-        return Test(dest, test.interesting, test.file, test.line)
+        return _run_llc_extract_core(
+            ctx,
+            test,
+            llc_opts,
+            dest=dest,
+            what="extract_mir_before_pass",
+            pass_specific_args=(
+                f"-stop-before={llc_opts.pass_under_test}",
+                "-simplify-mir",
+            ),
+        )
 
 
-class ExtractIrAfterPass(ReducePass):
-    """Placeholder: extract IR after the pass under test (not implemented yet)."""
+class ExtractIrBeforePass(ReducePass):
+    """Run ``llc`` with ``llc_O``, ``-mtriple``, ``--print-before=<pass_under_test>`` (no ``-simplify-mir``)."""
 
     def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
-        return test
+        llc_opts = _require_extract_mir_context(ctx)
+        if ctx.extract_ir_before_output:
+            name = Path(ctx.extract_ir_before_output).name
+            dest = ctx.tmp_dir / f"{step:02d}_{name}"
+        else:
+            dest = ctx.tmp_dir / f"{step:02d}_ir_before_pass.ll"
+
+        return _run_llc_extract_core(
+            ctx,
+            test,
+            llc_opts,
+            dest=dest,
+            what="extract_ir_before_pass",
+            pass_specific_args=(f"--print-before={llc_opts.pass_under_test}",),
+        )

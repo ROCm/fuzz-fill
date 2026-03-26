@@ -23,6 +23,7 @@ _TOP_LEVEL_KEYS = frozenset(
         "mtriple",
         "llc_O",
         "extract_mir_output",
+        "extract_ir_before_output",
     }
 )
 
@@ -90,6 +91,7 @@ class ReduceConfig:
     mtriple: str | None
     llc_O: str | None
     extract_mir_output: str | None
+    extract_ir_before_output: str | None
 
 
 def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
@@ -174,6 +176,12 @@ def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
     if extract_mir_output is not None and not isinstance(extract_mir_output, str):
         raise SystemExit(f'{config_file}: "extract_mir_output" must be a string filename or omitted.')
 
+    extract_ir_before_output = raw.get("extract_ir_before_output")
+    if extract_ir_before_output is not None and not isinstance(extract_ir_before_output, str):
+        raise SystemExit(
+            f'{config_file}: "extract_ir_before_output" must be a string filename or omitted.'
+        )
+
     return ReduceConfig(
         llvm_bin=llvm_bin,
         output_dir=Path(output_dir) if output_dir else None,
@@ -197,4 +205,5 @@ def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
         mtriple=mtriple,
         llc_O=llc_O,
         extract_mir_output=extract_mir_output,
+        extract_ir_before_output=extract_ir_before_output,
     )
