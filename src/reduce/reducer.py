@@ -3,9 +3,13 @@ from __future__ import annotations
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
+from typing import Any, Mapping
 
 from reduce.pass_registry import known_pass_ids, passes_from_ids
 from reduce.test import Test
+
+from reduce.config import PipelineStep
 
 
 @dataclass(frozen=True)
@@ -15,12 +19,8 @@ class ReduceContext:
     llvm_bin: Path
     output_dir: Path
     tmp_dir: Path
-    pass_under_test: str | None
-    mtriple: str | None
-    llc_O: str | None
-    extract_mir_output: str | None
-    extract_ir_before_output: str | None
-    interesting_mir: Path | None
+    pass_options: Mapping[str, Any]
+    """Merged options for the current pipeline step (defaults + step-specific)."""
 
 
 class Reducer:
@@ -30,25 +30,16 @@ class Reducer:
         output_dir: Path,
         test: Test,
         *,
-        pass_ids: list[str],
-        pass_under_test: str | None = None,
-        mtriple: str | None = None,
-        llc_O: str | None = None,
-        extract_mir_output: str | None = None,
-        extract_ir_before_output: str | None = None,
-        interesting_mir: Path | None = None,
+        pipeline_steps: tuple[PipelineStep, ...],
+        default_pass_options: Mapping[str, Any] | None = None,
     ):
         self.llvm_bin: Path = llvm_bin
         self.output_dir: Path = output_dir
         self.test: Test = test
-        self._pass_under_test: str | None = pass_under_test
-        self._mtriple: str | None = mtriple
-        self._llc_O: str | None = llc_O
-        self._extract_mir_output: str | None = extract_mir_output
-        self._extract_ir_before_output: str | None = extract_ir_before_output
-        self._interesting_mir: Path | None = interesting_mir
-        self._pass_ids: list[str] = list(pass_ids)
-        self._passes_list = passes_from_ids(pass_ids)
+        self._pipeline_steps: tuple[PipelineStep, ...] = pipeline_steps
+        self._default_pass_options: dict[str, Any] = dict(default_pass_options or {})
+        self._pass_ids: list[str] = [s.id for s in pipeline_steps]
+        self._passes_list = passes_from_ids(self._pass_ids)
 
     def reduce(self) -> Test:
         tmp_dir = self.output_dir / "tmp"
@@ -56,21 +47,20 @@ class Reducer:
             shutil.rmtree(tmp_dir)
         tmp_dir.mkdir(parents=True, exist_ok=True)
 
-        ctx = ReduceContext(
-            llvm_bin=self.llvm_bin,
-            output_dir=self.output_dir,
-            tmp_dir=tmp_dir,
-            pass_under_test=self._pass_under_test,
-            mtriple=self._mtriple,
-            llc_O=self._llc_O,
-            extract_mir_output=self._extract_mir_output,
-            extract_ir_before_output=self._extract_ir_before_output,
-            interesting_mir=self._interesting_mir,
-        )
         test = self.test
         n = len(self._passes_list)
         for step, (pass_id, p) in enumerate(zip(self._pass_ids, self._passes_list)):
             print(f"[reduce] pass {step + 1}/{n}: {pass_id}", flush=True)
+            merged: dict[str, Any] = {
+                **self._default_pass_options,
+                **dict(self._pipeline_steps[step].options),
+            }
+            ctx = ReduceContext(
+                llvm_bin=self.llvm_bin,
+                output_dir=self.output_dir,
+                tmp_dir=tmp_dir,
+                pass_options=MappingProxyType(merged),
+            )
             test = p.run(ctx, test, step=step)
 
         suffix = test.test_path.suffix if test.test_path.suffix else ".ll"

@@ -3,6 +3,16 @@
     "file": "llvm/lib/Target/SPIRV/SPIRVInstructionSelector.cpp",
     "line": 2460,
     "replacement": "    {assert(0 && \"My crash is here\"); return SPIRV::OpLogicalEqual;}\n",
-    "interesting": "interesting.sh",
-    "pipeline": ["snapshot", "llvm_reduce_ir"]
+    "pipeline": [
+        {
+            "id": "snapshot",
+            "parameters": {}
+        },
+        {
+            "id": "llvm_reduce_ir",
+            "parameters": {
+                "interesting": "interesting.sh"
+            }
+        }
+    ]
 }

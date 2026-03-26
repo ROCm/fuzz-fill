@@ -3,10 +3,26 @@
     "file": "llvm/lib/Target/AMDGPU/SILowerSGPRSpills.cpp",
     "line": 344,
     "replacement": "{    assert(0 && \"My crash is here\");\n       I->second = InsertPt;}\n",
-    "interesting": "interesting_ir.sh",
-    "interesting_mir": "interesting_mir.sh",
-    "pipeline": ["llvm_reduce_ir", "extract_ir_before_pass", "llvm_reduce_ir"],
-    "pass_under_test": "amdgpu-remove-incompatible-functions",
-    "mtriple": "amdgcn-amd-amdhsa",
-    "llc_O": "-O0"
+    "pipeline": [
+        {
+            "id": "llvm_reduce_ir",
+            "parameters": {
+                "interesting": "interesting_ir.sh"
+            }
+        },
+        {
+            "id": "extract_ir_before_pass",
+            "parameters": {
+                "llc_O": "-O0",
+                "mtriple": "amdgcn-amd-amdhsa",
+                "pass_under_test": "amdgpu-remove-incompatible-functions"
+            }
+        },
+        {
+            "id": "llvm_reduce_ir",
+            "parameters": {
+                "interesting": "interesting_ir.sh"
+            }
+        }
+    ]
 }

@@ -45,38 +45,68 @@ def _llc_opt_argv(llc_O: str) -> list[str]:
     return shlex.split(s) if s else []
 
 
-def _require_interesting_script(test: Test) -> None:
-    if test.interesting is None:
-        raise SystemExit('llvm-reduce requires an "interesting" script in the config.')
+def _interesting_script_for_llvm_reduce_ir(ctx: ReduceContext) -> Path:
+    v = ctx.pass_options.get("interesting")
+    if v is not None:
+        if isinstance(v, Path):
+            return v
+        if isinstance(v, str):
+            return Path(v)
+        raise SystemExit(
+            f'llvm_reduce_ir: "interesting" must be a path or string, got {type(v).__name__}.'
+        )
+    raise SystemExit(
+        'llvm_reduce_ir requires "interesting" in this step\'s "parameters" '
+        "(path to the interesting script for llvm-reduce --test)."
+    )
 
 
 def _require_interesting_mir_script(ctx: ReduceContext) -> Path:
-    if ctx.interesting_mir is None:
+    v = ctx.pass_options.get("interesting_mir")
+    if v is None:
         raise SystemExit(
-            'llvm_reduce_mir requires "interesting_mir" in the config (path to an executable script).'
+            'llvm_reduce_mir requires "interesting_mir" on this pipeline step '
+            '(path to an executable script), or in legacy top-level config.'
         )
-    return ctx.interesting_mir
+    if isinstance(v, Path):
+        return v
+    if isinstance(v, str):
+        return Path(v)
+    raise SystemExit(
+        f'llvm_reduce_mir: "interesting_mir" must be a path, got {type(v).__name__}.'
+    )
 
 
 def _require_extract_mir_context(ctx: ReduceContext) -> _ExtractMirLlcOptions:
     _pass = "extract_mir_before_pass and extract_ir_before_pass"
-    if ctx.pass_under_test is None:
+    put = ctx.pass_options.get("pass_under_test")
+    if put is None:
         raise SystemExit(
-            f'{_pass} require "pass_under_test" in the config (LLVM pass id, '
-            'e.g. "si-i1-copies").'
+            f'{_pass} require "pass_under_test" on this pipeline step (LLVM pass id, '
+            'e.g. "si-i1-copies"), or in legacy top-level config.'
         )
-    if ctx.mtriple is None:
+    if not isinstance(put, str):
+        raise SystemExit(f'{_pass}: "pass_under_test" must be a string.')
+    mt = ctx.pass_options.get("mtriple")
+    if mt is None:
         raise SystemExit(
-            f'{_pass} require "mtriple" in the config (e.g. "amdgcn-amd-amdhsa").'
+            f'{_pass} require "mtriple" on this pipeline step (e.g. "amdgcn-amd-amdhsa"), '
+            "or in legacy top-level config."
         )
-    if ctx.llc_O is None:
+    if not isinstance(mt, str):
+        raise SystemExit(f'{_pass}: "mtriple" must be a string.')
+    llc_O = ctx.pass_options.get("llc_O")
+    if llc_O is None:
         raise SystemExit(
-            f'{_pass} require "llc_O" in the config (e.g. "-O1", or "" to omit -O).'
+            f'{_pass} require "llc_O" on this pipeline step (e.g. "-O1", or "" to omit -O), '
+            "or in legacy top-level config."
         )
+    if not isinstance(llc_O, str):
+        raise SystemExit(f'{_pass}: "llc_O" must be a string.')
     return _ExtractMirLlcOptions(
-        pass_under_test=ctx.pass_under_test,
-        mtriple=ctx.mtriple,
-        llc_O=ctx.llc_O,
+        pass_under_test=put,
+        mtriple=mt,
+        llc_O=llc_O,
     )
 
 
@@ -207,12 +237,12 @@ class LlvmReduceIrPass(ReducePass):
     """Run ``llvm-reduce`` (IR) with the config interesting-ness script."""
 
     def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
-        _require_interesting_script(test)
+        interesting = _interesting_script_for_llvm_reduce_ir(ctx)
         exe = _require_tool(ctx.llvm_bin, "llvm-reduce")
         out = tmp_pass_path(ctx.tmp_dir, step, "llvmreduce")
         cmd = [
             str(exe),
-            f"--test={test.interesting.resolve()}",
+            f"--test={interesting.resolve()}",
             f"-o={out}",
             str(test.test_path.resolve()),
         ]
@@ -227,7 +257,7 @@ class LlvmReduceIrPass(ReducePass):
             raise SystemExit(f"llvm-reduce failed ({r.returncode}):\n{msg}")
         if not out.is_file():
             raise SystemExit(f"llvm-reduce did not write expected output: {out}")
-        return Test(out, test.interesting, test.file, test.line)
+        return Test(out, interesting, test.file, test.line)
 
 
 class LlvmReduceMirPass(ReducePass):
@@ -263,8 +293,11 @@ class ExtractMirBeforePass(ReducePass):
 
     def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
         llc_opts = _require_extract_mir_context(ctx)
-        if ctx.extract_mir_output:
-            name = Path(ctx.extract_mir_output).name
+        emo = ctx.pass_options.get("extract_mir_output")
+        if emo:
+            if not isinstance(emo, str):
+                raise SystemExit('extract_mir_before_pass: "extract_mir_output" must be a string.')
+            name = Path(emo).name
             dest = ctx.tmp_dir / f"{step:02d}_{name}"
         else:
             dest = ctx.tmp_dir / f"{step:02d}_mir_before_pass.mir"
@@ -288,8 +321,11 @@ class ExtractIrBeforePass(ReducePass):
 
     def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
         llc_opts = _require_extract_mir_context(ctx)
-        if ctx.extract_ir_before_output:
-            name = Path(ctx.extract_ir_before_output).name
+        eio = ctx.pass_options.get("extract_ir_before_output")
+        if eio:
+            if not isinstance(eio, str):
+                raise SystemExit('extract_ir_before_pass: "extract_ir_before_output" must be a string.')
+            name = Path(eio).name
             dest = ctx.tmp_dir / f"{step:02d}_{name}"
         else:
             dest = ctx.tmp_dir / f"{step:02d}_ir_before_pass.ll"

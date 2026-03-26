@@ -3,11 +3,27 @@
     "file": "llvm/lib/Target/AMDGPU/SILowerI1Copies.cpp",
     "line": 627,
     "replacement": "    assert(0 && \"My crash is here\");\n        SSAUpdater.Initialize(DstReg);\n",
-    "interesting": "interesting_ir.sh",
-    "interesting_mir": "interesting_mir.sh",
-    "pipeline": ["llvm_reduce_ir", "extract_mir_before_pass", "llvm_reduce_mir"],
-    "pass_under_test": "si-i1-copies",
-    "mtriple": "amdgcn-amd-amdhsa",
-    "llc_O": "-O1",
-    "extract_mir_output": "before-si-lower-i1-copies.mir"
+    "pipeline": [
+        {
+            "id": "llvm_reduce_ir",
+            "parameters": {
+                "interesting": "interesting_ir.sh"
+            }
+        },
+        {
+            "id": "extract_mir_before_pass",
+            "parameters": {
+                "extract_mir_output": "before-si-lower-i1-copies.mir",
+                "llc_O": "-O1",
+                "mtriple": "amdgcn-amd-amdhsa",
+                "pass_under_test": "si-i1-copies"
+            }
+        },
+        {
+            "id": "llvm_reduce_mir",
+            "parameters": {
+                "interesting_mir": "interesting_mir.sh"
+            }
+        }
+    ]
 }
