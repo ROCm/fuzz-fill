@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
+from reduce.pass_registry import known_pass_ids, passes_from_ids
 from reduce.test import Test
 
 
@@ -195,29 +196,11 @@ class ExtractMirBeforePass(ReducePass):
         return Test(dest, test.interesting, test.file, test.line)
 
 
-# Registry of pass ids for config ``pipeline`` arrays (order = run order; repeats allowed).
-_PASS_BY_ID: dict[str, type[ReducePass]] = {
-    "snapshot": SnapshotPass,
-    "llvm_reduce_ir": LlvmReduceIrPass,
-    "llvm_reduce_mir": LlvmReduceMirPass,
-    "extract_mir_before_pass": ExtractMirBeforePass,
-}
+class ExtractIrAfterPass(ReducePass):
+    """Placeholder: extract IR after the pass under test (not implemented yet)."""
 
-
-def known_pass_ids() -> frozenset[str]:
-    """Ids valid in JSON ``pipeline`` and ``--only-pass``."""
-    return frozenset(_PASS_BY_ID)
-
-
-def passes_from_ids(pass_ids: list[str]) -> list[ReducePass]:
-    out: list[ReducePass] = []
-    for pid in pass_ids:
-        cls = _PASS_BY_ID.get(pid)
-        if cls is None:
-            known = ", ".join(sorted(_PASS_BY_ID))
-            raise SystemExit(f"Unknown pass id {pid!r}. Known ids: {known}")
-        out.append(cls())
-    return out
+    def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
+        return test
 
 
 class Reducer:
