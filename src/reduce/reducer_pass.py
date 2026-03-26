@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shlex
 import shutil
 import subprocess
@@ -115,6 +116,76 @@ def _run_llc_extract_core(
     return Test(dest, test.interesting, test.file, test.line)
 
 
+_PIPE_ONLY_LINE = re.compile(r"^\s*\|\s*$")
+
+
+def _min_leading_space_count(lines: list[str]) -> int:
+    """Smallest leading space run among non-blank lines that start with a space (LLVM print-before style)."""
+    m: int | None = None
+    for ln in lines:
+        if not ln.strip() or not ln.startswith(" "):
+            continue
+        n = len(ln) - len(ln.lstrip(" "))
+        if m is None or n < m:
+            m = n
+    return m if m is not None else 0
+
+
+def _dedent_leading_spaces(lines: list[str], m: int) -> list[str]:
+    """Remove up to ``m`` leading spaces from space-indented lines; blank lines become ``\"\"``."""
+    if m <= 0:
+        return list(lines)
+    out: list[str] = []
+    for ln in lines:
+        if not ln.strip():
+            out.append("")
+            continue
+        if not ln.startswith(" "):
+            out.append(ln)
+            continue
+        i = 0
+        while i < m and i < len(ln) and ln[i] == " ":
+            i += 1
+        out.append(ln[i:])
+    return out
+
+
+def _normalize_extract_ir_ll_text(s: str) -> str:
+    """Normalize ``llc`` print-before dump: drop pipe column lines, dedent common space indent, strip trailing ``...``."""
+    lines = s.splitlines()
+    while lines and _PIPE_ONLY_LINE.match(lines[0]):
+        lines.pop(0)
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    m = _min_leading_space_count(lines)
+    lines = _dedent_leading_spaces(lines, m)
+    if lines:
+        last = lines[-1].rstrip()
+        if last.endswith("..."):
+            last = last[:-3].rstrip()
+        lines[-1] = last
+    return "\n".join(lines) + "\n"
+
+
+def _finalize_extract_ir_before_pass_output(path: Path, *, what: str) -> None:
+    """Keep text between the first two ``---`` markers, then apply `_normalize_extract_ir_ll_text`."""
+    marker = "---"
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    start = raw.find(marker)
+    if start == -1:
+        raise SystemExit(
+            f"llc ({what}): expected two {marker!r} delimiters in {path}; found none."
+        )
+    after_first = start + len(marker)
+    end = raw.find(marker, after_first)
+    if end == -1:
+        raise SystemExit(
+            f"llc ({what}): expected a second {marker!r} delimiter in {path}; found only one."
+        )
+    inner = raw[after_first:end].strip()
+    path.write_text(_normalize_extract_ir_ll_text(inner), encoding="utf-8")
+
+
 class ReducePass(ABC):
     """One step in the pipeline; returns the test state for the next pass."""
 
@@ -211,7 +282,9 @@ class ExtractMirBeforePass(ReducePass):
 
 
 class ExtractIrBeforePass(ReducePass):
-    """Same ``llc`` stop-before path as ``extract_mir_before_pass`` but without ``-simplify-mir``."""
+    """``llc`` stop-before without ``-simplify-mir``; output is sliced on ``---`` then cleaned for LLVM IR."""
+
+    _what = "extract_ir_before_pass"
 
     def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
         llc_opts = _require_extract_mir_context(ctx)
@@ -221,13 +294,15 @@ class ExtractIrBeforePass(ReducePass):
         else:
             dest = ctx.tmp_dir / f"{step:02d}_ir_before_pass.ll"
 
-        return _run_llc_extract_core(
+        out = _run_llc_extract_core(
             ctx,
             test,
             llc_opts,
             dest=dest,
-            what="extract_ir_before_pass",
+            what=self._what,
             pass_specific_args=_llc_stop_before_args(
                 llc_opts.pass_under_test, simplify_mir=False
             ),
         )
+        _finalize_extract_ir_before_pass_output(out.test_path, what=self._what)
+        return out
