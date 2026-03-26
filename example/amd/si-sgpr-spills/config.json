@@ -5,5 +5,8 @@
     "replacement": "{    assert(0 && \"My crash is here\");\n       I->second = InsertPt;}\n",
     "interesting": "interesting_ir.sh",
     "interesting_mir": "interesting_mir.sh",
-    "pipeline": ["llvm_reduce_ir"]
+    "pipeline": ["llvm_reduce_ir", "extract_ir_before_pass"],
+    "pass_under_test": "amdgpu-remove-incompatible-functions",
+    "mtriple": "amdgcn-amd-amdhsa",
+    "llc_O": "-O0"
 }

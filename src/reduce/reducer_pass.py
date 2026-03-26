@@ -79,6 +79,14 @@ def _require_extract_mir_context(ctx: ReduceContext) -> _ExtractMirLlcOptions:
     )
 
 
+def _llc_stop_before_args(pass_under_test: str, *, simplify_mir: bool) -> list[str]:
+    """Argv fragment after ``-mtriple`` for ``llc`` stop-before extraction (optional ``-simplify-mir``)."""
+    out = [f"-stop-before={pass_under_test}"]
+    if simplify_mir:
+        out.append("-simplify-mir")
+    return out
+
+
 def _run_llc_extract_core(
     ctx: ReduceContext,
     test: Test,
@@ -196,15 +204,14 @@ class ExtractMirBeforePass(ReducePass):
             llc_opts,
             dest=dest,
             what="extract_mir_before_pass",
-            pass_specific_args=(
-                f"-stop-before={llc_opts.pass_under_test}",
-                "-simplify-mir",
+            pass_specific_args=_llc_stop_before_args(
+                llc_opts.pass_under_test, simplify_mir=True
             ),
         )
 
 
 class ExtractIrBeforePass(ReducePass):
-    """Run ``llc`` with ``llc_O``, ``-mtriple``, ``--print-before=<pass_under_test>`` (no ``-simplify-mir``)."""
+    """Same ``llc`` stop-before path as ``extract_mir_before_pass`` but without ``-simplify-mir``."""
 
     def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
         llc_opts = _require_extract_mir_context(ctx)
@@ -220,5 +227,7 @@ class ExtractIrBeforePass(ReducePass):
             llc_opts,
             dest=dest,
             what="extract_ir_before_pass",
-            pass_specific_args=(f"--print-before={llc_opts.pass_under_test}",),
+            pass_specific_args=_llc_stop_before_args(
+                llc_opts.pass_under_test, simplify_mir=False
+            ),
         )
