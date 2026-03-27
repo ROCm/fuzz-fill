@@ -23,6 +23,20 @@
             "parameters": {
                 "interesting": "interesting_ir.sh"
             }
+        },
+        {
+            "id": "extract_mir_before_pass",
+            "parameters": {
+                "llc_O": "-O0",
+                "mtriple": "amdgcn-amd-amdhsa",
+                "pass_under_test": "si-lower-sgpr-spills"
+            }
+        },
+        {
+            "id": "llvm_reduce_mir",
+            "parameters": {
+                "interesting_mir": "interesting_mir.sh"
+            }
         }
     ]
 }
