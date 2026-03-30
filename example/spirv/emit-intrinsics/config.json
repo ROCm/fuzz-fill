@@ -1,0 +1,18 @@
+{
+    "input": "llc.real.51.ll",
+    "file": "llvm/lib/Target/SPIRV/SPIRVEmitIntrinsics.cpp",
+    "line": 1234,
+    "replacement": "    {assert(0 && \"My crash is here\"); IsIncomplete = true;}\n",
+    "pipeline": [
+        {
+            "id": "snapshot",
+            "parameters": {}
+        },
+        {
+            "id": "llvm_reduce_ir",
+            "parameters": {
+                "interesting": "interesting.sh"
+            }
+        }
+    ]
+}
