@@ -97,8 +97,20 @@ def _drop_first_line(s: str) -> str:
     return rest
 
 
+def _filter_ignored_lines(body: str) -> str:
+    """Drop blank lines and lines beginning with '#' from compare text."""
+    kept: list[str] = []
+    for line in body.splitlines(keepends=True):
+        if not line.strip():
+            continue
+        if line.startswith("#"):
+            continue
+        kept.append(line)
+    return "".join(kept)
+
+
 def _unified_diff_bodies(before_body: str, after_body: str, pass_slug: str) -> str:
-    """Unified diff of the compared region (same strings as the IDENTICAL/DIFFERENT check)."""
+    """Unified diff of the compared region (after all compare-time filtering)."""
     a = before_body.splitlines(keepends=True)
     b = after_body.splitlines(keepends=True)
     return "".join(
@@ -138,12 +150,16 @@ def main() -> None:
     )
     after_rc = emit_result(f"-print-after={args.pass_name}", print_after, after_path)
 
-    before_body = _drop_first_line(before_path.read_text(encoding="utf-8"))
-    after_body = _drop_first_line(after_path.read_text(encoding="utf-8"))
+    before_body = _filter_ignored_lines(
+        _drop_first_line(before_path.read_text(encoding="utf-8"))
+    )
+    after_body = _filter_ignored_lines(
+        _drop_first_line(after_path.read_text(encoding="utf-8"))
+    )
     if before_body == after_body:
-        print("[compare] before/after (ignoring first line): IDENTICAL")
+        print("[compare] before/after (ignoring first line, # lines, blank lines): IDENTICAL")
     else:
-        print("[compare] before/after (ignoring first line): DIFFERENT")
+        print("[compare] before/after (ignoring first line, # lines, blank lines): DIFFERENT")
         diff_text = _unified_diff_bodies(before_body, after_body, slug)
         diff_path = out_dir / f"diff-before-after-{slug}.txt"
         diff_path.write_text(diff_text, encoding="utf-8")

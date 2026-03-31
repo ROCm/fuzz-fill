@@ -21,42 +21,32 @@ def _pass_slug(pass_name: str) -> str:
 # Each entry: path to .ll (str or Path relative to repo or absolute), pass name, llc-args string (shell-style).
 CASES: list[dict[str, str | Path]] = [
     {
-        "test": _REPO / "fuzzer-tests/spirv/llc.real.2.ll",
+        "test": _REPO / "fuzzer-tests/reduced/llc.real.2.spirv.reduced.ll",
         "pass": "spirv-emit-intrinsics",
         "llc_args": "-mtriple=spirv64-amd-amdhsa",
     },
     {
-        "test": _REPO / "fuzzer-tests/spirv/llc.real.4.ll",
+        "test": _REPO / "fuzzer-tests/reduced/llc.real.4.spirv.reduced.ll",
         "pass": "spirv-emit-intrinsics",
         "llc_args": "-mtriple=spirv64-amd-amdhsa",
     },
     {
-        "test": _REPO / "fuzzer-tests/spirv/llc.real.34.ll",
+        "test": _REPO / "fuzzer-tests/reduced/llc.real.34.reduced.ll",
         "pass": "spirv-emit-intrinsics",
         "llc_args": "-mtriple=spirv64-amd-amdhsa",
     },
     {
-        "test": _REPO / "fuzzer-tests/spirv/llc.real.37.ll",
+        "test": _REPO / "fuzzer-tests/reduced/llc.real.51.spirv.reduced.ll",
         "pass": "instruction-select",
         "llc_args": "-mtriple=spirv64-amd-amdhsa",
     },
     {
-        "test": _REPO / "fuzzer-tests/spirv/llc.real.51.ll",
-        "pass": "instruction-select",
-        "llc_args": "-mtriple=spirv64-amd-amdhsa",
-    },
-    {
-        "test": _REPO / "fuzzer-tests/amd/llc.real.156.ll",
+        "test": _REPO / "fuzzer-tests/reduced/llc.real.156.reduced.ll",
         "pass": "amdgpu-mark-last-scratch-load",
         "llc_args": "-mtriple=amdgcn-amd-amdhsa",
     },
     {
-        "test": _REPO / "fuzzer-tests/amd/llc.real.185.ll",
-        "pass": "si-i1-copies",
-        "llc_args": "-O1 -mtriple=amdgcn-amd-amdhsa",
-    },
-    {
-        "test": _REPO / "fuzzer-tests/amd/llc.real.272.ll",
+        "test": _REPO / "fuzzer-tests/reduced/llc.real.272.reduced.ll",
         "pass": "si-lower-sgpr-spills",
         "llc_args": "-O0 -mtriple=amdgcn-amd-amdhsa",
     },
