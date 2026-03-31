@@ -38,6 +38,7 @@ _LEGACY_PASS_OPTION_KEYS = frozenset(
 _KNOWN_OPTIONS_BY_PASS: dict[str, frozenset[str]] = {
     "snapshot": frozenset(),
     "llvm_reduce_ir": frozenset({"interesting"}),
+    "creduce": frozenset({"interesting", "n"}),
     "llvm_reduce_mir": frozenset({"interesting_mir"}),
     "extract_mir_before_pass": frozenset(
         {"pass_under_test", "mtriple", "llc_O", "extract_mir_output"}
@@ -125,6 +126,14 @@ def _resolve_step_option_paths(
                 f'{config_file}: "interesting_mir" in pipeline step must be a string path.'
             )
     if pass_id == "llvm_reduce_ir" and "interesting" in out:
+        v = out["interesting"]
+        if v is not None and isinstance(v, str):
+            out["interesting"] = _resolve_relative_to_config(config_file, v)
+        elif v is not None and not isinstance(v, Path):
+            raise SystemExit(
+                f'{config_file}: "interesting" in pipeline step must be a string path.'
+            )
+    if pass_id == "creduce" and "interesting" in out:
         v = out["interesting"]
         if v is not None and isinstance(v, str):
             out["interesting"] = _resolve_relative_to_config(config_file, v)

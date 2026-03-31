@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import shutil
@@ -21,6 +22,12 @@ def tmp_pass_path(tmp_dir: Path, step: int, slug: str) -> Path:
 def tmp_pass_path_mir(tmp_dir: Path, step: int, slug: str) -> Path:
     """Same as ``tmp_pass_path`` but ``.mir`` for ``llvm-reduce -x=mir`` output."""
     return tmp_dir / f"{step:02d}_{slug}.mir"
+
+
+def tmp_pass_path_for_input(tmp_dir: Path, step: int, slug: str, input_path: Path) -> Path:
+    """``NN_<slug>.<ext>`` where ``<ext>`` matches ``input_path`` (``".ll"`` if it has no suffix)."""
+    suf = input_path.suffix.lower() or ".ll"
+    return tmp_dir / f"{step:02d}_{slug}{suf}"
 
 
 @dataclass(frozen=True)
@@ -53,12 +60,51 @@ def _interesting_script_for_llvm_reduce_ir(ctx: ReduceContext) -> Path:
         if isinstance(v, str):
             return Path(v)
         raise SystemExit(
-            f'llvm_reduce_ir: "interesting" must be a path or string, got {type(v).__name__}.'
+            f'llvm_reduce_ir / creduce: "interesting" must be a path or string, got {type(v).__name__}.'
         )
     raise SystemExit(
-        'llvm_reduce_ir requires "interesting" in this step\'s "parameters" '
-        "(path to the interesting script for llvm-reduce --test)."
+        'llvm_reduce_ir and creduce require "interesting" in this step\'s "parameters" '
+        "(path to the interesting script for llvm-reduce --test or creduce; creduce copies "
+        'the script and replaces every literal \'"$1"\' with the shell-quoted candidate '
+        "basename only, for use when the test runs in creduce’s temp directory)."
     )
+
+
+def _creduce_n_cores(ctx: ReduceContext) -> int:
+    """C-Reduce ``--n``: explicit ``parameters.n``, else half of ``os.cpu_count()`` (at least 1)."""
+    v = ctx.pass_options.get("n")
+    if v is not None:
+        if isinstance(v, bool):
+            raise SystemExit('creduce: "n" must be a positive integer, not a boolean.')
+        if isinstance(v, int):
+            if v < 1:
+                raise SystemExit(f'creduce: "n" must be >= 1, got {v}.')
+            return v
+        raise SystemExit(
+            f'creduce: "n" must be a positive integer, got {type(v).__name__}.'
+        )
+    cpu = os.cpu_count()
+    if cpu is None or cpu < 1:
+        return 1
+    return max(1, cpu // 2)
+
+
+def _creduce_interesting_copy_with_candidate(
+    src: Path,
+    dst: Path,
+    candidate: Path,
+) -> None:
+    """Copy ``src`` to ``dst``, embedding the candidate basename by replacing each ``\"$1\"``."""
+    raw = src.read_text(encoding="utf-8", errors="replace")
+    if '"$1"' not in raw:
+        raise SystemExit(
+            "creduce: the interesting script must contain the literal token "
+            '\'"$1"\' where the candidate file name should appear (one or more times); '
+            f"none found in {src}."
+        )
+    quoted = shlex.quote(candidate.name)
+    dst.write_text(raw.replace('"$1"', quoted), encoding="utf-8")
+    shutil.copymode(src, dst)
 
 
 def _require_interesting_mir_script(ctx: ReduceContext) -> Path:
@@ -258,6 +304,45 @@ class LlvmReduceIrPass(ReducePass):
         if not out.is_file():
             raise SystemExit(f"llvm-reduce did not write expected output: {out}")
         return Test(out, interesting, test.file, test.line)
+
+
+class CreducePass(ReducePass):
+    """Run ``creduce`` with a generated copy of the interesting-ness script."""
+
+    def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
+        interesting_src = _interesting_script_for_llvm_reduce_ir(ctx)
+        exe = shutil.which("creduce")
+        if exe is None:
+            raise SystemExit("creduce not found in PATH")
+
+        out = tmp_pass_path_for_input(ctx.tmp_dir, step, "creduce", test.test_path)
+        shutil.copy2(test.test_path, out)
+
+        interesting_copy = ctx.tmp_dir / (
+            f"{step:02d}_creduce_interesting{interesting_src.suffix or '.sh'}"
+        )
+        _creduce_interesting_copy_with_candidate(interesting_src, interesting_copy, out)
+
+        n = _creduce_n_cores(ctx)
+        cmd = [
+            exe,
+            "--n",
+            str(n),
+            str(interesting_copy.resolve()),
+            str(out.resolve()),
+        ]
+        r = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=ctx.tmp_dir,
+        )
+        if r.returncode != 0:
+            msg = (r.stderr or r.stdout or "").strip() or "(no output)"
+            raise SystemExit(f"creduce failed ({r.returncode}):\n{msg}")
+        if not out.is_file():
+            raise SystemExit(f"creduce did not write expected output: {out}")
+        return Test(out, interesting_copy, test.file, test.line)
 
 
 class LlvmReduceMirPass(ReducePass):

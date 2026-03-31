@@ -13,6 +13,7 @@ def _pass_by_id() -> dict[str, type[ReducePass]]:
     return {
         "snapshot": rp.SnapshotPass,
         "llvm_reduce_ir": rp.LlvmReduceIrPass,
+        "creduce": rp.CreducePass,
         "llvm_reduce_mir": rp.LlvmReduceMirPass,
         "extract_mir_before_pass": rp.ExtractMirBeforePass,
         "extract_ir_before_pass": rp.ExtractIrBeforePass,

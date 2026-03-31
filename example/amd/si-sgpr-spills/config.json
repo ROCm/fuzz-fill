@@ -37,6 +37,12 @@
             "parameters": {
                 "interesting_mir": "interesting_mir.sh"
             }
+        },
+        {
+            "id": "creduce",
+            "parameters": {
+                "interesting": "interesting_mir.sh"
+            }
         }
     ]
 }
