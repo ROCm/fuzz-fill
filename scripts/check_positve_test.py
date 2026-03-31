@@ -4,18 +4,22 @@
 Current behavior:
 - run llc with -print-before=<pass_name> on the given test input
 - run llc again with -print-after=<pass_name>
-- write each full llc output under --output-dir as:
+- write each full llc output under --output-dir (created if needed) as:
   - before-pass-<pass>.txt
   - after-pass-<pass>.txt
-- print only concise status lines to the terminal
+- if before/after differ (after dropping the first line), write diff-before-after-<pass>.txt
+  (unified diff) and print it (truncated if very long)
 """
 
 import argparse
+import difflib
 import shlex
 import subprocess
 import sys
-from datetime import datetime
 from pathlib import Path
+
+# Max diff lines to print on the terminal (full diff is always written to a file when different).
+_MAX_DIFF_PRINT_LINES = 200
 
 _DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data" / "output" / "positive_tests"
 
@@ -35,13 +39,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--llc-args",
         default="",
-        help="Extra llc argv (shell-style, e.g. '-O1 -mtriple=spirv64-unknown-unknown'); empty is ignored",
+        help=(
+            "Extra llc argv (shell-style, e.g. '-O1 -mtriple=spirv64-unknown-unknown'); "
+            "empty is ignored. Prefer --llc-args=-mtriple=... (equals form) so values "
+            "starting with '-' are not parsed as separate flags."
+        ),
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=_DEFAULT_OUTPUT_DIR,
-        help=f"Directory for captured llc output (default: {_DEFAULT_OUTPUT_DIR})",
+        help=(
+            f"Directory for captured llc output (default: {_DEFAULT_OUTPUT_DIR}). "
+            "Files are written here directly (no extra timestamp subfolder)."
+        ),
     )
     return parser.parse_args()
 
@@ -86,13 +97,26 @@ def _drop_first_line(s: str) -> str:
     return rest
 
 
+def _unified_diff_bodies(before_body: str, after_body: str, pass_slug: str) -> str:
+    """Unified diff of the compared region (same strings as the IDENTICAL/DIFFERENT check)."""
+    a = before_body.splitlines(keepends=True)
+    b = after_body.splitlines(keepends=True)
+    return "".join(
+        difflib.unified_diff(
+            a,
+            b,
+            fromfile=f"before-pass-{pass_slug}.txt (from line 2)",
+            tofile=f"after-pass-{pass_slug}.txt (from line 2)",
+            n=3,
+        )
+    )
+
+
 def main() -> None:
     args = parse_args()
     extra = shlex.split(args.llc_args.strip()) if args.llc_args.strip() else []
     test_path = args.test.resolve()
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_dir_name = f"{_pass_file_slug(args.pass_name)}_{ts}"
-    out_dir = args.output_dir.resolve() / run_dir_name
+    out_dir = args.output_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     slug = _pass_file_slug(args.pass_name)
     before_path = out_dir / f"before-pass-{slug}.txt"
@@ -120,6 +144,20 @@ def main() -> None:
         print("[compare] before/after (ignoring first line): IDENTICAL")
     else:
         print("[compare] before/after (ignoring first line): DIFFERENT")
+        diff_text = _unified_diff_bodies(before_body, after_body, slug)
+        diff_path = out_dir / f"diff-before-after-{slug}.txt"
+        diff_path.write_text(diff_text, encoding="utf-8")
+        print(f"[diff] unified diff -> {diff_path}")
+        diff_lines = diff_text.splitlines()
+        if len(diff_lines) <= _MAX_DIFF_PRINT_LINES:
+            print(diff_text, end="" if diff_text.endswith("\n") else "\n")
+        else:
+            print("\n".join(diff_lines[:_MAX_DIFF_PRINT_LINES]))
+            print(
+                f"... ({len(diff_lines) - _MAX_DIFF_PRINT_LINES} more diff lines; "
+                f"see {diff_path})",
+                file=sys.stderr,
+            )
 
     if before_rc != 0 or after_rc != 0:
         sys.exit(before_rc or after_rc)
