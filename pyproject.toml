@@ -13,6 +13,7 @@ dependencies = []
 
 [project.scripts]
 reduce = "reduce.__main__:main"
+llvm-test-suite-coverage = "coverage.cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
