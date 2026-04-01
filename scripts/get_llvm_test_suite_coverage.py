@@ -1,13 +1,15 @@
 """
-Run LLVM tests via llvm-lit (default: ../llvm/test with --filter=CodeGen/AMDGPU) under
-SanitizerCoverage, merge all raw .sancov outputs, symbolize once, and write an amalgamated
-coverage outline. Override the run with --command (-c).
+Run LLVM tests via llvm-lit (default: ../llvm/test with a configurable --filter) under
+SanitizerCoverage, merge raw .sancov outputs per instrumented binary (default: llc and opt), symbolize each,
+and write outlines. Override the run with --command (-c).
 
 Workflow (matches scripts/check_expected_line_coverage.py for env):
   UBSAN_OPTIONS=coverage=1:coverage_dir=<dir>  (prepended before any existing UBSAN_OPTIONS)
-  sancov -union  <many llc.*.sancov>  --output merged.sancov
-  sancov -symbolize merged.sancov <llc-binary>  > merged.symcov
-  sancov -print-coverage-stats merged.sancov <llc-binary>  (human-readable stats)
+  For each --binary NAME: sancov -union … → NAME.<merge-id>.sancov, then -symbolize and
+  -print-coverage-stats with build-dir/bin/NAME.
+
+  The merged .sancov basename prefix must equal the instrumented binary name (llvm sancov
+  matches coverage files to the binary that way); do not use e.g. llcmerged.0.sancov.
 """
 from __future__ import annotations
 
@@ -23,9 +25,18 @@ import time
 from pathlib import Path
 
 # Run from LLVM build root (--cwd); paths are relative to that tree.
-DEFAULT_TEST_COMMAND = (
-    "./bin/llvm-lit ../llvm/test/ --filter=CodeGen/AMDGPU"
-)
+DEFAULT_LIT_FILTER = "CodeGen/AMDGPU"
+
+# Raw and merged files use <binary>.<digits>.sancov. Merged output uses MERGED_SANCOV_SUFFIX_ID
+# (default 0); that exact file is excluded when collecting raw inputs. Prefix must match the
+# binary basename for sancov -symbolize (see llvm/tools/sancov/sancov.cpp SancovFileRegex).
+MERGED_SANCOV_SUFFIX_ID = "0"
+
+
+def default_lit_command(lit_filter: str) -> str:
+    return shlex.join(
+        ["./bin/llvm-lit", "../llvm/test/", f"--filter={lit_filter}"]
+    )
 
 
 def get_repo_base(script_file: str) -> Path:
@@ -34,14 +45,22 @@ def get_repo_base(script_file: str) -> Path:
 
 def parse_args(base: Path) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Amalgamate SanitizerCoverage from many llc runs into one outline."
+        description="Amalgamate SanitizerCoverage from llvm-lit runs (per --binary)."
     )
     parser.add_argument(
         "--command",
         "-c",
         default=None,
         help="Command line to run tests (parsed with shlex.split). Default: llvm-lit "
-        "on ../llvm/test/ with --filter=CodeGen/AMDGPU. Not used with --skip-run.",
+        "on ../llvm/test/ with --filter from --filter. Not used with --skip-run.",
+    )
+    parser.add_argument(
+        "--filter",
+        dest="lit_filter",
+        default=DEFAULT_LIT_FILTER,
+        metavar="PATTERN",
+        help="Value for lit --filter= when using the default command (default: %(default)s). "
+        "Ignored when --command (-c) is set.",
     )
     parser.add_argument(
         "--llvm-project",
@@ -53,15 +72,15 @@ def parse_args(base: Path) -> argparse.Namespace:
         "--build-dir",
         type=Path,
         default=None,
-        help="LLVM build tree (e.g. build/ or build-amdgpu/); llc and sancov are taken "
-        "from <this>/bin/. Independent of --cwd. Default: <llvm-project>/build.",
+        help="LLVM build tree (e.g. build/ or build-amdgpu/); each --binary and sancov are "
+        "taken from <this>/bin/. Independent of --cwd. Default: <llvm-project>/build.",
     )
     parser.add_argument(
         "--coverage-dir",
         type=Path,
         default=None,
         help="Directory for raw .sancov files and merged outputs "
-        "(default: <repo>/coverage_output/test_suite_<timestamp>)",
+        "(default: <repo>/data/coverage_output/test_suite_<timestamp>)",
     )
     parser.add_argument(
         "--cwd",
@@ -70,9 +89,14 @@ def parse_args(base: Path) -> argparse.Namespace:
         help="Working directory for the test command (default: current directory).",
     )
     parser.add_argument(
-        "--binary-name",
-        default="llc",
-        help="Instrumented binary basename for .sancov glob and symbolize (default: llc).",
+        "--binary",
+        dest="binaries",
+        action="append",
+        default=None,
+        metavar="NAME",
+        help="Instrumented tool basename under build-dir/bin (repeat for multiple). "
+        f"Default when omitted: llc opt. Raw files: <name>.<digits>.sancov; merged: "
+        f"<name>.{MERGED_SANCOV_SUFFIX_ID}.sancov.",
     )
     parser.add_argument(
         "--skip-run",
@@ -93,8 +117,18 @@ def parse_args(base: Path) -> argparse.Namespace:
         help="Write machine-readable outline (stats + paths) to this JSON file.",
     )
     args = parser.parse_args()
+    if args.binaries is None:
+        args.binaries = ["llc", "opt"]
+    else:
+        seen: set[str] = set()
+        uniq: list[str] = []
+        for b in args.binaries:
+            if b not in seen:
+                seen.add(b)
+                uniq.append(b)
+        args.binaries = uniq
     if not args.skip_run and not args.command:
-        args.command = DEFAULT_TEST_COMMAND
+        args.command = default_lit_command(args.lit_filter)
     args.llvm_project = args.llvm_project or base / "llvm-project"
     if args.build_dir is None:
         args.build_dir = args.llvm_project / "build"
@@ -107,14 +141,24 @@ def parse_args(base: Path) -> argparse.Namespace:
         args.coverage_dir = Path(args.coverage_dir).resolve()
     else:
         args.coverage_dir = (
-            base / "coverage_output" / f"test_suite_{int(time.time())}"
+            base / "data" / "coverage_output" / f"test_suite_{int(time.time())}"
         ).resolve()
     return args
 
 
-def collect_sancov_files(coverage_dir: Path, binary_name: str) -> list[Path]:
-    files = sorted(coverage_dir.glob(f"{binary_name}.*.sancov"))
-    return files
+def collect_sancov_files(
+    coverage_dir: Path,
+    binary_name: str,
+    merged_suffix_id: str = MERGED_SANCOV_SUFFIX_ID,
+) -> list[Path]:
+    """Raw <binary_name>.<digits>.sancov only; skips reserved merged name."""
+    pat = re.compile(rf"^{re.escape(binary_name)}\.\d+\.sancov$")
+    merged_name = f"{binary_name}.{merged_suffix_id}.sancov"
+    return sorted(
+        p
+        for p in coverage_dir.iterdir()
+        if p.is_file() and pat.match(p.name) and p.name != merged_name
+    )
 
 
 def union_sancov_batched(
@@ -126,7 +170,7 @@ def union_sancov_batched(
     """Merge many raw .sancov files using repeated sancov -union (batched)."""
     if not files:
         raise FileNotFoundError(
-            f"No {output.name.split('.')[0]}.*.sancov files under {output.parent}"
+            f"No raw <binary>.<digits>.sancov inputs to merge under {output.parent}"
         )
     if len(files) == 1:
         shutil.copy(files[0], output)
@@ -205,7 +249,6 @@ def main() -> None:
     base = get_repo_base(__file__)
     args = parse_args(base)
 
-    llc_bin = args.build_dir / args.binary_name
     sancov_bin = args.build_dir / "sancov"
     args.coverage_dir.mkdir(parents=True, exist_ok=True)
 
@@ -228,46 +271,80 @@ def main() -> None:
     else:
         print("(--skip-run: not executing tests)")
 
-    sancov_files = collect_sancov_files(args.coverage_dir, args.binary_name)
-    print(f"Found {len(sancov_files)} raw .sancov file(s) for {args.binary_name}")
-
     if not sancov_bin.exists():
         print(f"ERROR: sancov not found at {sancov_bin}")
         raise SystemExit(1)
-    if not llc_bin.exists():
-        print(f"ERROR: binary not found at {llc_bin}")
-        raise SystemExit(1)
 
-    merged_sancov = args.coverage_dir / f"{args.binary_name}.merged.sancov"
-    union_sancov_batched(
-        sancov_bin, sancov_files, merged_sancov, args.union_batch
-    )
-    print(f"Merged raw coverage -> {merged_sancov}")
+    outline_sections: list[str] = []
+    per_binary: dict[str, dict[str, object]] = {}
+    processed = 0
 
-    symcov_path = args.coverage_dir / f"{args.binary_name}.merged.symcov"
-    run_sancov_symbolize(sancov_bin, merged_sancov, llc_bin, symcov_path)
-    print(f"Symbolized -> {symcov_path}")
+    for binary_name in args.binaries:
+        tool_bin = args.build_dir / binary_name
+        if not tool_bin.exists():
+            print(f"ERROR: binary not found at {tool_bin}")
+            raise SystemExit(1)
 
-    stats_text = run_sancov_stats(sancov_bin, merged_sancov, llc_bin)
-    outline_txt = args.coverage_dir / "coverage_outline.txt"
-    outline_txt.write_text(
-        stats_text
-        + "\n---\n"
-        + f"merged_sancov: {merged_sancov}\n"
-        + f"merged_symcov: {symcov_path}\n"
-        + f"raw_sancov_count: {len(sancov_files)}\n"
-    )
-    print(f"Outline -> {outline_txt}")
-    print()
-    print(stats_text)
+        sancov_files = collect_sancov_files(
+            args.coverage_dir, binary_name, MERGED_SANCOV_SUFFIX_ID
+        )
+        print(f"Found {len(sancov_files)} raw .sancov file(s) for {binary_name}")
+        if not sancov_files:
+            print(
+                f"WARNING: skipping {binary_name}: no raw <{binary_name}>.<digits>.sancov "
+                f"in {args.coverage_dir}"
+            )
+            continue
 
-    if args.outline_json:
-        payload = {
+        merged_sancov = (
+            args.coverage_dir
+            / f"{binary_name}.{MERGED_SANCOV_SUFFIX_ID}.sancov"
+        )
+        union_sancov_batched(
+            sancov_bin, sancov_files, merged_sancov, args.union_batch
+        )
+        print(f"Merged raw coverage -> {merged_sancov}")
+
+        symcov_path = (
+            args.coverage_dir
+            / f"{binary_name}.{MERGED_SANCOV_SUFFIX_ID}.symcov"
+        )
+        run_sancov_symbolize(sancov_bin, merged_sancov, tool_bin, symcov_path)
+        print(f"Symbolized -> {symcov_path}")
+
+        stats_text = run_sancov_stats(sancov_bin, merged_sancov, tool_bin)
+        section = (
+            f"=== {binary_name} ===\n"
+            + stats_text.rstrip()
+            + "\n---\n"
+            + f"merged_sancov: {merged_sancov}\n"
+            + f"merged_symcov: {symcov_path}\n"
+            + f"raw_sancov_count: {len(sancov_files)}\n"
+        )
+        outline_sections.append(section)
+        print()
+        print(stats_text)
+
+        per_binary[binary_name] = {
             "merged_sancov": str(merged_sancov),
             "merged_symcov": str(symcov_path),
             "raw_sancov_count": len(sancov_files),
             "stats": parse_stats_text(stats_text),
             "stats_raw": stats_text.strip(),
+        }
+        processed += 1
+
+    if processed == 0:
+        print("ERROR: no binaries produced coverage (no raw .sancov inputs).")
+        raise SystemExit(1)
+
+    outline_txt = args.coverage_dir / "coverage_outline.txt"
+    outline_txt.write_text("\n".join(outline_sections).rstrip() + "\n")
+    print(f"Outline -> {outline_txt}")
+
+    if args.outline_json:
+        payload = {
+            "binaries": per_binary,
             "run_summary": {
                 "command": args.command,
                 "returncode": run_returncode,

@@ -9,4 +9,5 @@ BUILD_DIR=$LLVM/build-amdgpu
 
 python3 scripts/get_llvm_test_suite_coverage.py \
   --cwd "$BUILD_DIR" \
-  --build-dir "$BUILD_DIR"
+  --build-dir "$BUILD_DIR" \
+  --filter "CodeGen/AMDGPU"

@@ -1,4 +1,5 @@
 scratch/*
 venv/*
 data/*
+coverage_output/*
 **/__pycache__/*
