@@ -33,6 +33,15 @@ def _sancov_meta(path: Path) -> dict[str, object]:
 
 
 def map_main(args: Namespace) -> int:
+    get_summary = getattr(args, "get_summary", False)
+    create_joint = getattr(args, "create_joint_sancov", False)
+    if not get_summary and not create_joint:
+        print(
+            "ERROR: specify at least one of --get-summary or --create-joint-sancov",
+            file=sys.stderr,
+        )
+        return 1
+
     llc_symcov = Path(args.llc_symcov).resolve()
     llc_sancov = Path(args.llc_sancov).resolve()
     opt_symcov = Path(args.opt_symcov).resolve()
@@ -48,29 +57,31 @@ def map_main(args: Namespace) -> int:
             print(f"ERROR: {label} is not a file: {p}", file=sys.stderr)
             return 1
 
-    try:
-        payload = {
-            "llc_symcov": _symcov_summary(llc_symcov),
-            "llc_sancov": _sancov_meta(llc_sancov),
-            "opt_symcov": _symcov_summary(opt_symcov),
-            "opt_sancov": _sancov_meta(opt_sancov),
-        }
-    except json.JSONDecodeError as e:
-        print(f"ERROR: invalid JSON in symcov: {e}", file=sys.stderr)
-        return 1
-    except OSError as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        return 1
-
-    if getattr(args, "create_joint_sancov", False):
+    if create_joint:
         # TODO: merge opt coverage into a single llc-encoded .sancov using symcov inputs.
         pass
 
-    text = json.dumps(payload, indent=2)
-    if getattr(args, "output", None):
-        out_path = Path(args.output).resolve()
-        out_path.write_text(text, encoding="utf-8")
-        print(f"Wrote {out_path}")
-    else:
-        print(text)
+    if get_summary:
+        try:
+            payload = {
+                "llc_symcov": _symcov_summary(llc_symcov),
+                "llc_sancov": _sancov_meta(llc_sancov),
+                "opt_symcov": _symcov_summary(opt_symcov),
+                "opt_sancov": _sancov_meta(opt_sancov),
+            }
+        except json.JSONDecodeError as e:
+            print(f"ERROR: invalid JSON in symcov: {e}", file=sys.stderr)
+            return 1
+        except OSError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
+
+        text = json.dumps(payload, indent=2)
+        if getattr(args, "output", None):
+            out_path = Path(args.output).resolve()
+            out_path.write_text(text, encoding="utf-8")
+            print(f"Wrote {out_path}")
+        else:
+            print(text)
+
     return 0

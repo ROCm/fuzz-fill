@@ -126,7 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     map_p = sub.add_parser(
         "map",
-        help="Summarize four llc/opt symcov and sancov paths as JSON (loads full symcov files).",
+        help="Map llc/opt symcov+sancov: optional JSON summary and/or joint .sancov.",
     )
     map_p.add_argument(
         "llc_symcov",
@@ -153,16 +153,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to merged opt .sancov",
     )
     map_p.add_argument(
+        "--get-summary",
+        action="store_true",
+        help="Load symcov files and write JSON summary (stdout or --output).",
+    )
+    map_p.add_argument(
         "--output",
         "-o",
         type=Path,
         default=None,
-        help="Write JSON summary to this file (default: stdout).",
+        help="With --get-summary: write JSON to this file (default: stdout).",
     )
     map_p.add_argument(
         "--create-joint-sancov",
         action="store_true",
-        help="Also emit a joint llc-oriented .sancov (not implemented yet).",
+        help="Emit a joint llc-oriented .sancov (not implemented yet).",
     )
     return parser
 

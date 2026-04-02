@@ -52,7 +52,7 @@ Use an LLVM **build** that matches the tests (same `llc`, `opt`, etc., built wit
 The CLI uses **subcommands**:
 
 - **`run`** — llvm-lit (or `-c`) plus merge/symbolize (this is the default if you start with a flag, e.g. `python -m coverage --cwd …` is treated as `run`).
-- **`map`** — four paths (llc/opt symcov and sancov); writes a small JSON summary to stdout or `-o` (loads whole `.symcov` files; can be large).
+- **`map`** — four paths (llc/opt symcov and sancov). Use **`--get-summary`** for the JSON summary (loads whole `.symcov` files; can be large), and/or **`--create-joint-sancov`** for a joint llc-oriented `.sancov` (when implemented). At least one of those flags is required.
 
 Examples:
 
@@ -77,13 +77,16 @@ Use `llvm-test-suite-coverage run --help` for the full list.
 
 ### `map`
 
-Summarize merged llc/opt artifacts (paths are positional, order fixed):
+Four positional paths (order fixed). Then choose at least one action:
+
+- **`--get-summary`** — write JSON (stdout, or **`--output` / `-o`** for a file): per-symcov top-level keys, optional `BinaryHash` / list lengths when present, byte size for each `.sancov`.
+- **`--create-joint-sancov`** — build a joint llc-oriented `.sancov` (not implemented yet). Does not run the summary unless **`--get-summary`** is also set.
 
 ```text
-coverage map llc-symcov llc-sancov opt-symcov opt-sancov [-o OUT.json]
+coverage map llc-symcov llc-sancov opt-symcov opt-sancov --get-summary [-o OUT.json]
+coverage map … --create-joint-sancov
+coverage map … --get-summary --create-joint-sancov
 ```
-
-JSON includes per-symcov top-level keys, optional `BinaryHash` / list lengths when present, and byte size for each `.sancov`.
 
 ### Example
 
@@ -113,7 +116,7 @@ Summarize four merged files:
 ```bash
 PYTHONPATH=src python -m coverage map \
   llc.0.symcov llc.0.sancov opt.0.symcov opt.0.sancov \
-  -o coverage_map_summary.json
+  --get-summary -o coverage_map_summary.json
 ```
 
 ## Reduce module
