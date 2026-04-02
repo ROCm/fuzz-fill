@@ -9,7 +9,9 @@ description = "Fuzzing to fill test suite gaps"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENCE.txt" }
-dependencies = []
+dependencies = [
+    "pandas>=2.0",
+]
 
 [project.scripts]
 reduce = "reduce.__main__:main"

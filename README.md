@@ -4,7 +4,7 @@ Fuzzing to fill test suite gaps.
 
 ## Python environment
 
-Create a virtual environment, **activate it**, then install the project (so `pip` does not install into your system Python):
+Create a virtual environment, **activate it**, then install the project. With the venv active, `pip` installs into that environment only (not your system Python), including dependencies such as **pandas**:
 
 ```bash
 python3 -m venv venv
@@ -12,7 +12,7 @@ source venv/bin/activate
 pip install -e .
 ```
 
-This installs editable packages and console scripts such as `reduce` and `llvm-test-suite-coverage`.
+This installs editable packages, console scripts (`reduce`, `llvm-test-suite-coverage`), and **`pandas`** (used by **`coverage map`**). **`coverage run`** does not import **`map_cmd`**, but pandas is still a declared dependency of the package.
 
 ## Coverage module
 

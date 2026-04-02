@@ -13,7 +13,6 @@ from coverage.constants import (
     MERGED_SANCOV_SUFFIX_ID,
     default_lit_command,
 )
-from coverage.map_cmd import map_main
 from coverage.session import CoverageSession
 
 
@@ -230,6 +229,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.subcmd == "map":
+        from coverage.map_cmd import map_main
+
         return map_main(args)
 
     if args.subcmd == "run":

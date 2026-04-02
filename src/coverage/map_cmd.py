@@ -7,30 +7,12 @@ import sys
 from argparse import Namespace
 from pathlib import Path
 
-
-def _parse_line_from_loc(loc_str: object) -> int | None:
-    if not isinstance(loc_str, str) or not loc_str.strip():
-        return None
-    part = loc_str.split(":", 1)[0].strip()
-    try:
-        return int(part)
-    except ValueError:
-        return None
+import pandas as pd
 
 
-def _point_id_to_location(symcov: dict[str, object]) -> dict[str, tuple[str, str, int]]:
-    """
-    Invert ``point-symbol-info``: point id -> (file_path, function_name, line).
-
-    Values in the leaf map are strings like ``5:0`` (line:column); line is the first integer.
-    """
-    out: dict[str, tuple[str, str, int]] = {}
-    psi = symcov.get("point-symbol-info")
-    if psi is None:
-        psi = symcov.get("point_symbol_info")
-    if not isinstance(psi, dict):
-        return out
-
+def _point_symbol_info_records(psi: dict[str, object]) -> list[dict[str, object]]:
+    """Flatten ``point-symbol-info`` to rows before building a DataFrame."""
+    records: list[dict[str, object]] = []
     for file_path, by_func in psi.items():
         if not isinstance(file_path, str) or not isinstance(by_func, dict):
             continue
@@ -40,53 +22,99 @@ def _point_id_to_location(symcov: dict[str, object]) -> dict[str, tuple[str, str
             for point_id, loc_str in by_point.items():
                 if not isinstance(point_id, str):
                     continue
-                line = _parse_line_from_loc(loc_str)
-                if line is None:
-                    continue
-                out[point_id] = (file_path, func_name, line)
-    return out
+                records.append(
+                    {
+                        "point_id": point_id,
+                        "file": file_path,
+                        "function": func_name,
+                        "loc_str": loc_str,
+                    }
+                )
+    return records
+
+
+def _point_table_from_symcov(symcov: dict[str, object]) -> pd.DataFrame:
+    """
+    DataFrame keyed by ``point_id`` with columns ``file``, ``function``, ``line``.
+
+    Line is parsed vectorized from ``loc_str`` (``line:col``). Duplicate ``point_id`` rows keep
+    the last occurrence (same as dict overwrite semantics).
+    """
+    psi = symcov.get("point-symbol-info")
+    if psi is None:
+        psi = symcov.get("point_symbol_info")
+    if not isinstance(psi, dict):
+        return pd.DataFrame(columns=["point_id", "file", "function", "line"])
+
+    records = _point_symbol_info_records(psi)
+    if not records:
+        return pd.DataFrame(columns=["point_id", "file", "function", "line"])
+
+    df = pd.DataFrame(records)
+    loc = df["loc_str"].astype(str)
+    first_col = loc.str.split(":", n=1, expand=True)[0].str.strip()
+    df["line"] = pd.to_numeric(first_col, errors="coerce")
+    df = df.drop(columns=["loc_str"])
+    df = df.dropna(subset=["line"])
+    df["line"] = df["line"].astype("int64")
+    df = df.drop_duplicates(subset=["point_id"], keep="last")
+    return df
 
 
 def _covered_locations_from_symcov(symcov: dict[str, object]) -> list[dict[str, object]]:
-    """Map ``covered-points`` ids through ``point-symbol-info`` to unique ``file`` / ``function`` / ``line`` rows.
+    """Map ``covered-points`` through ``point-symbol-info`` to unique location rows.
 
-    Raises ``ValueError`` if any covered point id is missing from ``point-symbol-info`` (or has a
-    value that does not yield a parseable line), or if a ``covered-points`` entry is not a string.
+    Raises ``ValueError`` if any covered id is missing or not a string.
     """
     raw = symcov.get("covered-points")
     if raw is None:
         raw = symcov.get("covered_points")
     if not isinstance(raw, list):
         return []
+    if not raw:
+        return []
 
-    table = _point_id_to_location(symcov)
-    missing: list[str] = []
-    for pid in raw:
-        if not isinstance(pid, str):
+    for x in raw:
+        if not isinstance(x, str):
             raise ValueError(
-                f"covered-points entries must be strings, got {type(pid).__name__}: {pid!r}"
+                f"covered-points entries must be strings, got {type(x).__name__}: {x!r}"
             )
-        if pid not in table:
-            missing.append(pid)
-    if missing:
+
+    table = _point_table_from_symcov(symcov)
+    covered = pd.DataFrame({"point_id": raw})
+    merged = covered.merge(table, on="point_id", how="left", validate="many_to_one")
+
+    miss = merged.loc[merged["line"].isna(), "point_id"].tolist()
+    if miss:
         raise ValueError(
             "covered-points not found under point-symbol-info (or unparseable line:col): "
-            + ", ".join(missing)
+            + ", ".join(miss)
         )
 
-    seen: set[tuple[str, str, int]] = set()
-    rows: list[dict[str, object]] = []
-    for pid in raw:
-        loc = table[pid]
-        file_path, func_name, line = loc
-        key = (file_path, func_name, line)
-        if key in seen:
-            continue
-        seen.add(key)
-        rows.append({"file": file_path, "function": func_name, "line": line})
+    out = merged.drop_duplicates(subset=["file", "function", "line"])[
+        ["file", "function", "line"]
+    ]
+    out = out.sort_values(by=["file", "line", "function"], kind="mergesort")
+    return _location_df_to_records(out)
 
-    rows.sort(key=lambda r: (str(r["file"]), int(r["line"]), str(r["function"])))
-    return rows
+
+def _location_rows_to_df(rows: list[dict[str, object]]) -> pd.DataFrame:
+    cols = ["file", "function", "line"]
+    if not rows:
+        return pd.DataFrame(columns=cols)
+    return pd.DataFrame(rows, columns=cols)
+
+
+def _location_df_to_records(df: pd.DataFrame) -> list[dict[str, object]]:
+    """JSON-friendly records (plain ``int`` / ``str``, no numpy scalars)."""
+    return [
+        {
+            "file": str(r.file),
+            "function": str(r.function),
+            "line": int(r.line),
+        }
+        for r in df.itertuples(index=False)
+    ]
 
 
 def _create_joint_sancov(
@@ -112,22 +140,15 @@ def _create_joint_sancov(
     if not isinstance(llc_data, dict) or not isinstance(opt_data, dict):
         raise TypeError("llc and opt symcov must be JSON objects")
 
-    llc_rows = _covered_locations_from_symcov(llc_data)
-    opt_rows = _covered_locations_from_symcov(opt_data)
+    llc_df = _location_rows_to_df(_covered_locations_from_symcov(llc_data))
+    opt_df = _location_rows_to_df(_covered_locations_from_symcov(opt_data))
+    if llc_df.empty and opt_df.empty:
+        return []
 
-    seen: set[tuple[str, str, int]] = set()
-    union: list[dict[str, object]] = []
-    for r in llc_rows + opt_rows:
-        key = (str(r["file"]), str(r["function"]), int(r["line"]))
-        if key in seen:
-            continue
-        seen.add(key)
-        union.append(
-            {"file": r["file"], "function": r["function"], "line": r["line"]}
-        )
-
-    union.sort(key=lambda r: (str(r["file"]), int(r["line"]), str(r["function"])))
-    return union
+    union = pd.concat([llc_df, opt_df], axis=0, ignore_index=True)
+    union = union.drop_duplicates(subset=["file", "function", "line"])
+    union = union.sort_values(by=["file", "line", "function"], kind="mergesort")
+    return _location_df_to_records(union)
 
 
 def _symcov_summary(path: Path) -> dict[str, object]:
