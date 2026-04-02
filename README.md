@@ -49,13 +49,21 @@ Use an LLVM **build** that matches the tests (same `llc`, `opt`, etc., built wit
 
 ### How to run
 
-- **Console script** (after `pip install -e .`): `llvm-test-suite-coverage …`
-- **Module**: `python -m coverage …` from the repo with this package importable (e.g. after install, or `PYTHONPATH=src python -m coverage …` from the repo root).
-- **Shim**: `scripts/get_llvm_test_suite_coverage.py` prepends `src` to `sys.path` so you can run it without installing.
+The CLI uses **subcommands**:
+
+- **`run`** — llvm-lit (or `-c`) plus merge/symbolize (this is the default if you start with a flag, e.g. `python -m coverage --cwd …` is treated as `run`).
+- **`map`** — four paths (llc/opt symcov and sancov); writes a small JSON summary to stdout or `-o` (loads whole `.symcov` files; can be large).
+
+Examples:
+
+- **Console script** (after `pip install -e .`): `llvm-test-suite-coverage run …`, `llvm-test-suite-coverage map …`
+- **Module**: `PYTHONPATH=src python -m coverage run …` or `… map …` from the repo root (or after install).
+
+Top-level help: `python -m coverage --help` lists `{run,map}`. Per-command: `python -m coverage run --help`, `python -m coverage map --help`.
 
 If the PyPI **`coverage`** package is installed in the same environment, ensure this project’s `coverage` is found first (e.g. `PYTHONPATH=src` when working from a clone) so `python -m coverage` hits `src/coverage`, not the third-party tool.
 
-### Common flags
+### `run` flags
 
 - **`--cwd`** — LLVM **build directory** (e.g. `build-amdgpu/`); default test command runs `./bin/llvm-lit` relative to it.
 - **`--build-dir`** — Same tree (or its `bin`); used to locate `sancov`, `llc`, `opt`, etc. Defaults to `<llvm-project>/build` when `--llvm-project` is unset.
@@ -65,15 +73,25 @@ If the PyPI **`coverage`** package is installed in the same environment, ensure 
 - **`--skip-run`** — Only merge/symbolize; use with **`--coverage-dir`** pointing at a previous run’s directory.
 - **`--outline-json`** — Extra machine-readable summary (`binaries` + `run_summary`).
 
-Use `llvm-test-suite-coverage --help` for the full list.
+Use `llvm-test-suite-coverage run --help` for the full list.
+
+### `map`
+
+Summarize merged llc/opt artifacts (paths are positional, order fixed):
+
+```text
+coverage map llc-symcov llc-sancov opt-symcov opt-sancov [-o OUT.json]
+```
+
+JSON includes per-symcov top-level keys, optional `BinaryHash` / list lengths when present, and byte size for each `.sancov`.
 
 ### Example
 
-Full run (adjust paths):
+Full run (adjust paths). You can use **`run` explicitly** or omit it when the first argument is an option:
 
 ```bash
 source venv/bin/activate   # optional
-PYTHONPATH=src python -m coverage \
+PYTHONPATH=src python -m coverage run \
   --cwd "$LLVM_BUILD" \
   --build-dir "$LLVM_BUILD" \
   --filter "CodeGen/AMDGPU"
@@ -82,12 +100,20 @@ PYTHONPATH=src python -m coverage \
 Re-process **opt** only from an existing output dir:
 
 ```bash
-PYTHONPATH=src python -m coverage \
+PYTHONPATH=src python -m coverage run \
   --skip-run \
   --binary opt \
   --coverage-dir /path/to/data/coverage_output/test_suite_XXXXX \
   --build-dir "$LLVM_BUILD" \
   --cwd "$LLVM_BUILD"
+```
+
+Summarize four merged files:
+
+```bash
+PYTHONPATH=src python -m coverage map \
+  llc.0.symcov llc.0.sancov opt.0.symcov opt.0.sancov \
+  -o coverage_map_summary.json
 ```
 
 ## Reduce module

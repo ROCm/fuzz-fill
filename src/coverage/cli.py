@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import time
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from coverage.constants import (
     MERGED_SANCOV_SUFFIX_ID,
     default_lit_command,
 )
+from coverage.map_cmd import map_main
 from coverage.session import CoverageSession
 
 
@@ -20,18 +22,33 @@ def repo_base_from_here() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Amalgamate SanitizerCoverage from llvm-lit runs (per --binary)."
-    )
-    parser.add_argument(
+def _normalize_argv(argv: list[str]) -> list[str]:
+    """
+    Prepend ``run`` when the first token is a flag so legacy invocations keep working:
+    ``python -m coverage --cwd …`` → ``run --cwd …``.
+
+    A lone ``-h`` / ``--help`` is left unchanged so the top-level parser lists ``run`` and ``map``.
+    """
+    if not argv:
+        return ["run"]
+    if argv[0] in ("run", "map"):
+        return argv
+    if len(argv) == 1 and argv[0] in ("-h", "--help"):
+        return argv
+    if argv[0].startswith("-"):
+        return ["run", *argv]
+    return argv
+
+
+def _add_run_arguments(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
         "--command",
         "-c",
         default=None,
         help="Command line to run tests (parsed with shlex.split). Default: llvm-lit "
         "on ../llvm/test/ with --filter from --filter. Not used with --skip-run.",
     )
-    parser.add_argument(
+    p.add_argument(
         "--filter",
         dest="lit_filter",
         default=DEFAULT_LIT_FILTER,
@@ -39,33 +56,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Value for lit --filter= when using the default command (default: %(default)s). "
         "Ignored when --command (-c) is set.",
     )
-    parser.add_argument(
+    p.add_argument(
         "--llvm-project",
         type=Path,
         default=None,
         help="Path to llvm-project root (default: <repo>/llvm-project)",
     )
-    parser.add_argument(
+    p.add_argument(
         "--build-dir",
         type=Path,
         default=None,
         help="LLVM build tree (e.g. build/ or build-amdgpu/); each --binary and sancov are "
         "taken from <this>/bin/. Independent of --cwd. Default: <llvm-project>/build.",
     )
-    parser.add_argument(
+    p.add_argument(
         "--coverage-dir",
         type=Path,
         default=None,
         help="Directory for raw .sancov files and merged outputs "
         "(default: <repo>/data/coverage_output/test_suite_<timestamp>)",
     )
-    parser.add_argument(
+    p.add_argument(
         "--cwd",
         type=Path,
         default=None,
         help="Working directory for the test command (default: current directory).",
     )
-    parser.add_argument(
+    p.add_argument(
         "--binary",
         dest="binaries",
         action="append",
@@ -75,28 +92,77 @@ def build_parser() -> argparse.ArgumentParser:
         "Default when omitted: llc opt. Raw files: <name>.<digits>.sancov; merged: "
         f"<name>.{MERGED_SANCOV_SUFFIX_ID}.sancov.",
     )
-    parser.add_argument(
+    p.add_argument(
         "--skip-run",
         action="store_true",
         help="Only merge/symbolize existing .sancov files in --coverage-dir (no new runs).",
     )
-    parser.add_argument(
+    p.add_argument(
         "--union-batch",
         type=int,
         default=200,
         metavar="N",
         help="Max .sancov files per sancov -union invocation (avoid ARG_MAX).",
     )
-    parser.add_argument(
+    p.add_argument(
         "--outline-json",
         type=Path,
         default=None,
         help="Write machine-readable outline (stats + paths) to this JSON file.",
     )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="coverage",
+        description="LLVM SanitizerCoverage tools (llvm-lit run + merge/symbolize, or map).",
+    )
+    sub = parser.add_subparsers(dest="subcmd", metavar="{run,map}", required=True)
+    run_p = sub.add_parser(
+        "run",
+        help="Run tests with UBSAN coverage and merge/symbolize per --binary (default).",
+    )
+    _add_run_arguments(run_p)
+
+    map_p = sub.add_parser(
+        "map",
+        help="Summarize four llc/opt symcov and sancov paths as JSON (loads full symcov files).",
+    )
+    map_p.add_argument(
+        "llc_symcov",
+        type=Path,
+        metavar="llc-symcov",
+        help="Path to merged llc .symcov",
+    )
+    map_p.add_argument(
+        "llc_sancov",
+        type=Path,
+        metavar="llc-sancov",
+        help="Path to merged llc .sancov",
+    )
+    map_p.add_argument(
+        "opt_symcov",
+        type=Path,
+        metavar="opt-symcov",
+        help="Path to merged opt .symcov",
+    )
+    map_p.add_argument(
+        "opt_sancov",
+        type=Path,
+        metavar="opt-sancov",
+        help="Path to merged opt .sancov",
+    )
+    map_p.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        default=None,
+        help="Write JSON summary to this file (default: stdout).",
+    )
     return parser
 
 
-def config_from_args(args: argparse.Namespace, base: Path) -> CoverageConfig:
+def config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfig:
     if args.binaries is None:
         binaries = ("llc", "opt")
     else:
@@ -149,16 +215,24 @@ def config_from_args(args: argparse.Namespace, base: Path) -> CoverageConfig:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = _normalize_argv(list(sys.argv[1:] if argv is None else argv))
     parser = build_parser()
     args = parser.parse_args(argv)
-    base = repo_base_from_here()
-    config = config_from_args(args, base)
-    try:
-        CoverageSession(config).run()
-    except (FileNotFoundError, RuntimeError) as e:
-        print(f"ERROR: {e}")
-        return 1
-    return 0
+
+    if args.subcmd == "map":
+        return map_main(args)
+
+    if args.subcmd == "run":
+        base = repo_base_from_here()
+        config = config_from_run_args(args, base)
+        try:
+            CoverageSession(config).run()
+        except (FileNotFoundError, RuntimeError) as e:
+            print(f"ERROR: {e}")
+            return 1
+        return 0
+
+    raise AssertionError(f"unknown subcommand: {args.subcmd}")
 
 
 if __name__ == "__main__":
