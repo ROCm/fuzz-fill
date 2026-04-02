@@ -166,7 +166,30 @@ def build_parser() -> argparse.ArgumentParser:
     map_p.add_argument(
         "--create-joint-sancov",
         action="store_true",
-        help="Emit a joint llc-oriented .sancov (not implemented yet).",
+        help="Merge llc/opt symcov locations (union to stdout/JSON; use --joint-csv for CSV).",
+    )
+    map_p.add_argument(
+        "--joint-csv",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="With --create-joint-sancov: write source locations covered by *either* llc or opt "
+        "(deduped union; columns: file, function, line).",
+    )
+    jf = map_p.add_mutually_exclusive_group()
+    jf.add_argument(
+        "--joint-file-prefix",
+        type=str,
+        default=None,
+        metavar="PREFIX",
+        help="With --create-joint-sancov: only include source paths under this prefix (POSIX path "
+        "prefix after expanduser). Cannot be used with --no-joint-file-filter.",
+    )
+    jf.add_argument(
+        "--no-joint-file-filter",
+        action="store_true",
+        help="With --create-joint-sancov: include every source path from symcov (no path filter). "
+        "Cannot be used with --joint-file-prefix.",
     )
     return parser
 
