@@ -159,6 +159,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Write JSON summary to this file (default: stdout).",
     )
+    map_p.add_argument(
+        "--create-joint-sancov",
+        action="store_true",
+        help="Also emit a joint llc-oriented .sancov (not implemented yet).",
+    )
     return parser
 
 

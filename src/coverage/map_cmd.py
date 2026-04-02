@@ -62,6 +62,10 @@ def map_main(args: Namespace) -> int:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
+    if getattr(args, "create_joint_sancov", False):
+        # TODO: merge opt coverage into a single llc-encoded .sancov using symcov inputs.
+        pass
+
     text = json.dumps(payload, indent=2)
     if getattr(args, "output", None):
         out_path = Path(args.output).resolve()
