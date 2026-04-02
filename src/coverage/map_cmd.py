@@ -73,6 +73,54 @@ def _symcov_point_table_stats(
     return c, n_all, len(filtered)
 
 
+def _line_from_loc_str(loc_str: object) -> int | None:
+    """Source line from ``point-symbol-info`` location string (``line:col``)."""
+    if not isinstance(loc_str, str):
+        return None
+    part = loc_str.split(":", 1)[0].strip()
+    try:
+        return int(part)
+    except ValueError:
+        return None
+
+
+def _build_llc_line_address_index(
+    llc_data: dict[str, object],
+) -> dict[tuple[str, str, int], list[str]]:
+    """
+    Map ``(file, function, line)`` → sorted unique hex point ids from llc ``point-symbol-info``.
+
+    Includes every instrumented point in that section (not only ``covered-points``), so a line can
+    list multiple addresses (e.g. distinct ``line:col`` slots).
+    """
+    psi = llc_data.get("point-symbol-info")
+    if psi is None:
+        psi = llc_data.get("point_symbol_info")
+    if not isinstance(psi, dict):
+        return {}
+
+    buckets: dict[tuple[str, str, int], list[str]] = {}
+    for file_path, by_func in psi.items():
+        if not isinstance(file_path, str) or not isinstance(by_func, dict):
+            continue
+        for func_name, by_point in by_func.items():
+            if not isinstance(func_name, str) or not isinstance(by_point, dict):
+                continue
+            for point_id, loc_str in by_point.items():
+                if not isinstance(point_id, str):
+                    continue
+                line = _line_from_loc_str(loc_str)
+                if line is None:
+                    continue
+                key = (file_path, func_name, line)
+                buckets.setdefault(key, []).append(point_id)
+
+    out: dict[tuple[str, str, int], list[str]] = {}
+    for key, ids in buckets.items():
+        out[key] = sorted(set(ids))
+    return out
+
+
 def _point_symbol_info_records(psi: dict[str, object]) -> list[dict[str, object]]:
     """Flatten ``point-symbol-info`` to rows before building a DataFrame."""
     records: list[dict[str, object]] = []
@@ -221,6 +269,55 @@ def _union_covered_locations(
     )
 
 
+def _union_covered_df_with_llc_addresses(
+    llc_data: dict[str, object],
+    opt_data: dict[str, object],
+    *,
+    path_filter: Callable[[str], bool] | None = None,
+) -> tuple[pd.DataFrame, int]:
+    """
+    Joint covered lines plus ``llc_addresses`` (JSON-serializable list of hex ids per row).
+
+    Returns ``(dataframe, n_rows_with_nonempty_llc_addresses)``.
+    """
+    union = _union_covered_df(llc_data, opt_data, path_filter=path_filter)
+    if union.empty:
+        empty = pd.DataFrame(columns=["file", "function", "line", "llc_addresses"])
+        return empty, 0
+
+    idx = _build_llc_line_address_index(llc_data)
+    lists: list[list[str]] = []
+    nonempty = 0
+    for r in union.itertuples(index=False):
+        key = (str(r.file), str(r.function), int(r.line))
+        lst = idx.get(key, [])
+        if lst:
+            nonempty += 1
+        lists.append(lst)
+
+    out = union.copy()
+    out["llc_addresses"] = lists
+    return out, nonempty
+
+
+def _joint_records_from_union_df(df: pd.DataFrame) -> list[dict[str, object]]:
+    """Records for ``--get-summary`` / ``-o`` JSON (includes ``llc_addresses`` lists)."""
+    recs: list[dict[str, object]] = []
+    for r in df.itertuples(index=False):
+        addrs = getattr(r, "llc_addresses", [])
+        if not isinstance(addrs, list):
+            addrs = []
+        recs.append(
+            {
+                "file": str(r.file),
+                "function": str(r.function),
+                "line": int(r.line),
+                "llc_addresses": list(addrs),
+            }
+        )
+    return recs
+
+
 def _location_df_to_records(df: pd.DataFrame) -> list[dict[str, object]]:
     """JSON-friendly records (plain ``int`` / ``str``, no numpy scalars)."""
     return [
@@ -240,13 +337,19 @@ def _create_joint_sancov(
     _llc_sancov: Path,
     _opt_sancov: Path,
     path_filter: Callable[[str], bool] | None = None,
-) -> list[dict[str, object]]:
+) -> tuple[list[dict[str, object]], int, pd.DataFrame]:
     """
-    Union of covered (file, function, line) from llc and opt symcov payloads.
+    Union of covered (file, function, line) from llc and opt symcov, with llc ``point-symbol-info``
+    hex ids per line in ``llc_addresses``.
+
+    Returns ``(records, n_rows_with_nonempty_llc_addresses, dataframe)``.
 
     ``_llc_sancov`` / ``_opt_sancov`` are reserved for future joint ``.sancov`` output.
     """
-    return _union_covered_locations(llc_data, opt_data, path_filter=path_filter)
+    df, nonempty = _union_covered_df_with_llc_addresses(
+        llc_data, opt_data, path_filter=path_filter
+    )
+    return _joint_records_from_union_df(df), nonempty, df
 
 
 def _symcov_summary(path: Path) -> dict[str, object]:
@@ -365,7 +468,11 @@ def map_main(args: Namespace) -> int:
                     )
 
             _map_log("[map] Resolving covered locations and merging llc ∪ opt …")
-            joint_locations = _create_joint_sancov(
+            _map_log(
+                "[map] Mapping joint lines → llc symcov point-symbol-info hex ids "
+                "(per file/function/line) …"
+            )
+            joint_locations, joint_llc_addr_nonempty, union_df = _create_joint_sancov(
                 llc_data,
                 opt_data,
                 _llc_sancov=llc_sancov,
@@ -380,17 +487,23 @@ def map_main(args: Namespace) -> int:
                 f"[map] Unique covered source lines (after filter): llc={llc_n:,}, "
                 f"opt={opt_n:,}, either deduped={either_n:,}"
             )
+            _map_log(
+                f"[map] Attached llc point-symbol-info addresses: "
+                f"{joint_llc_addr_nonempty:,} / {either_n:,} joint rows have ≥1 hex id "
+                f"(exact file/function/line match on llc symcov)"
+            )
             if joint_csv is not None:
-                union_df = _union_covered_df(
-                    llc_data, opt_data, path_filter=joint_path_filter
-                )
                 out_csv = Path(joint_csv).resolve()
                 out_csv.parent.mkdir(parents=True, exist_ok=True)
                 n_csv = len(union_df)
-                _map_log(
-                    f"[map] Writing --joint-csv: {n_csv:,} data rows (+ header) → {out_csv}"
+                csv_df = union_df.assign(
+                    llc_addresses=union_df["llc_addresses"].map(json.dumps)
                 )
-                union_df.to_csv(out_csv, index=False)
+                _map_log(
+                    f"[map] Writing --joint-csv: {n_csv:,} data rows (+ header) → {out_csv} "
+                    f"(column llc_addresses = JSON array of hex ids)"
+                )
+                csv_df.to_csv(out_csv, index=False)
                 _map_log("[map] Joint CSV write complete.")
         except (json.JSONDecodeError, OSError, TypeError, ValueError) as e:
             print(f"ERROR: {e}", file=sys.stderr)
