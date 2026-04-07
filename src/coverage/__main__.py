@@ -92,8 +92,9 @@ def _add_run_arguments(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="DIR",
         help="Run llc -o /dev/null on each *.ll and *.bc under DIR (recursive), with the same UBSAN coverage "
-        "as lit runs. Leaves raw llc.<pid>.sancov files in --coverage-dir only (no merge/symbolize "
-        "or outline). Default --coverage-dir: <repo>/data/coverage_output/new_tests_<timestamp>. "
+        "as lit runs. Symbolizes each run's raw llc.*.sancov and writes "
+        "<stem>.line_address_map.csv (file,function,line,llc_addresses) next to the .symcov. "
+        "Default --coverage-dir: <repo>/data/coverage_output/new_tests_<timestamp>. "
         "Not compatible with -c or --skip-run.",
     )
     p.add_argument(
@@ -111,6 +112,23 @@ def _add_run_arguments(p: argparse.ArgumentParser) -> None:
         help="With --llc-tests-dir: CSV with columns file,function,line,llc_addresses (JSON array of "
         "hex ids per row). Loaded once; llc_test_report.csv gains baseline vs test address counts "
         "(unique normalized ids) and novel_vs_baseline_addresses (JSON array; [] without this flag).",
+    )
+
+
+def _add_symcov_line_map_arguments(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "symcov",
+        type=Path,
+        metavar="SYMCOV",
+        help="Path to a .symcov JSON file (sancov -symbolize output).",
+    )
+    p.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        default=None,
+        metavar="CSV",
+        help="Output CSV path (default: <symcov-dir>/<symcov-stem>.line_address_map.csv).",
     )
 
 
@@ -274,9 +292,11 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="coverage",
-        description="LLVM SanitizerCoverage tools (llvm-lit run + merge/symbolize, or map).",
+        description="LLVM SanitizerCoverage tools (run, map, symcov-line-map).",
     )
-    sub = parser.add_subparsers(dest="subcmd", metavar="{run,map}", required=True)
+    sub = parser.add_subparsers(
+        dest="subcmd", metavar="{run,map,symcov-line-map}", required=True
+    )
     run_p = sub.add_parser(
         "run",
         help="Run tests with UBSAN coverage and merge/symbolize per --binary (default).",
@@ -289,12 +309,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_map_arguments(map_p)
 
+    slm_p = sub.add_parser(
+        "symcov-line-map",
+        help="Extract file/function/line → llc address ids from one .symcov JSON; write CSV beside it.",
+    )
+    _add_symcov_line_map_arguments(slm_p)
+
     args = parser.parse_args(argv)
 
     if args.subcmd == "map":
         from coverage.map_cmd import map_main
 
         return map_main(args)
+
+    if args.subcmd == "symcov-line-map":
+        from coverage.map_cmd import symcov_line_map_main
+
+        return symcov_line_map_main(args)
 
     if args.subcmd == "run":
         base = Path(__file__).resolve().parent.parent.parent

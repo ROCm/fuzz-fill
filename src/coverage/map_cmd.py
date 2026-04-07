@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import sys
 from argparse import Namespace
@@ -119,6 +120,83 @@ def _build_llc_line_address_index(
     for key, ids in buckets.items():
         out[key] = sorted(set(ids))
     return out
+
+
+def line_address_map_rows_from_symcov(symcov: dict[str, object]) -> list[dict[str, object]]:
+    """
+    One row per distinct ``(file, function, line)`` from ``point-symbol-info``, with all hex point
+    ids for that line (same indexing logic as joint CSV ``llc_addresses``).
+    """
+    idx = _build_llc_line_address_index(symcov)
+    return [
+        {
+            "file": k[0],
+            "function": k[1],
+            "line": k[2],
+            "llc_addresses": ids,
+        }
+        for k, ids in sorted(idx.items(), key=lambda kv: (kv[0][0], kv[0][2], kv[0][1]))
+    ]
+
+
+def write_line_address_map_csv_for_symcov_data(
+    symcov: dict[str, object],
+    output_csv: Path,
+) -> None:
+    """Write ``file,function,line,llc_addresses`` CSV (``llc_addresses`` = JSON array per row)."""
+    output_csv = Path(output_csv)
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    rows = line_address_map_rows_from_symcov(symcov)
+    fieldnames = ["file", "function", "line", "llc_addresses"]
+    with output_csv.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        for r in rows:
+            w.writerow(
+                {
+                    "file": r["file"],
+                    "function": r["function"],
+                    "line": r["line"],
+                    "llc_addresses": json.dumps(r["llc_addresses"]),
+                }
+            )
+
+
+def write_symcov_line_address_map_csv(
+    symcov_json_path: Path,
+    output_csv: Path | None = None,
+) -> Path:
+    """
+    Load a ``.symcov`` JSON file, emit line→address mapping CSV next to it by default
+    (``<stem>.line_address_map.csv``).
+    """
+    symcov_json_path = Path(symcov_json_path).resolve()
+    with symcov_json_path.open(encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise TypeError(f"symcov JSON must be an object, got {type(data).__name__}")
+    out = output_csv or (
+        symcov_json_path.parent / f"{symcov_json_path.stem}.line_address_map.csv"
+    )
+    out = Path(out).resolve()
+    write_line_address_map_csv_for_symcov_data(data, out)
+    return out
+
+
+def symcov_line_map_main(args: Namespace) -> int:
+    symcov_path = Path(args.symcov).resolve()
+    if not symcov_path.is_file():
+        print(f"ERROR: symcov is not a file: {symcov_path}", file=sys.stderr)
+        return 1
+    out_arg = getattr(args, "output", None)
+    out_path = Path(out_arg).resolve() if out_arg else None
+    try:
+        written = write_symcov_line_address_map_csv(symcov_path, out_path)
+    except (json.JSONDecodeError, OSError, TypeError, ValueError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    print(f"Wrote {written}")
+    return 0
 
 
 def _point_symbol_info_records(psi: dict[str, object]) -> list[dict[str, object]]:

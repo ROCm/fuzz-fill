@@ -30,6 +30,33 @@ def _collect_llc_input_files(test_root: Path) -> list[Path]:
 class CoverageSession:
     """One llvm-lit (or custom) run plus merge/symbolize for configured binaries."""
 
+    def _write_llc_symcov_line_address_map(
+        self,
+        cov: Path,
+        llc_bin: Path,
+        run_index: int,
+        new_names: list[str],
+    ) -> Path | None:
+        """Symbolize raw ``llc.*.sancov`` for this run and write ``*.line_address_map.csv`` beside ``.symcov``."""
+        from coverage.map_cmd import write_symcov_line_address_map_csv
+
+        raw_paths = [cov / n for n in new_names if (cov / n).is_file()]
+        if not raw_paths:
+            return None
+        if len(raw_paths) == 1:
+            merged_sancov = raw_paths[0]
+            cleanup_merged = False
+        else:
+            merged_sancov = cov / f"_llc_test_{run_index:04d}_merged.sancov"
+            self.san_cov.merge_to(raw_paths, merged_sancov)
+            cleanup_merged = True
+        symcov_out = merged_sancov.with_suffix(".symcov")
+        self.san_cov.symbolize(merged_sancov, llc_bin, symcov_out)
+        out_csv = write_symcov_line_address_map_csv(symcov_out)
+        if cleanup_merged:
+            merged_sancov.unlink(missing_ok=True)
+        return out_csv
+
     def __init__(self, config: CoverageConfig) -> None:
         self.config = config
         self.san_cov = SanCov(
@@ -147,6 +174,16 @@ class CoverageSession:
                         "both_address_count": "",
                     }
 
+                if new_names:
+                    try:
+                        line_map = self._write_llc_symcov_line_address_map(
+                            cov, llc, i, new_names
+                        )
+                        if line_map is not None:
+                            print(f"Line→address map -> {line_map}")
+                    except Exception as e:
+                        print(f"WARNING: line-address map failed: {e}")
+
                 writer.writerow(
                     {
                         "test": test_key,
@@ -252,7 +289,7 @@ class CoverageSession:
             raw = self.san_cov.collect_raw(self.config.coverage_dir, "llc")
             print(
                 f"({len(raw)} raw llc.*.sancov in {self.config.coverage_dir}; "
-                "no merge/symbolize in --llc-tests-dir mode)"
+                "per-test .symcov + .line_address_map.csv from symbolize; no lit-style merge/outline)"
             )
             return run_returncode if run_returncode is not None else 1
 
