@@ -10,6 +10,14 @@ from coverage.runner import TestCommandRunner
 from coverage.sancov import BinaryCoverageResult, SanCov
 
 
+def _collect_llc_input_files(test_root: Path) -> list[Path]:
+    """Sorted unique paths under ``test_root`` with suffix ``.ll`` or ``.bc``."""
+    paths: set[Path] = set()
+    for pattern in ("*.ll", "*.bc"):
+        paths.update(p for p in test_root.rglob(pattern) if p.is_file())
+    return sorted(paths)
+
+
 class CoverageSession:
     """One llvm-lit (or custom) run plus merge/symbolize for configured binaries."""
 
@@ -26,12 +34,43 @@ class CoverageSession:
         if self.config.skip_run:
             print("(--skip-run: not executing tests)")
             return None
+        if self.config.llc_tests_dir is not None:
+            return self._run_llc_tests_dir()
         assert self.config.command is not None
         return self._runner.run(
             self.config.command,
             self.config.cwd,
             self.config.coverage_dir,
         )
+
+    def _run_llc_tests_dir(self) -> int:
+        """Run ``llc -o /dev/null`` on each ``*.ll`` / ``*.bc`` under ``llc_tests_dir``; raw ``llc.*.sancov`` only."""
+        d = self.config.llc_tests_dir
+        assert d is not None
+        llc = self.san_cov.tool_binary("llc")
+        if not llc.exists():
+            raise FileNotFoundError(f"llc not found at {llc}")
+
+        tests = _collect_llc_input_files(d)
+        if not tests:
+            raise RuntimeError(f"no .ll or .bc files under {d}")
+
+        limit = self.config.llc_tests_limit
+        assert limit is not None
+        z = len(tests)
+        y = min(limit, z)
+        to_run = tests[:y]
+
+        any_failed = False
+        for i, test_path in enumerate(to_run, start=1):
+            print(f"running [{i}/{y}] out of {z} in directory {d}")
+            rel = test_path.relative_to(d)
+            argv = [str(llc), "-o", "/dev/null", str(rel)]
+            rc = self._runner.run_argv(argv, d, self.config.coverage_dir)
+            if rc != 0:
+                any_failed = True
+                print(f"FAILED: {rel} (exit {rc})")
+        return 1 if any_failed else 0
 
     def process_binaries(self) -> list[BinaryCoverageResult]:
         if not self.san_cov.sancov_bin.exists():
@@ -115,6 +154,14 @@ class CoverageSession:
         """Run tests (unless skipped), then merge/symbolize and write outlines. Exit 0 on success."""
         self.config.coverage_dir.mkdir(parents=True, exist_ok=True)
         run_returncode = self.run_tests()
+        if self.config.llc_tests_dir is not None:
+            raw = self.san_cov.collect_raw(self.config.coverage_dir, "llc")
+            print(
+                f"({len(raw)} raw llc.*.sancov in {self.config.coverage_dir}; "
+                "no merge/symbolize in --llc-tests-dir mode)"
+            )
+            return run_returncode if run_returncode is not None else 1
+
         results = self.process_binaries()
         self.write_outlines(results, run_returncode)
         return 0

@@ -86,6 +86,23 @@ def _add_run_arguments(p: argparse.ArgumentParser) -> None:
         default=None,
         help="Write machine-readable outline (stats + paths) to this JSON file.",
     )
+    p.add_argument(
+        "--llc-tests-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="Run llc -o /dev/null on each *.ll and *.bc under DIR (recursive), with the same UBSAN coverage "
+        "as lit runs. Leaves raw llc.<pid>.sancov files in --coverage-dir only (no merge/symbolize "
+        "or outline). Default --coverage-dir: <repo>/data/coverage_output/new_tests_<timestamp>. "
+        "Not compatible with -c or --skip-run.",
+    )
+    p.add_argument(
+        "--llc-test-limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="With --llc-tests-dir: run at most N input files (.ll/.bc, sorted path order). Default: 1.",
+    )
 
 
 def _add_map_arguments(p: argparse.ArgumentParser) -> None:
@@ -156,7 +173,26 @@ def _add_map_arguments(p: argparse.ArgumentParser) -> None:
 
 
 def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfig:
-    if args.binaries is None:
+    llc_tests_dir: Path | None = None
+    llc_tests_limit: int | None = None
+    if args.llc_tests_dir is not None:
+        llc_tests_dir = Path(args.llc_tests_dir).resolve()
+        if not llc_tests_dir.is_dir():
+            raise ValueError(f"--llc-tests-dir is not a directory: {llc_tests_dir}")
+        if args.skip_run:
+            raise ValueError("--llc-tests-dir cannot be used with --skip-run")
+        if args.command is not None:
+            raise ValueError("--llc-tests-dir cannot be used with --command (-c)")
+        llc_tests_limit = 1 if args.llc_test_limit is None else args.llc_test_limit
+        if llc_tests_limit < 1:
+            raise ValueError("--llc-test-limit must be >= 1")
+    else:
+        if args.llc_test_limit is not None:
+            raise ValueError("--llc-test-limit requires --llc-tests-dir")
+
+    if llc_tests_dir is not None:
+        binaries = ("llc",)
+    elif args.binaries is None:
         binaries = ("llc", "opt")
     else:
         seen: set[str] = set()
@@ -168,7 +204,9 @@ def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfi
         binaries = tuple(uniq)
 
     command: str | None
-    if args.skip_run:
+    if llc_tests_dir is not None:
+        command = None
+    elif args.skip_run:
         command = args.command
     elif args.command:
         command = args.command
@@ -187,6 +225,10 @@ def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfi
 
     if args.coverage_dir is not None:
         coverage_dir = Path(args.coverage_dir).resolve()
+    elif llc_tests_dir is not None:
+        coverage_dir = (
+            base / "data" / "coverage_output" / f"new_tests_{int(time.time())}"
+        ).resolve()
     else:
         coverage_dir = (
             base / "data" / "coverage_output" / f"test_suite_{int(time.time())}"
@@ -204,6 +246,8 @@ def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfi
         union_batch=args.union_batch,
         outline_json=outline_json,
         merged_suffix_id=MERGED_SANCOV_SUFFIX_ID,
+        llc_tests_dir=llc_tests_dir,
+        llc_tests_limit=llc_tests_limit,
     )
 
 
@@ -236,13 +280,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.subcmd == "run":
         base = Path(__file__).resolve().parent.parent.parent
-        config = _config_from_run_args(args, base)
         try:
-            CoverageSession(config).run()
+            config = _config_from_run_args(args, base)
+        except ValueError as e:
+            print(f"ERROR: {e}")
+            return 2
+        try:
+            return CoverageSession(config).run()
         except (FileNotFoundError, RuntimeError) as e:
             print(f"ERROR: {e}")
             return 1
-        return 0
 
     raise AssertionError(f"unknown subcommand: {args.subcmd}")
 
