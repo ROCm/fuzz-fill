@@ -22,3 +22,4 @@ class CoverageConfig:
     llc_tests_dir: Path | None
     llc_tests_limit: int | None
     llc_baseline_csv: Path | None
+    llc_line_address_map: Path | None

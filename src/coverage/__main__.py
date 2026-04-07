@@ -93,7 +93,7 @@ def _add_run_arguments(p: argparse.ArgumentParser) -> None:
         metavar="DIR",
         help="Run llc -o /dev/null on each *.ll and *.bc under DIR (recursive), with the same UBSAN coverage "
         "as lit runs. Symbolizes each run's raw llc.*.sancov and writes "
-        "<stem>.line_address_map.csv (file,function,line,llc_addresses) next to the .symcov. "
+        "<stem>.point_symbol_info.json (only point-symbol-info from the symcov) next to the .symcov. "
         "Default --coverage-dir: <repo>/data/coverage_output/new_tests_<timestamp>. "
         "Not compatible with -c or --skip-run.",
     )
@@ -113,6 +113,17 @@ def _add_run_arguments(p: argparse.ArgumentParser) -> None:
         "hex ids per row). Loaded once; llc_test_report.csv gains baseline vs test address counts "
         "(unique normalized ids) and novel_vs_baseline_addresses (JSON array; [] without this flag).",
     )
+    p.add_argument(
+        "--llc-line-address-map",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        dest="llc_line_address_map",
+        help="With --llc-tests-dir: point_symbol_info.json (symcov point-symbol-info extract), e.g. "
+        "llc.0.point_symbol_info.json. Requires --llc-baseline-csv. Flags (file,function,line) where "
+        "no id for that line appears on the same row in the baseline CSV, but at least one id for "
+        "that line is in the new test; writes llc_test_novel_source_lines.csv (flushed per test).",
+    )
 
 
 def _add_symcov_line_map_arguments(p: argparse.ArgumentParser) -> None:
@@ -128,7 +139,7 @@ def _add_symcov_line_map_arguments(p: argparse.ArgumentParser) -> None:
         type=Path,
         default=None,
         metavar="CSV",
-        help="Output CSV path (default: <symcov-dir>/<symcov-stem>.line_address_map.csv).",
+        help="Output path (default: <symcov-stem>.point_symbol_info.json).",
     )
 
 
@@ -218,12 +229,24 @@ def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfi
             raise ValueError("--llc-test-limit requires --llc-tests-dir")
         if args.llc_baseline_csv is not None:
             raise ValueError("--llc-baseline-csv requires --llc-tests-dir")
+        if args.llc_line_address_map is not None:
+            raise ValueError("--llc-line-address-map requires --llc-tests-dir")
 
     llc_baseline_csv: Path | None = None
     if llc_tests_dir is not None and args.llc_baseline_csv is not None:
         llc_baseline_csv = Path(args.llc_baseline_csv).resolve()
         if not llc_baseline_csv.is_file():
             raise ValueError(f"--llc-baseline-csv is not a file: {llc_baseline_csv}")
+
+    llc_line_address_map: Path | None = None
+    if llc_tests_dir is not None and args.llc_line_address_map is not None:
+        if args.llc_baseline_csv is None:
+            raise ValueError("--llc-line-address-map requires --llc-baseline-csv")
+        llc_line_address_map = Path(args.llc_line_address_map).resolve()
+        if not llc_line_address_map.is_file():
+            raise ValueError(
+                f"--llc-line-address-map is not a file: {llc_line_address_map}"
+            )
 
     if llc_tests_dir is not None:
         binaries = ("llc",)
@@ -284,6 +307,7 @@ def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfi
         llc_tests_dir=llc_tests_dir,
         llc_tests_limit=llc_tests_limit,
         llc_baseline_csv=llc_baseline_csv,
+        llc_line_address_map=llc_line_address_map,
     )
 
 

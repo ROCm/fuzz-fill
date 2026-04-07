@@ -53,6 +53,57 @@ def load_baseline_llc_addresses_from_csv(csv_path: Path) -> set[str]:
     return out
 
 
+def load_baseline_llc_addresses_by_source_line(
+    csv_path: Path,
+) -> dict[tuple[str, str, int], frozenset[str]]:
+    """
+    Same CSV as :func:`load_baseline_llc_addresses_from_csv`, keyed by ``(file, function, line)``.
+
+    Rows with duplicate keys merge address sets. Line numbers are integers; file/function strings
+    are stripped from the CSV.
+    """
+    buckets: dict[tuple[str, str, int], set[str]] = {}
+    with csv_path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            raise ValueError(f"CSV has no header row: {csv_path}")
+        by_lower = {
+            (name or "").strip().lower(): name for name in reader.fieldnames if name
+        }
+        for key in ("file", "function", "line", "llc_addresses"):
+            if key not in by_lower:
+                raise ValueError(
+                    f"CSV must include {key!r} column (got {list(reader.fieldnames)!r})"
+                )
+        cf = by_lower["file"]
+        cfn = by_lower["function"]
+        cln = by_lower["line"]
+        caddr = by_lower["llc_addresses"]
+        for row in reader:
+            file_s = (row.get(cf) or "").strip()
+            func_s = (row.get(cfn) or "").strip()
+            line_s = (row.get(cln) or "").strip()
+            cell = (row.get(caddr) or "").strip()
+            if not file_s or not func_s or not line_s or not cell or cell == "[]":
+                continue
+            try:
+                line_num = int(line_s)
+            except ValueError:
+                continue
+            try:
+                parsed = json.loads(cell)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(parsed, list):
+                continue
+            loc_key = (file_s, func_s, line_num)
+            acc = buckets.setdefault(loc_key, set())
+            for item in parsed:
+                if isinstance(item, str) and item.strip():
+                    acc.add(normalize_llc_address_for_compare(item))
+    return {k: frozenset(v) for k, v in buckets.items()}
+
+
 def addresses_in_test_not_in_baseline(
     test_addresses_from_print: set[str],
     baseline_normalized: set[str],
@@ -71,3 +122,67 @@ def addresses_in_test_not_in_baseline(
         seen_norm.add(n)
         result.append(a)
     return result
+
+
+def load_llc_line_address_map_rows(
+    map_path: Path,
+) -> list[tuple[str, str, int, frozenset[str]]]:
+    """
+    Load ``*.point_symbol_info.json`` (or any symcov-shaped JSON with ``point-symbol-info``)
+    produced by ``symcov-line-map`` / per-test symbolize extract.
+    """
+    from coverage.map_cmd import line_address_map_rows_from_symcov
+
+    path = Path(map_path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise TypeError(
+            f"line map JSON must be an object, got {type(data).__name__}: {path}"
+        )
+    rows = line_address_map_rows_from_symcov(data)
+    out: list[tuple[str, str, int, frozenset[str]]] = []
+    for r in rows:
+        addrs = r.get("llc_addresses")
+        if not isinstance(addrs, list) or not addrs:
+            continue
+        norm = frozenset(
+            normalize_llc_address_for_compare(x)
+            for x in addrs
+            if isinstance(x, str) and x.strip()
+        )
+        if not norm:
+            continue
+        out.append(
+            (
+                str(r["file"]),
+                str(r["function"]),
+                int(r["line"]),
+                norm,
+            )
+        )
+    return out
+
+
+def novel_source_lines_vs_baseline(
+    line_map_rows: list[tuple[str, str, int, frozenset[str]]],
+    baseline_by_line: dict[tuple[str, str, int], frozenset[str]],
+    test_norm: set[str],
+) -> list[tuple[str, str, int]]:
+    """
+    Lines where **no** instrumentation id for that ``(file, function, line)`` appears in the
+    baseline row for that same location, but **at least one** id for that line appears in
+    ``test_norm``.
+
+    If the baseline CSV has no row for that location, the baseline address set for that line is
+    treated as empty.
+    """
+    flagged: list[tuple[str, str, int]] = []
+    for file_s, func_s, line_num, addrs in line_map_rows:
+        if not addrs:
+            continue
+        base_line = baseline_by_line.get((file_s, func_s, line_num), frozenset())
+        if addrs & base_line:
+            continue
+        if addrs & test_norm:
+            flagged.append((file_s, func_s, line_num))
+    return sorted(flagged)

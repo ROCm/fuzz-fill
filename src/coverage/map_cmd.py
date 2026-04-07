@@ -122,6 +122,18 @@ def _build_llc_line_address_index(
     return out
 
 
+def point_symbol_info_extract(symcov: dict[str, object]) -> dict[str, object]:
+    """
+    Slim payload for disk: only ``point-symbol-info`` (or ``point_symbol_info``) from a symcov JSON.
+    """
+    psi = symcov.get("point-symbol-info")
+    if psi is None:
+        psi = symcov.get("point_symbol_info")
+    if not isinstance(psi, dict):
+        psi = {}
+    return {"point-symbol-info": psi}
+
+
 def line_address_map_rows_from_symcov(symcov: dict[str, object]) -> list[dict[str, object]]:
     """
     One row per distinct ``(file, function, line)`` from ``point-symbol-info``, with all hex point
@@ -139,47 +151,35 @@ def line_address_map_rows_from_symcov(symcov: dict[str, object]) -> list[dict[st
     ]
 
 
-def write_line_address_map_csv_for_symcov_data(
-    symcov: dict[str, object],
-    output_csv: Path,
-) -> None:
-    """Write ``file,function,line,llc_addresses`` CSV (``llc_addresses`` = JSON array per row)."""
-    output_csv = Path(output_csv)
-    output_csv.parent.mkdir(parents=True, exist_ok=True)
-    rows = line_address_map_rows_from_symcov(symcov)
-    fieldnames = ["file", "function", "line", "llc_addresses"]
-    with output_csv.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames)
-        w.writeheader()
-        for r in rows:
-            w.writerow(
-                {
-                    "file": r["file"],
-                    "function": r["function"],
-                    "line": r["line"],
-                    "llc_addresses": json.dumps(r["llc_addresses"]),
-                }
-            )
+def write_point_symbol_info_json(symcov: dict[str, object], output_path: Path) -> None:
+    """Write compact JSON with only ``point-symbol-info`` (see :func:`point_symbol_info_extract`)."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = point_symbol_info_extract(symcov)
+    output_path.write_text(
+        json.dumps(payload, separators=(",", ":"), ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
 
 
-def write_symcov_line_address_map_csv(
+def write_symcov_point_symbol_extract(
     symcov_json_path: Path,
-    output_csv: Path | None = None,
+    output_path: Path | None = None,
 ) -> Path:
     """
-    Load a ``.symcov`` JSON file, emit line→address mapping CSV next to it by default
-    (``<stem>.line_address_map.csv``).
+    Read a ``.symcov`` JSON file; write ``<stem>.point_symbol_info.json`` with only
+    ``point-symbol-info`` (smaller than the full symcov).
     """
     symcov_json_path = Path(symcov_json_path).resolve()
     with symcov_json_path.open(encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
         raise TypeError(f"symcov JSON must be an object, got {type(data).__name__}")
-    out = output_csv or (
-        symcov_json_path.parent / f"{symcov_json_path.stem}.line_address_map.csv"
-    )
-    out = Path(out).resolve()
-    write_line_address_map_csv_for_symcov_data(data, out)
+    out = Path(
+        output_path
+        or (symcov_json_path.parent / f"{symcov_json_path.stem}.point_symbol_info.json")
+    ).resolve()
+    write_point_symbol_info_json(data, out)
     return out
 
 
@@ -191,7 +191,7 @@ def symcov_line_map_main(args: Namespace) -> int:
     out_arg = getattr(args, "output", None)
     out_path = Path(out_arg).resolve() if out_arg else None
     try:
-        written = write_symcov_line_address_map_csv(symcov_path, out_path)
+        written = write_symcov_point_symbol_extract(symcov_path, out_path)
     except (json.JSONDecodeError, OSError, TypeError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1

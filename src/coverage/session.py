@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import csv
 import json
+from contextlib import ExitStack
 from pathlib import Path
 
 from coverage.baseline_csv import (
     addresses_in_test_not_in_baseline,
+    load_baseline_llc_addresses_by_source_line,
     load_baseline_llc_addresses_from_csv,
+    load_llc_line_address_map_rows,
     normalize_llc_address_for_compare,
+    novel_source_lines_vs_baseline,
 )
 from coverage.config import CoverageConfig
 from coverage.runner import TestCommandRunner
@@ -17,6 +21,7 @@ from coverage.sancov import BinaryCoverageResult, SanCov
 
 
 LLC_TEST_REPORT_CSV = "llc_test_report.csv"
+LLC_TEST_NOVEL_SOURCE_LINES_CSV = "llc_test_novel_source_lines.csv"
 
 
 def _collect_llc_input_files(test_root: Path) -> list[Path]:
@@ -30,15 +35,15 @@ def _collect_llc_input_files(test_root: Path) -> list[Path]:
 class CoverageSession:
     """One llvm-lit (or custom) run plus merge/symbolize for configured binaries."""
 
-    def _write_llc_symcov_line_address_map(
+    def _write_llc_symcov_point_symbol_extract(
         self,
         cov: Path,
         llc_bin: Path,
         run_index: int,
         new_names: list[str],
     ) -> Path | None:
-        """Symbolize raw ``llc.*.sancov`` for this run and write ``*.line_address_map.csv`` beside ``.symcov``."""
-        from coverage.map_cmd import write_symcov_line_address_map_csv
+        """Symbolize raw ``llc.*.sancov`` and write ``*.point_symbol_info.json`` beside ``.symcov``."""
+        from coverage.map_cmd import write_symcov_point_symbol_extract
 
         raw_paths = [cov / n for n in new_names if (cov / n).is_file()]
         if not raw_paths:
@@ -52,10 +57,10 @@ class CoverageSession:
             cleanup_merged = True
         symcov_out = merged_sancov.with_suffix(".symcov")
         self.san_cov.symbolize(merged_sancov, llc_bin, symcov_out)
-        out_csv = write_symcov_line_address_map_csv(symcov_out)
+        out_path = write_symcov_point_symbol_extract(symcov_out)
         if cleanup_merged:
             merged_sancov.unlink(missing_ok=True)
-        return out_csv
+        return out_path
 
     def __init__(self, config: CoverageConfig) -> None:
         self.config = config
@@ -110,6 +115,22 @@ class CoverageSession:
                 f"{baseline_path}"
             )
 
+        line_map_path = self.config.llc_line_address_map
+        line_map_rows: list[tuple[str, str, int, frozenset[str]]] | None = None
+        baseline_by_line: dict[tuple[str, str, int], frozenset[str]] | None = None
+        if line_map_path is not None:
+            line_map_rows = load_llc_line_address_map_rows(line_map_path)
+            print(
+                f"Loaded {len(line_map_rows)} source line row(s) from --llc-line-address-map "
+                f"{line_map_path}"
+            )
+            assert baseline_path is not None
+            baseline_by_line = load_baseline_llc_addresses_by_source_line(baseline_path)
+            print(
+                f"Loaded {len(baseline_by_line)} baseline (file,function,line) location(s) "
+                f"for per-line comparison"
+            )
+
         def raw_llc_sancov_names() -> set[str]:
             return {p.name for p in self.san_cov.collect_raw(cov, "llc")}
 
@@ -123,14 +144,32 @@ class CoverageSession:
             "test_only_address_count",
             "baseline_only_address_count",
             "both_address_count",
+            "novel_source_line_count",
             "novel_vs_baseline_addresses",
         ]
 
+        novel_path = cov / LLC_TEST_NOVEL_SOURCE_LINES_CSV
         any_failed = False
-        with report_path.open("w", newline="", encoding="utf-8") as report_f:
+        with ExitStack() as stack:
+            report_f = stack.enter_context(
+                report_path.open("w", newline="", encoding="utf-8")
+            )
             writer = csv.DictWriter(report_f, fieldnames=report_fields)
             writer.writeheader()
             report_f.flush()
+
+            novel_f = None
+            novel_writer: csv.DictWriter | None = None
+            if line_map_rows is not None:
+                novel_f = stack.enter_context(
+                    novel_path.open("w", newline="", encoding="utf-8")
+                )
+                novel_writer = csv.DictWriter(
+                    novel_f,
+                    fieldnames=["test", "file", "function", "line"],
+                )
+                novel_writer.writeheader()
+                novel_f.flush()
 
             for i, test_path in enumerate(to_run, start=1):
                 print(f"running [{i}/{y}] out of {z} in directory {d}")
@@ -176,13 +215,35 @@ class CoverageSession:
 
                 if new_names:
                     try:
-                        line_map = self._write_llc_symcov_line_address_map(
+                        psi_path = self._write_llc_symcov_point_symbol_extract(
                             cov, llc, i, new_names
                         )
-                        if line_map is not None:
-                            print(f"Line→address map -> {line_map}")
+                        if psi_path is not None:
+                            print(f"point-symbol-info extract -> {psi_path}")
                     except Exception as e:
-                        print(f"WARNING: line-address map failed: {e}")
+                        print(f"WARNING: point_symbol_info extract failed: {e}")
+
+                novel_line_count: str | int = ""
+                if line_map_rows is not None and baseline_by_line is not None:
+                    novel_src = novel_source_lines_vs_baseline(
+                        line_map_rows, baseline_by_line, test_norm
+                    )
+                    novel_line_count = len(novel_src)
+                    print(
+                        f"{novel_line_count} source line(s) for test {test_key} hit by new "
+                        "coverage but no line id in baseline"
+                    )
+                    assert novel_writer is not None and novel_f is not None
+                    for file_s, func_s, line_num in novel_src:
+                        novel_writer.writerow(
+                            {
+                                "test": test_key,
+                                "file": file_s,
+                                "function": func_s,
+                                "line": line_num,
+                            }
+                        )
+                    novel_f.flush()
 
                 writer.writerow(
                     {
@@ -190,6 +251,7 @@ class CoverageSession:
                         "llc_exit_code": rc,
                         "raw_sancov_files": json.dumps(new_names),
                         "novel_vs_baseline_addresses": json.dumps(novel),
+                        "novel_source_line_count": novel_line_count,
                         **row_counts,
                     }
                 )
@@ -200,6 +262,8 @@ class CoverageSession:
                     print(f"FAILED: {rel} (exit {rc})")
 
         print(f"LLC test report CSV -> {report_path} ({y} row(s))")
+        if line_map_rows is not None:
+            print(f"Novel source lines (detail) -> {novel_path}")
 
         return 1 if any_failed else 0
 
@@ -289,7 +353,7 @@ class CoverageSession:
             raw = self.san_cov.collect_raw(self.config.coverage_dir, "llc")
             print(
                 f"({len(raw)} raw llc.*.sancov in {self.config.coverage_dir}; "
-                "per-test .symcov + .line_address_map.csv from symbolize; no lit-style merge/outline)"
+                "per-test .symcov + .point_symbol_info.json extract; no lit-style merge/outline)"
             )
             return run_returncode if run_returncode is not None else 1
 
