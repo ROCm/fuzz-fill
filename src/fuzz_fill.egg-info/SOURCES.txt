@@ -2,9 +2,10 @@ LICENCE.txt
 README.md
 pyproject.toml
 src/coverage/__init__.py
-src/coverage/cli.py
+src/coverage/__main__.py
 src/coverage/config.py
 src/coverage/constants.py
+src/coverage/map_cmd.py
 src/coverage/merge.py
 src/coverage/runner.py
 src/coverage/sancov.py
