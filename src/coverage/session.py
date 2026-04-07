@@ -10,6 +10,9 @@ from coverage.runner import TestCommandRunner
 from coverage.sancov import BinaryCoverageResult, SanCov
 
 
+LLC_TEST_SANCOV_MAP_JSON = "llc_test_sancov_map.json"
+
+
 def _collect_llc_input_files(test_root: Path) -> list[Path]:
     """Sorted unique paths under ``test_root`` with suffix ``.ll`` or ``.bc``."""
     paths: set[Path] = set()
@@ -61,15 +64,36 @@ class CoverageSession:
         y = min(limit, z)
         to_run = tests[:y]
 
+        cov = self.config.coverage_dir
+        test_to_sancov: dict[str, str | list[str] | None] = {}
+
+        def raw_llc_sancov_names() -> set[str]:
+            return {p.name for p in self.san_cov.collect_raw(cov, "llc")}
+
         any_failed = False
         for i, test_path in enumerate(to_run, start=1):
             print(f"running [{i}/{y}] out of {z} in directory {d}")
             rel = test_path.relative_to(d)
+            test_key = rel.as_posix()
+            before = raw_llc_sancov_names()
             argv = [str(llc), "-o", "/dev/null", str(rel)]
-            rc = self._runner.run_argv(argv, d, self.config.coverage_dir)
+            rc = self._runner.run_argv(argv, d, cov)
+            after = raw_llc_sancov_names()
+            new_names = sorted(after - before)
+            if len(new_names) == 1:
+                test_to_sancov[test_key] = new_names[0]
+            elif not new_names:
+                test_to_sancov[test_key] = None
+            else:
+                test_to_sancov[test_key] = new_names
             if rc != 0:
                 any_failed = True
                 print(f"FAILED: {rel} (exit {rc})")
+
+        map_path = cov / LLC_TEST_SANCOV_MAP_JSON
+        map_path.write_text(json.dumps(test_to_sancov, indent=2, sort_keys=True) + "\n")
+        print(f"Test → sancov map -> {map_path}")
+
         return 1 if any_failed else 0
 
     def process_binaries(self) -> list[BinaryCoverageResult]:
