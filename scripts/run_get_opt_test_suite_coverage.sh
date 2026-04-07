@@ -6,7 +6,7 @@ BUILD_DIR=$LLVM/build-amdgpu
 COVERAGE_DIR=/$HOME/fuzz-fill/data/coverage_output/test_suite_full_coverage_010426
 
 # Get opt coverage from already executed tests
-python -m coverage \
+python -m coverage run \
   --skip-run \
   --binary opt \
   --coverage-dir $COVERAGE_DIR \

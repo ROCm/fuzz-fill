@@ -16,24 +16,6 @@ from coverage.constants import (
 from coverage.session import CoverageSession
 
 
-def _normalize_argv(argv: list[str]) -> list[str]:
-    """
-    Prepend ``run`` when the first token is a flag so legacy invocations keep working:
-    ``python -m coverage --cwd …`` → ``run --cwd …``.
-
-    A lone ``-h`` / ``--help`` is left unchanged so the top-level parser lists ``run`` and ``map``.
-    """
-    if not argv:
-        return ["run"]
-    if argv[0] in ("run", "map"):
-        return argv
-    if len(argv) == 1 and argv[0] in ("-h", "--help"):
-        return argv
-    if argv[0].startswith("-"):
-        return ["run", *argv]
-    return argv
-
-
 def _add_run_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--command",
@@ -106,6 +88,73 @@ def _add_run_arguments(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_map_arguments(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "llc_symcov",
+        type=Path,
+        metavar="llc-symcov",
+        help="Path to merged llc .symcov",
+    )
+    p.add_argument(
+        "llc_sancov",
+        type=Path,
+        metavar="llc-sancov",
+        help="Path to merged llc .sancov",
+    )
+    p.add_argument(
+        "opt_symcov",
+        type=Path,
+        metavar="opt-symcov",
+        help="Path to merged opt .symcov",
+    )
+    p.add_argument(
+        "opt_sancov",
+        type=Path,
+        metavar="opt-sancov",
+        help="Path to merged opt .sancov",
+    )
+    p.add_argument(
+        "--get-summary",
+        action="store_true",
+        help="Load symcov files and write JSON summary (stdout or --output).",
+    )
+    p.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        default=None,
+        help="With --get-summary: write JSON to this file (default: stdout).",
+    )
+    p.add_argument(
+        "--create-joint-sancov",
+        action="store_true",
+        help="Merge llc/opt symcov locations (union to stdout/JSON; use --joint-csv for CSV).",
+    )
+    p.add_argument(
+        "--joint-csv",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="With --create-joint-sancov: write source locations covered by *either* llc or opt "
+        "(deduped union; columns: file, function, line).",
+    )
+    jf = p.add_mutually_exclusive_group()
+    jf.add_argument(
+        "--joint-file-prefix",
+        type=str,
+        default=None,
+        metavar="PREFIX",
+        help="With --create-joint-sancov: only include source paths under this prefix (POSIX path "
+        "prefix after expanduser). Cannot be used with --no-joint-file-filter.",
+    )
+    jf.add_argument(
+        "--no-joint-file-filter",
+        action="store_true",
+        help="With --create-joint-sancov: include every source path from symcov (no path filter). "
+        "Cannot be used with --joint-file-prefix.",
+    )
+
+
 def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfig:
     if args.binaries is None:
         binaries = ("llc", "opt")
@@ -159,7 +208,7 @@ def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfi
 
 
 def main(argv: list[str] | None = None) -> int:
-    argv = _normalize_argv(list(sys.argv[1:] if argv is None else argv))
+    argv = list(sys.argv[1:] if argv is None else argv)
 
     parser = argparse.ArgumentParser(
         prog="coverage",
@@ -176,70 +225,7 @@ def main(argv: list[str] | None = None) -> int:
         "map",
         help="Map llc/opt symcov+sancov: optional JSON summary and/or joint .sancov.",
     )
-    map_p.add_argument(
-        "llc_symcov",
-        type=Path,
-        metavar="llc-symcov",
-        help="Path to merged llc .symcov",
-    )
-    map_p.add_argument(
-        "llc_sancov",
-        type=Path,
-        metavar="llc-sancov",
-        help="Path to merged llc .sancov",
-    )
-    map_p.add_argument(
-        "opt_symcov",
-        type=Path,
-        metavar="opt-symcov",
-        help="Path to merged opt .symcov",
-    )
-    map_p.add_argument(
-        "opt_sancov",
-        type=Path,
-        metavar="opt-sancov",
-        help="Path to merged opt .sancov",
-    )
-    map_p.add_argument(
-        "--get-summary",
-        action="store_true",
-        help="Load symcov files and write JSON summary (stdout or --output).",
-    )
-    map_p.add_argument(
-        "--output",
-        "-o",
-        type=Path,
-        default=None,
-        help="With --get-summary: write JSON to this file (default: stdout).",
-    )
-    map_p.add_argument(
-        "--create-joint-sancov",
-        action="store_true",
-        help="Merge llc/opt symcov locations (union to stdout/JSON; use --joint-csv for CSV).",
-    )
-    map_p.add_argument(
-        "--joint-csv",
-        type=Path,
-        default=None,
-        metavar="PATH",
-        help="With --create-joint-sancov: write source locations covered by *either* llc or opt "
-        "(deduped union; columns: file, function, line).",
-    )
-    jf = map_p.add_mutually_exclusive_group()
-    jf.add_argument(
-        "--joint-file-prefix",
-        type=str,
-        default=None,
-        metavar="PREFIX",
-        help="With --create-joint-sancov: only include source paths under this prefix (POSIX path "
-        "prefix after expanduser). Cannot be used with --no-joint-file-filter.",
-    )
-    jf.add_argument(
-        "--no-joint-file-filter",
-        action="store_true",
-        help="With --create-joint-sancov: include every source path from symcov (no path filter). "
-        "Cannot be used with --joint-file-prefix.",
-    )
+    _add_map_arguments(map_p)
 
     args = parser.parse_args(argv)
 
