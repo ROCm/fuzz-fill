@@ -109,8 +109,8 @@ def _add_run_arguments(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="PATH",
         help="With --llc-tests-dir: CSV with columns file,function,line,llc_addresses (JSON array of "
-        "hex ids per row). Loaded once; per-test rows in llc_test_report.csv include novel "
-        "addresses in column novel_vs_baseline_addresses (JSON array; [] without this flag).",
+        "hex ids per row). Loaded once; llc_test_report.csv gains baseline vs test address counts "
+        "(unique normalized ids) and novel_vs_baseline_addresses (JSON array; [] without this flag).",
     )
 
 

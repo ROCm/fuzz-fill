@@ -9,6 +9,7 @@ from pathlib import Path
 from coverage.baseline_csv import (
     addresses_in_test_not_in_baseline,
     load_baseline_llc_addresses_from_csv,
+    normalize_llc_address_for_compare,
 )
 from coverage.config import CoverageConfig
 from coverage.runner import TestCommandRunner
@@ -90,7 +91,11 @@ class CoverageSession:
             "test",
             "llc_exit_code",
             "raw_sancov_files",
-            "covered_address_count",
+            "baseline_unique_address_count",
+            "test_unique_address_count",
+            "test_only_address_count",
+            "baseline_only_address_count",
+            "both_address_count",
             "novel_vs_baseline_addresses",
         ]
 
@@ -115,23 +120,40 @@ class CoverageSession:
                     sp = cov / basename
                     if sp.is_file():
                         addr_strings |= self.san_cov.unique_addresses_from_print(sp)
-                print(f"{len(addr_strings)} addresses covered by test {test_key}")
+                test_norm = {
+                    normalize_llc_address_for_compare(a) for a in addr_strings
+                }
+                print(f"{len(test_norm)} addresses covered by test {test_key}")
 
                 if baseline_norm is not None:
                     novel = addresses_in_test_not_in_baseline(addr_strings, baseline_norm)
                     print(
                         f"{len(novel)} address(es) from test {test_key} not in baseline CSV"
                     )
+                    row_counts = {
+                        "baseline_unique_address_count": len(baseline_norm),
+                        "test_unique_address_count": len(test_norm),
+                        "test_only_address_count": len(test_norm - baseline_norm),
+                        "baseline_only_address_count": len(baseline_norm - test_norm),
+                        "both_address_count": len(test_norm & baseline_norm),
+                    }
                 else:
                     novel = []
+                    row_counts = {
+                        "baseline_unique_address_count": "",
+                        "test_unique_address_count": len(test_norm),
+                        "test_only_address_count": "",
+                        "baseline_only_address_count": "",
+                        "both_address_count": "",
+                    }
 
                 writer.writerow(
                     {
                         "test": test_key,
                         "llc_exit_code": rc,
                         "raw_sancov_files": json.dumps(new_names),
-                        "covered_address_count": len(addr_strings),
                         "novel_vs_baseline_addresses": json.dumps(novel),
+                        **row_counts,
                     }
                 )
                 report_f.flush()
