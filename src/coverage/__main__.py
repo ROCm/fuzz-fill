@@ -139,6 +139,15 @@ def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
         help="point_symbol_info.json (symcov point-symbol-info extract from a LIT merge/symbolize run). "
         "Requires --baseline-csv. Writes llc_test_novel_source_lines.csv.",
     )
+    p.add_argument(
+        "--source-path-prefix",
+        type=str,
+        default=None,
+        metavar="PREFIX",
+        help="Keep only baseline CSV rows and line-map JSON file keys whose source path is this "
+        "POSIX path or under it (expanduser; compared after strip). Requires --baseline-csv. "
+        "Skips non-matching rows before json.loads / line indexing to shrink memory and work.",
+    )
 
 
 def _add_symcov_line_map_arguments(p: argparse.ArgumentParser) -> None:
@@ -153,8 +162,17 @@ def _add_symcov_line_map_arguments(p: argparse.ArgumentParser) -> None:
         "--output",
         type=Path,
         default=None,
-        metavar="CSV",
+        metavar="PATH",
         help="Output path (default: <symcov-stem>.point_symbol_info.json).",
+    )
+    p.add_argument(
+        "--filter",
+        dest="symcov_path_filter",
+        default=None,
+        metavar="PATTERN",
+        help="If set, regular expression applied with re.search to each point-symbol-info source "
+        "path (POSIX, expanduser)—same idea as llvm-lit --filter= on path strings. "
+        "Only matching file entries are written (smaller JSON). Omit for all paths.",
     )
 
 
@@ -279,6 +297,7 @@ def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfi
         new_tests_limit=None,
         new_tests_baseline_csv=None,
         new_tests_line_address_map=None,
+        new_tests_source_path_prefix=None,
     )
 
 
@@ -305,6 +324,14 @@ def _config_from_new_tests_args(args: argparse.Namespace, base: Path) -> Coverag
         if not line_map.is_file():
             raise ValueError(f"--line-address-map is not a file: {line_map}")
 
+    source_prefix: str | None = None
+    if args.source_path_prefix is not None:
+        if baseline_csv is None:
+            raise ValueError("--source-path-prefix requires --baseline-csv")
+        source_prefix = args.source_path_prefix.strip()
+        if not source_prefix:
+            raise ValueError("--source-path-prefix must be non-empty")
+
     build_bin_dir = _resolve_build_bin_dir(args, base)
 
     if args.coverage_dir is not None:
@@ -328,6 +355,7 @@ def _config_from_new_tests_args(args: argparse.Namespace, base: Path) -> Coverag
         new_tests_limit=limit,
         new_tests_baseline_csv=baseline_csv,
         new_tests_line_address_map=line_map,
+        new_tests_source_path_prefix=source_prefix,
     )
 
 

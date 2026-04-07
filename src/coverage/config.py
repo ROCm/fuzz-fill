@@ -23,3 +23,4 @@ class CoverageConfig:
     new_tests_limit: int | None
     new_tests_baseline_csv: Path | None
     new_tests_line_address_map: Path | None
+    new_tests_source_path_prefix: str | None

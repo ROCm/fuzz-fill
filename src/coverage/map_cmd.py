@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import sys
 from argparse import Namespace
 from collections.abc import Callable
@@ -122,15 +123,30 @@ def _build_llc_line_address_index(
     return out
 
 
-def point_symbol_info_extract(symcov: dict[str, object]) -> dict[str, object]:
+def point_symbol_info_extract(
+    symcov: dict[str, object],
+    *,
+    path_filter: re.Pattern[str] | None = None,
+) -> dict[str, object]:
     """
     Slim payload for disk: only ``point-symbol-info`` (or ``point_symbol_info``) from a symcov JSON.
+
+    With ``path_filter``, keep only top-level file paths where
+    ``path_filter.search(Path(path).expanduser().as_posix())`` matches (same path string idea as
+    llvm-lit ``--filter=`` on test paths).
     """
     psi = symcov.get("point-symbol-info")
     if psi is None:
         psi = symcov.get("point_symbol_info")
     if not isinstance(psi, dict):
         psi = {}
+    if path_filter is not None:
+        psi = {
+            fp: v
+            for fp, v in psi.items()
+            if isinstance(fp, str)
+            and path_filter.search(Path(fp).expanduser().as_posix()) is not None
+        }
     return {"point-symbol-info": psi}
 
 
@@ -151,11 +167,16 @@ def line_address_map_rows_from_symcov(symcov: dict[str, object]) -> list[dict[st
     ]
 
 
-def write_point_symbol_info_json(symcov: dict[str, object], output_path: Path) -> None:
+def write_point_symbol_info_json(
+    symcov: dict[str, object],
+    output_path: Path,
+    *,
+    path_filter: re.Pattern[str] | None = None,
+) -> None:
     """Write compact JSON with only ``point-symbol-info`` (see :func:`point_symbol_info_extract`)."""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = point_symbol_info_extract(symcov)
+    payload = point_symbol_info_extract(symcov, path_filter=path_filter)
     output_path.write_text(
         json.dumps(payload, separators=(",", ":"), ensure_ascii=False) + "\n",
         encoding="utf-8",
@@ -165,6 +186,8 @@ def write_point_symbol_info_json(symcov: dict[str, object], output_path: Path) -
 def write_symcov_point_symbol_extract(
     symcov_json_path: Path,
     output_path: Path | None = None,
+    *,
+    path_filter: re.Pattern[str] | None = None,
 ) -> Path:
     """
     Read a ``.symcov`` JSON file; write ``<stem>.point_symbol_info.json`` with only
@@ -179,7 +202,7 @@ def write_symcov_point_symbol_extract(
         output_path
         or (symcov_json_path.parent / f"{symcov_json_path.stem}.point_symbol_info.json")
     ).resolve()
-    write_point_symbol_info_json(data, out)
+    write_point_symbol_info_json(data, out, path_filter=path_filter)
     return out
 
 
@@ -190,8 +213,18 @@ def symcov_line_map_main(args: Namespace) -> int:
         return 1
     out_arg = getattr(args, "output", None)
     out_path = Path(out_arg).resolve() if out_arg else None
+    path_rx: re.Pattern[str] | None = None
+    pat = getattr(args, "symcov_path_filter", None)
+    if pat is not None and str(pat).strip():
+        try:
+            path_rx = re.compile(str(pat).strip())
+        except re.error as e:
+            print(f"ERROR: invalid --filter regex: {e}", file=sys.stderr)
+            return 1
     try:
-        written = write_symcov_point_symbol_extract(symcov_path, out_path)
+        written = write_symcov_point_symbol_extract(
+            symcov_path, out_path, path_filter=path_rx
+        )
     except (json.JSONDecodeError, OSError, TypeError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1

@@ -74,6 +74,8 @@ class CoverageSession:
 
         limit = self.config.new_tests_limit
         assert limit is not None
+        src_prefix = self.config.new_tests_source_path_prefix
+
         z = len(tests)
         y = min(limit, z)
         to_run = tests[:y]
@@ -82,23 +84,36 @@ class CoverageSession:
         baseline_path = self.config.new_tests_baseline_csv
         baseline_norm: set[str] | None = None
         if baseline_path is not None:
-            baseline_norm = load_baseline_llc_addresses_from_csv(baseline_path)
+            baseline_norm = load_baseline_llc_addresses_from_csv(
+                baseline_path,
+                source_path_prefix=src_prefix,
+            )
+            pfx_note = (
+                f" (source path prefix {src_prefix!r})" if src_prefix is not None else ""
+            )
             print(
                 f"Loaded {len(baseline_norm)} unique llc address(es) from baseline CSV "
-                f"{baseline_path}"
+                f"{baseline_path}{pfx_note}"
             )
 
         line_map_path = self.config.new_tests_line_address_map
         line_map_rows: list[tuple[str, str, int, frozenset[str]]] | None = None
         baseline_by_line: dict[tuple[str, str, int], frozenset[str]] | None = None
         if line_map_path is not None:
-            line_map_rows = load_llc_line_address_map_rows(line_map_path)
+            line_map_rows = load_llc_line_address_map_rows(
+                line_map_path,
+                source_path_prefix=src_prefix,
+            )
             print(
                 f"Loaded {len(line_map_rows)} source line row(s) from --line-address-map "
                 f"{line_map_path}"
+                + (f" (prefix {src_prefix!r})" if src_prefix is not None else "")
             )
             assert baseline_path is not None
-            baseline_by_line = load_baseline_llc_addresses_by_source_line(baseline_path)
+            baseline_by_line = load_baseline_llc_addresses_by_source_line(
+                baseline_path,
+                source_path_prefix=src_prefix,
+            )
             print(
                 f"Loaded {len(baseline_by_line)} baseline (file,function,line) location(s) "
                 f"for per-line comparison"

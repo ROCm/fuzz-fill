@@ -7,6 +7,17 @@ import json
 from pathlib import Path
 
 
+def source_path_has_prefix(path_str: str, prefix: str) -> bool:
+    """
+    True if ``path_str`` is the prefix path or lies under it (POSIX, after expanduser).
+
+    Used to drop baseline / symcov rows early before building large sets.
+    """
+    p = Path(path_str).expanduser().as_posix()
+    base = Path(prefix).expanduser().as_posix().rstrip("/")
+    return p == base or p.startswith(base + "/")
+
+
 def normalize_llc_address_for_compare(addr: str) -> str:
     """
     Canonical form for set comparisons between ``sancov --print`` lines and CSV JSON ids.
@@ -19,10 +30,17 @@ def normalize_llc_address_for_compare(addr: str) -> str:
     return t.lower()
 
 
-def load_baseline_llc_addresses_from_csv(csv_path: Path) -> set[str]:
+def load_baseline_llc_addresses_from_csv(
+    csv_path: Path,
+    *,
+    source_path_prefix: str | None = None,
+) -> set[str]:
     """
     Read ``file,function,line,llc_addresses`` CSV; parse each ``llc_addresses`` cell as JSON
     array of strings; return a deduplicated set of **normalized** address ids.
+
+    With ``source_path_prefix``, skip rows whose ``file`` path is not under that prefix (no
+    ``json.loads`` for those rows).
     """
     out: set[str] = set()
     with csv_path.open(newline="", encoding="utf-8") as f:
@@ -37,7 +55,19 @@ def load_baseline_llc_addresses_from_csv(csv_path: Path) -> set[str]:
             raise ValueError(
                 f"CSV must include an 'llc_addresses' column (got {list(reader.fieldnames)!r})"
             )
+        cf: str | None = None
+        if source_path_prefix is not None:
+            cf = by_lower.get("file")
+            if cf is None:
+                raise ValueError(
+                    "--source-path-prefix requires a 'file' column in the baseline CSV "
+                    f"(got {list(reader.fieldnames)!r})"
+                )
         for row in reader:
+            if cf is not None:
+                file_s = (row.get(cf) or "").strip()
+                if not file_s or not source_path_has_prefix(file_s, source_path_prefix):
+                    continue
             cell = (row.get(col) or "").strip()
             if not cell or cell == "[]":
                 continue
@@ -55,12 +85,17 @@ def load_baseline_llc_addresses_from_csv(csv_path: Path) -> set[str]:
 
 def load_baseline_llc_addresses_by_source_line(
     csv_path: Path,
+    *,
+    source_path_prefix: str | None = None,
 ) -> dict[tuple[str, str, int], frozenset[str]]:
     """
     Same CSV as :func:`load_baseline_llc_addresses_from_csv`, keyed by ``(file, function, line)``.
 
     Rows with duplicate keys merge address sets. Line numbers are integers; file/function strings
     are stripped from the CSV.
+
+    With ``source_path_prefix``, skip rows whose ``file`` is not under that prefix before
+    parsing ``llc_addresses``.
     """
     buckets: dict[tuple[str, str, int], set[str]] = {}
     with csv_path.open(newline="", encoding="utf-8") as f:
@@ -81,6 +116,10 @@ def load_baseline_llc_addresses_by_source_line(
         caddr = by_lower["llc_addresses"]
         for row in reader:
             file_s = (row.get(cf) or "").strip()
+            if source_path_prefix is not None and (
+                not file_s or not source_path_has_prefix(file_s, source_path_prefix)
+            ):
+                continue
             func_s = (row.get(cfn) or "").strip()
             line_s = (row.get(cln) or "").strip()
             cell = (row.get(caddr) or "").strip()
@@ -126,10 +165,15 @@ def addresses_in_test_not_in_baseline(
 
 def load_llc_line_address_map_rows(
     map_path: Path,
+    *,
+    source_path_prefix: str | None = None,
 ) -> list[tuple[str, str, int, frozenset[str]]]:
     """
     Load ``*.point_symbol_info.json`` (or any symcov-shaped JSON with ``point-symbol-info``)
     produced by ``symcov-line-map`` / per-test symbolize extract.
+
+    With ``source_path_prefix``, drop non-matching top-level file paths from ``point-symbol-info``
+    immediately after JSON parse (before building line rows).
     """
     from coverage.map_cmd import line_address_map_rows_from_symcov
 
@@ -139,6 +183,8 @@ def load_llc_line_address_map_rows(
         raise TypeError(
             f"line map JSON must be an object, got {type(data).__name__}: {path}"
         )
+    if source_path_prefix is not None:
+        data = _filter_point_symbol_info_files(data, source_path_prefix)
     rows = line_address_map_rows_from_symcov(data)
     out: list[tuple[str, str, int, frozenset[str]]] = []
     for r in rows:
@@ -160,6 +206,22 @@ def load_llc_line_address_map_rows(
                 norm,
             )
         )
+    return out
+
+
+def _filter_point_symbol_info_files(
+    data: dict[str, object], source_path_prefix: str
+) -> dict[str, object]:
+    out = dict(data)
+    for key in ("point-symbol-info", "point_symbol_info"):
+        psi = out.get(key)
+        if not isinstance(psi, dict):
+            continue
+        out[key] = {
+            fp: v
+            for fp, v in psi.items()
+            if isinstance(fp, str) and source_path_has_prefix(fp, source_path_prefix)
+        }
     return out
 
 
