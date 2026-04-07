@@ -29,8 +29,10 @@ The next step is to generate a single `.sancov` file that contains the full *joi
 
 To get the single `sancov` file, run:
 ```
-./scripts/run_get_merged_coverage.sh
+./scripts/run_get_joint_sancov.sh
 ```
+
+This will output a `csv` file in the coverage directory that contains all lines covered by either `opt` or `llc` and the list of addresses in the `llc` `sancov` binary that those lines correspond to. This is the set of addresses that new coverage output should be checked against. If the `sancov` file of a test run with `llc` contains an address that does *not* appear in the output `csv` file, then the test has achieved new coverage and should be a candidate test for addition to the test suite.
 
 ### Summary
 
@@ -80,8 +82,8 @@ Use `llvm-test-suite-coverage run --help` for the full list.
 Four positional paths (order fixed). Then choose at least one action:
 
 - **`--get-summary`** — write JSON (stdout, or **`--output` / `-o`** for a file): per-symcov top-level keys, optional `BinaryHash` / list lengths when present, byte size for each `.sancov`.
-- **`--create-joint-sancov`** — union of covered `(file, function, line)` from llc and opt symcov. Prints a one-line count summary to the terminal (llc-only / opt-only / either deduped), not the full location list. With **`--get-summary`**, stdout JSON includes **`joint_coverage_line_counts`** (`llc`, `opt`, `either_deduped`); the full **`joint_covered_locations`** list is written only when **`--output` / `-o`** is set. Does not emit the symcov summary JSON unless **`--get-summary`** is also set.
-- **`--joint-csv PATH`** — with **`--create-joint-sancov`**, write the **union** of locations covered by llc **or** opt (deduped on `file`, `function`, `line`) to that CSV. Same rows as the joint union. Creates parent dirs if needed (no extra terminal spam beyond the one-line summary).
+- **`--create-joint-sancov`** — union of covered `(file, function, line)` from llc and opt symcov. Prints a one-line count summary to the terminal (llc-only / opt-only / either deduped), not the full location list. With **`--get-summary`**, stdout JSON includes **`joint_coverage_line_counts`** (`llc`, `opt`, `either_deduped`); the full **`joint_covered_locations`** list is written only when **`--output` / `-o`** is set (each entry includes **`llc_addresses`** as for the CSV). Does not emit the symcov summary JSON unless **`--get-summary`** is also set.
+- **`--joint-csv PATH`** — with **`--create-joint-sancov`**, write the **union** of locations covered by llc **or** opt (deduped on `file`, `function`, `line`) to that CSV, plus **`llc_addresses`**: a JSON array of hex coverage point ids from the llc symcov **`point-symbol-info`** for that exact `(file, function, line)` (all instrumented points for the line, not only those hit in `covered-points`). Rows only covered via opt may get `[]` if the llc symcov uses different path or function strings. Creates parent dirs if needed.
 - **`--joint-file-prefix PREFIX`** — with **`--create-joint-sancov`**, only keep source paths under this prefix (after `expanduser`, compared as POSIX paths). Filtering runs on the point table **before** merging with covered ids, so the union/CSV work stays smaller. Mutually exclusive with **`--no-joint-file-filter`**.
 - **`--no-joint-file-filter`** — with **`--create-joint-sancov`**, include all paths from symcov (legacy behavior: no path filter). Mutually exclusive with **`--joint-file-prefix`**. If neither flag is set, the default is to keep only paths that contain a directory component named **`llvm-project`** (typical checkout layout).
 
