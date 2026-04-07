@@ -53,6 +53,9 @@ class CoverageSession:
         llc = self.san_cov.tool_binary("llc")
         if not llc.exists():
             raise FileNotFoundError(f"llc not found at {llc}")
+        sancov_tool = self.san_cov.sancov_bin
+        if not sancov_tool.exists():
+            raise FileNotFoundError(f"sancov not found at {sancov_tool}")
 
         tests = _collect_llc_input_files(d)
         if not tests:
@@ -86,6 +89,14 @@ class CoverageSession:
                 test_to_sancov[test_key] = None
             else:
                 test_to_sancov[test_key] = new_names
+
+            addr_strings: set[str] = set()
+            for basename in new_names:
+                sp = cov / basename
+                if sp.is_file():
+                    addr_strings |= self.san_cov.unique_addresses_from_print(sp)
+            print(f"{len(addr_strings)} addresses covered by test {test_key}")
+
             if rc != 0:
                 any_failed = True
                 print(f"FAILED: {rel} (exit {rc})")

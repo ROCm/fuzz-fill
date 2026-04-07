@@ -47,6 +47,24 @@ class SanCov:
             coverage_dir, binary_name, self.merged_suffix_id
         )
 
+    def unique_addresses_from_print(self, sancov_file: Path) -> set[str]:
+        """
+        Run ``sancov --print`` on a ``.sancov`` file and return unique address lines as strings.
+        """
+        try:
+            proc = subprocess.run(
+                [str(self.sancov_bin), "--print", str(sancov_file)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            err = (e.stderr or e.stdout or "").strip()
+            raise RuntimeError(
+                f"sancov --print failed for {sancov_file}: {err or e}"
+            ) from e
+        return {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+
     def merge_to(
         self,
         raw_files: list[Path],
