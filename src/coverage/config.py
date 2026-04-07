@@ -21,3 +21,4 @@ class CoverageConfig:
     merged_suffix_id: str
     llc_tests_dir: Path | None
     llc_tests_limit: int | None
+    llc_baseline_csv: Path | None

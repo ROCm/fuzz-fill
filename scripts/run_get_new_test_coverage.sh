@@ -12,4 +12,5 @@ python -m coverage run \
       --cwd "$BUILD_DIR" \
       --build-dir "$BUILD_DIR" \
       --llc-tests-dir "$TESTS_DIR" \
-      --llc-test-limit 1
+      --llc-test-limit 1 \
+      --llc-baseline-csv "$BASE/fuzz-fill/data/coverage_output/test_suite_full_coverage_010426/covered_either.csv"

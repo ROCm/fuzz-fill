@@ -103,6 +103,15 @@ def _add_run_arguments(p: argparse.ArgumentParser) -> None:
         metavar="N",
         help="With --llc-tests-dir: run at most N input files (.ll/.bc, sorted path order). Default: 1.",
     )
+    p.add_argument(
+        "--llc-baseline-csv",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="With --llc-tests-dir: CSV with columns file,function,line,llc_addresses (JSON array of "
+        "hex ids per row). Loaded once; output JSON lists addresses from each test's sancov --print "
+        "that are not in the deduplicated CSV set (see addresses_in_test_not_in_baseline_csv).",
+    )
 
 
 def _add_map_arguments(p: argparse.ArgumentParser) -> None:
@@ -189,6 +198,14 @@ def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfi
     else:
         if args.llc_test_limit is not None:
             raise ValueError("--llc-test-limit requires --llc-tests-dir")
+        if args.llc_baseline_csv is not None:
+            raise ValueError("--llc-baseline-csv requires --llc-tests-dir")
+
+    llc_baseline_csv: Path | None = None
+    if llc_tests_dir is not None and args.llc_baseline_csv is not None:
+        llc_baseline_csv = Path(args.llc_baseline_csv).resolve()
+        if not llc_baseline_csv.is_file():
+            raise ValueError(f"--llc-baseline-csv is not a file: {llc_baseline_csv}")
 
     if llc_tests_dir is not None:
         binaries = ("llc",)
@@ -248,6 +265,7 @@ def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfi
         merged_suffix_id=MERGED_SANCOV_SUFFIX_ID,
         llc_tests_dir=llc_tests_dir,
         llc_tests_limit=llc_tests_limit,
+        llc_baseline_csv=llc_baseline_csv,
     )
 
 

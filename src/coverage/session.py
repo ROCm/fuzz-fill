@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from coverage.baseline_csv import (
+    addresses_in_test_not_in_baseline,
+    load_baseline_llc_addresses_from_csv,
+)
 from coverage.config import CoverageConfig
 from coverage.runner import TestCommandRunner
 from coverage.sancov import BinaryCoverageResult, SanCov
@@ -69,6 +73,15 @@ class CoverageSession:
 
         cov = self.config.coverage_dir
         test_to_sancov: dict[str, str | list[str] | None] = {}
+        baseline_path = self.config.llc_baseline_csv
+        baseline_norm: set[str] | None = None
+        if baseline_path is not None:
+            baseline_norm = load_baseline_llc_addresses_from_csv(baseline_path)
+            print(
+                f"Loaded {len(baseline_norm)} unique llc address(es) from baseline CSV "
+                f"{baseline_path}"
+            )
+        novel_by_test: dict[str, list[str]] = {}
 
         def raw_llc_sancov_names() -> set[str]:
             return {p.name for p in self.san_cov.collect_raw(cov, "llc")}
@@ -97,12 +110,25 @@ class CoverageSession:
                     addr_strings |= self.san_cov.unique_addresses_from_print(sp)
             print(f"{len(addr_strings)} addresses covered by test {test_key}")
 
+            if baseline_norm is not None:
+                novel = addresses_in_test_not_in_baseline(addr_strings, baseline_norm)
+                if novel:
+                    novel_by_test[test_key] = novel
+                print(
+                    f"{len(novel)} address(es) from test {test_key} not in baseline CSV"
+                )
+
             if rc != 0:
                 any_failed = True
                 print(f"FAILED: {rel} (exit {rc})")
 
         map_path = cov / LLC_TEST_SANCOV_MAP_JSON
-        map_path.write_text(json.dumps(test_to_sancov, indent=2, sort_keys=True) + "\n")
+        report: dict[str, object] = {"test_to_sancov": test_to_sancov}
+        if baseline_path is not None and baseline_norm is not None:
+            report["baseline_csv"] = str(baseline_path)
+            report["baseline_unique_llc_address_count"] = len(baseline_norm)
+            report["addresses_in_test_not_in_baseline_csv"] = novel_by_test
+        map_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
         print(f"Test → sancov map -> {map_path}")
 
         return 1 if any_failed else 0
