@@ -86,43 +86,58 @@ def _add_run_arguments(p: argparse.ArgumentParser) -> None:
         default=None,
         help="Write machine-readable outline (stats + paths) to this JSON file.",
     )
+
+
+def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument(
-        "--llc-tests-dir",
+        "--tests-dir",
         type=Path,
-        default=None,
+        required=True,
         metavar="DIR",
-        help="Run llc -o /dev/null on each *.ll and *.bc under DIR (recursive), with the same UBSAN coverage "
-        "as lit runs. Symbolizes each run's raw llc.*.sancov and writes "
-        "<stem>.point_symbol_info.json (only point-symbol-info from the symcov) next to the .symcov. "
-        "Default --coverage-dir: <repo>/data/coverage_output/new_tests_<timestamp>. "
-        "Not compatible with -c or --skip-run.",
+        help="Search recursively for *.ll and *.bc; run llc -o /dev/null on each selected file "
+        "(cwd is this directory) with UBSAN SanitizerCoverage.",
     )
     p.add_argument(
-        "--llc-test-limit",
+        "--llvm-project",
+        type=Path,
+        default=None,
+        help="Path to llvm-project root (default: <repo>/llvm-project)",
+    )
+    p.add_argument(
+        "--build-dir",
+        type=Path,
+        default=None,
+        help="LLVM build tree; llc and sancov are taken from <build>/bin/. Default: <llvm-project>/build.",
+    )
+    p.add_argument(
+        "--coverage-dir",
+        type=Path,
+        default=None,
+        help="Directory for raw llc.*.sancov and llc_test_report.csv "
+        "(default: <repo>/data/coverage_output/new_tests_<timestamp>).",
+    )
+    p.add_argument(
+        "--limit",
         type=int,
         default=None,
         metavar="N",
-        help="With --llc-tests-dir: run at most N input files (.ll/.bc, sorted path order). Default: 1.",
+        help="Run at most N inputs (.ll/.bc, sorted path order). Default: 1.",
     )
     p.add_argument(
-        "--llc-baseline-csv",
+        "--baseline-csv",
         type=Path,
         default=None,
         metavar="PATH",
-        help="With --llc-tests-dir: CSV with columns file,function,line,llc_addresses (JSON array of "
-        "hex ids per row). Loaded once; llc_test_report.csv gains baseline vs test address counts "
-        "(unique normalized ids) and novel_vs_baseline_addresses (JSON array; [] without this flag).",
+        help="Joint coverage CSV (file,function,line,llc_addresses as JSON array per row). "
+        "Adds baseline vs test address counts and novel_vs_baseline_addresses on llc_test_report.csv.",
     )
     p.add_argument(
-        "--llc-line-address-map",
+        "--line-address-map",
         type=Path,
         default=None,
         metavar="PATH",
-        dest="llc_line_address_map",
-        help="With --llc-tests-dir: point_symbol_info.json (symcov point-symbol-info extract), e.g. "
-        "llc.0.point_symbol_info.json. Requires --llc-baseline-csv. Flags (file,function,line) where "
-        "no id for that line appears on the same row in the baseline CSV, but at least one id for "
-        "that line is in the new test; writes llc_test_novel_source_lines.csv (flushed per test).",
+        help="point_symbol_info.json (symcov point-symbol-info extract from a LIT merge/symbolize run). "
+        "Requires --baseline-csv. Writes llc_test_novel_source_lines.csv.",
     )
 
 
@@ -210,47 +225,17 @@ def _add_map_arguments(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _resolve_build_bin_dir(args: argparse.Namespace, base: Path) -> Path:
+    llvm_project = args.llvm_project or base / "llvm-project"
+    build_dir = args.build_dir if args.build_dir is not None else llvm_project / "build"
+    build_dir = Path(build_dir).resolve()
+    if build_dir.name != "bin":
+        return build_dir / "bin"
+    return build_dir
+
+
 def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfig:
-    llc_tests_dir: Path | None = None
-    llc_tests_limit: int | None = None
-    if args.llc_tests_dir is not None:
-        llc_tests_dir = Path(args.llc_tests_dir).resolve()
-        if not llc_tests_dir.is_dir():
-            raise ValueError(f"--llc-tests-dir is not a directory: {llc_tests_dir}")
-        if args.skip_run:
-            raise ValueError("--llc-tests-dir cannot be used with --skip-run")
-        if args.command is not None:
-            raise ValueError("--llc-tests-dir cannot be used with --command (-c)")
-        llc_tests_limit = 1 if args.llc_test_limit is None else args.llc_test_limit
-        if llc_tests_limit < 1:
-            raise ValueError("--llc-test-limit must be >= 1")
-    else:
-        if args.llc_test_limit is not None:
-            raise ValueError("--llc-test-limit requires --llc-tests-dir")
-        if args.llc_baseline_csv is not None:
-            raise ValueError("--llc-baseline-csv requires --llc-tests-dir")
-        if args.llc_line_address_map is not None:
-            raise ValueError("--llc-line-address-map requires --llc-tests-dir")
-
-    llc_baseline_csv: Path | None = None
-    if llc_tests_dir is not None and args.llc_baseline_csv is not None:
-        llc_baseline_csv = Path(args.llc_baseline_csv).resolve()
-        if not llc_baseline_csv.is_file():
-            raise ValueError(f"--llc-baseline-csv is not a file: {llc_baseline_csv}")
-
-    llc_line_address_map: Path | None = None
-    if llc_tests_dir is not None and args.llc_line_address_map is not None:
-        if args.llc_baseline_csv is None:
-            raise ValueError("--llc-line-address-map requires --llc-baseline-csv")
-        llc_line_address_map = Path(args.llc_line_address_map).resolve()
-        if not llc_line_address_map.is_file():
-            raise ValueError(
-                f"--llc-line-address-map is not a file: {llc_line_address_map}"
-            )
-
-    if llc_tests_dir is not None:
-        binaries = ("llc",)
-    elif args.binaries is None:
+    if args.binaries is None:
         binaries = ("llc", "opt")
     else:
         seen: set[str] = set()
@@ -261,32 +246,18 @@ def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfi
                 uniq.append(b)
         binaries = tuple(uniq)
 
-    command: str | None
-    if llc_tests_dir is not None:
-        command = None
-    elif args.skip_run:
+    if args.skip_run:
         command = args.command
     elif args.command:
         command = args.command
     else:
         command = default_lit_command(args.lit_filter)
 
-    llvm_project = args.llvm_project or base / "llvm-project"
-    build_dir = args.build_dir if args.build_dir is not None else llvm_project / "build"
-    build_dir = Path(build_dir).resolve()
-    if build_dir.name != "bin":
-        build_bin_dir = build_dir / "bin"
-    else:
-        build_bin_dir = build_dir
-
+    build_bin_dir = _resolve_build_bin_dir(args, base)
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd()
 
     if args.coverage_dir is not None:
         coverage_dir = Path(args.coverage_dir).resolve()
-    elif llc_tests_dir is not None:
-        coverage_dir = (
-            base / "data" / "coverage_output" / f"new_tests_{int(time.time())}"
-        ).resolve()
     else:
         coverage_dir = (
             base / "data" / "coverage_output" / f"test_suite_{int(time.time())}"
@@ -304,10 +275,59 @@ def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfi
         union_batch=args.union_batch,
         outline_json=outline_json,
         merged_suffix_id=MERGED_SANCOV_SUFFIX_ID,
-        llc_tests_dir=llc_tests_dir,
-        llc_tests_limit=llc_tests_limit,
-        llc_baseline_csv=llc_baseline_csv,
-        llc_line_address_map=llc_line_address_map,
+        new_tests_dir=None,
+        new_tests_limit=None,
+        new_tests_baseline_csv=None,
+        new_tests_line_address_map=None,
+    )
+
+
+def _config_from_new_tests_args(args: argparse.Namespace, base: Path) -> CoverageConfig:
+    tests_dir = Path(args.tests_dir).resolve()
+    if not tests_dir.is_dir():
+        raise ValueError(f"--tests-dir is not a directory: {tests_dir}")
+
+    limit = 1 if args.limit is None else args.limit
+    if limit < 1:
+        raise ValueError("--limit must be >= 1")
+
+    baseline_csv: Path | None = None
+    if args.baseline_csv is not None:
+        baseline_csv = Path(args.baseline_csv).resolve()
+        if not baseline_csv.is_file():
+            raise ValueError(f"--baseline-csv is not a file: {baseline_csv}")
+
+    line_map: Path | None = None
+    if args.line_address_map is not None:
+        if baseline_csv is None:
+            raise ValueError("--line-address-map requires --baseline-csv")
+        line_map = Path(args.line_address_map).resolve()
+        if not line_map.is_file():
+            raise ValueError(f"--line-address-map is not a file: {line_map}")
+
+    build_bin_dir = _resolve_build_bin_dir(args, base)
+
+    if args.coverage_dir is not None:
+        coverage_dir = Path(args.coverage_dir).resolve()
+    else:
+        coverage_dir = (
+            base / "data" / "coverage_output" / f"new_tests_{int(time.time())}"
+        ).resolve()
+
+    return CoverageConfig(
+        build_bin_dir=build_bin_dir,
+        coverage_dir=coverage_dir,
+        cwd=tests_dir,
+        binaries=("llc",),
+        command=None,
+        skip_run=False,
+        union_batch=200,
+        outline_json=None,
+        merged_suffix_id=MERGED_SANCOV_SUFFIX_ID,
+        new_tests_dir=tests_dir,
+        new_tests_limit=limit,
+        new_tests_baseline_csv=baseline_csv,
+        new_tests_line_address_map=line_map,
     )
 
 
@@ -316,16 +336,22 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="coverage",
-        description="LLVM SanitizerCoverage tools (run, map, symcov-line-map).",
+        description="LLVM SanitizerCoverage tools (run, new-tests, map, symcov-line-map).",
     )
     sub = parser.add_subparsers(
-        dest="subcmd", metavar="{run,map,symcov-line-map}", required=True
+        dest="subcmd", metavar="{run,new-tests,map,symcov-line-map}", required=True
     )
     run_p = sub.add_parser(
         "run",
-        help="Run tests with UBSAN coverage and merge/symbolize per --binary (default).",
+        help="llvm-lit (or -c) with UBSAN coverage, then merge and symbolize per --binary.",
     )
     _add_run_arguments(run_p)
+
+    new_p = sub.add_parser(
+        "new-tests",
+        help="Run llc on .ll/.bc under --tests-dir; per-test raw sancov addresses only (no merge/symbolize).",
+    )
+    _add_new_tests_arguments(new_p)
 
     map_p = sub.add_parser(
         "map",
@@ -335,7 +361,7 @@ def main(argv: list[str] | None = None) -> int:
 
     slm_p = sub.add_parser(
         "symcov-line-map",
-        help="Extract file/function/line → llc address ids from one .symcov JSON; write CSV beside it.",
+        help="Extract point-symbol-info from a .symcov JSON to a smaller .json beside it.",
     )
     _add_symcov_line_map_arguments(slm_p)
 
@@ -355,6 +381,19 @@ def main(argv: list[str] | None = None) -> int:
         base = Path(__file__).resolve().parent.parent.parent
         try:
             config = _config_from_run_args(args, base)
+        except ValueError as e:
+            print(f"ERROR: {e}")
+            return 2
+        try:
+            return CoverageSession(config).run()
+        except (FileNotFoundError, RuntimeError) as e:
+            print(f"ERROR: {e}")
+            return 1
+
+    if args.subcmd == "new-tests":
+        base = Path(__file__).resolve().parent.parent.parent
+        try:
+            config = _config_from_new_tests_args(args, base)
         except ValueError as e:
             print(f"ERROR: {e}")
             return 2

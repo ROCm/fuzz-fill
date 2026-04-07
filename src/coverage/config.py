@@ -19,7 +19,7 @@ class CoverageConfig:
     union_batch: int
     outline_json: Path | None
     merged_suffix_id: str
-    llc_tests_dir: Path | None
-    llc_tests_limit: int | None
-    llc_baseline_csv: Path | None
-    llc_line_address_map: Path | None
+    new_tests_dir: Path | None
+    new_tests_limit: int | None
+    new_tests_baseline_csv: Path | None
+    new_tests_line_address_map: Path | None

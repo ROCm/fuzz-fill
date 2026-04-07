@@ -35,33 +35,6 @@ def _collect_llc_input_files(test_root: Path) -> list[Path]:
 class CoverageSession:
     """One llvm-lit (or custom) run plus merge/symbolize for configured binaries."""
 
-    def _write_llc_symcov_point_symbol_extract(
-        self,
-        cov: Path,
-        llc_bin: Path,
-        run_index: int,
-        new_names: list[str],
-    ) -> Path | None:
-        """Symbolize raw ``llc.*.sancov`` and write ``*.point_symbol_info.json`` beside ``.symcov``."""
-        from coverage.map_cmd import write_symcov_point_symbol_extract
-
-        raw_paths = [cov / n for n in new_names if (cov / n).is_file()]
-        if not raw_paths:
-            return None
-        if len(raw_paths) == 1:
-            merged_sancov = raw_paths[0]
-            cleanup_merged = False
-        else:
-            merged_sancov = cov / f"_llc_test_{run_index:04d}_merged.sancov"
-            self.san_cov.merge_to(raw_paths, merged_sancov)
-            cleanup_merged = True
-        symcov_out = merged_sancov.with_suffix(".symcov")
-        self.san_cov.symbolize(merged_sancov, llc_bin, symcov_out)
-        out_path = write_symcov_point_symbol_extract(symcov_out)
-        if cleanup_merged:
-            merged_sancov.unlink(missing_ok=True)
-        return out_path
-
     def __init__(self, config: CoverageConfig) -> None:
         self.config = config
         self.san_cov = SanCov(
@@ -75,8 +48,8 @@ class CoverageSession:
         if self.config.skip_run:
             print("(--skip-run: not executing tests)")
             return None
-        if self.config.llc_tests_dir is not None:
-            return self._run_llc_tests_dir()
+        if self.config.new_tests_dir is not None:
+            return self._run_new_tests()
         assert self.config.command is not None
         return self._runner.run(
             self.config.command,
@@ -84,9 +57,9 @@ class CoverageSession:
             self.config.coverage_dir,
         )
 
-    def _run_llc_tests_dir(self) -> int:
-        """Run ``llc -o /dev/null`` on each ``*.ll`` / ``*.bc`` under ``llc_tests_dir``; raw ``llc.*.sancov`` only."""
-        d = self.config.llc_tests_dir
+    def _run_new_tests(self) -> int:
+        """Run ``llc -o /dev/null`` on each ``*.ll`` / ``*.bc`` under ``new_tests_dir``; per-test addresses via ``sancov --print`` only (no merge/symbolize)."""
+        d = self.config.new_tests_dir
         assert d is not None
         llc = self.san_cov.tool_binary("llc")
         if not llc.exists():
@@ -99,14 +72,14 @@ class CoverageSession:
         if not tests:
             raise RuntimeError(f"no .ll or .bc files under {d}")
 
-        limit = self.config.llc_tests_limit
+        limit = self.config.new_tests_limit
         assert limit is not None
         z = len(tests)
         y = min(limit, z)
         to_run = tests[:y]
 
         cov = self.config.coverage_dir
-        baseline_path = self.config.llc_baseline_csv
+        baseline_path = self.config.new_tests_baseline_csv
         baseline_norm: set[str] | None = None
         if baseline_path is not None:
             baseline_norm = load_baseline_llc_addresses_from_csv(baseline_path)
@@ -115,13 +88,13 @@ class CoverageSession:
                 f"{baseline_path}"
             )
 
-        line_map_path = self.config.llc_line_address_map
+        line_map_path = self.config.new_tests_line_address_map
         line_map_rows: list[tuple[str, str, int, frozenset[str]]] | None = None
         baseline_by_line: dict[tuple[str, str, int], frozenset[str]] | None = None
         if line_map_path is not None:
             line_map_rows = load_llc_line_address_map_rows(line_map_path)
             print(
-                f"Loaded {len(line_map_rows)} source line row(s) from --llc-line-address-map "
+                f"Loaded {len(line_map_rows)} source line row(s) from --line-address-map "
                 f"{line_map_path}"
             )
             assert baseline_path is not None
@@ -212,16 +185,6 @@ class CoverageSession:
                         "baseline_only_address_count": "",
                         "both_address_count": "",
                     }
-
-                if new_names:
-                    try:
-                        psi_path = self._write_llc_symcov_point_symbol_extract(
-                            cov, llc, i, new_names
-                        )
-                        if psi_path is not None:
-                            print(f"point-symbol-info extract -> {psi_path}")
-                    except Exception as e:
-                        print(f"WARNING: point_symbol_info extract failed: {e}")
 
                 novel_line_count: str | int = ""
                 if line_map_rows is not None and baseline_by_line is not None:
@@ -346,14 +309,14 @@ class CoverageSession:
             print(f"JSON outline -> {self.config.outline_json}")
 
     def run(self) -> int:
-        """Run tests (unless skipped), then merge/symbolize and write outlines. Exit 0 on success."""
+        """Run tests (unless skipped), then merge/symbolize and write outlines (LIT path only)."""
         self.config.coverage_dir.mkdir(parents=True, exist_ok=True)
         run_returncode = self.run_tests()
-        if self.config.llc_tests_dir is not None:
+        if self.config.new_tests_dir is not None:
             raw = self.san_cov.collect_raw(self.config.coverage_dir, "llc")
             print(
                 f"({len(raw)} raw llc.*.sancov in {self.config.coverage_dir}; "
-                "per-test .symcov + .point_symbol_info.json extract; no lit-style merge/outline)"
+                "new-tests mode: no merge or symbolize; addresses from sancov --print per test.)"
             )
             return run_returncode if run_returncode is not None else 1
 
