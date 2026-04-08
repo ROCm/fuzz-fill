@@ -248,3 +248,50 @@ def novel_source_lines_vs_baseline(
         if addrs & test_norm:
             flagged.append((file_s, func_s, line_num))
     return sorted(flagged)
+
+
+def norm_address_to_files_from_line_map_rows(
+    line_map_rows: list[tuple[str, str, int, frozenset[str]]],
+) -> dict[str, frozenset[str]]:
+    """
+    Map each normalized llc address id to the set of source ``file`` paths that reference it in
+    the line map (union across all rows).
+    """
+    m: dict[str, set[str]] = {}
+    for file_s, _func, _line, addrs in line_map_rows:
+        for n in addrs:
+            m.setdefault(n, set()).add(file_s)
+    return {k: frozenset(v) for k, v in m.items()}
+
+
+def split_novel_addresses_by_source_prefix(
+    novel_addresses: list[str],
+    norm_to_files: dict[str, frozenset[str]],
+    source_path_prefix: str,
+) -> tuple[list[str], list[str]]:
+    """
+    Partition ``novel_addresses`` using :func:`source_path_has_prefix` on mapped file paths.
+
+    An address is *in* the prefix bucket if any mapped file lies under ``source_path_prefix``.
+    Addresses with no line-map entry go to the *outside* bucket.
+    """
+    in_prefix: list[str] = []
+    outside: list[str] = []
+    for a in novel_addresses:
+        n = normalize_llc_address_for_compare(a)
+        files = norm_to_files.get(n)
+        if files and any(source_path_has_prefix(f, source_path_prefix) for f in files):
+            in_prefix.append(a)
+        else:
+            outside.append(a)
+    return in_prefix, outside
+
+
+def split_novel_lines_by_source_prefix(
+    novel_lines: list[tuple[str, str, int]],
+    source_path_prefix: str,
+) -> tuple[list[tuple[str, str, int]], list[tuple[str, str, int]]]:
+    """Split ``(file, function, line)`` tuples by whether ``file`` is under ``source_path_prefix``."""
+    in_p = [t for t in novel_lines if source_path_has_prefix(t[0], source_path_prefix)]
+    out_p = [t for t in novel_lines if not source_path_has_prefix(t[0], source_path_prefix)]
+    return in_p, out_p

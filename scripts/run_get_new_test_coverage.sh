@@ -15,4 +15,5 @@ python -m coverage new-tests \
       --limit 1 \
       --baseline-csv "$COV_DIR/covered_either.csv" \
       --line-address-map "$COV_DIR/llc.0.point_symbol_info.json" \
-      --source-path-prefix "$PREFIX"
+      --source-path-prefix "$PREFIX" \
+      --sense-check

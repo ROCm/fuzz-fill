@@ -12,8 +12,11 @@ from coverage.baseline_csv import (
     load_baseline_llc_addresses_by_source_line,
     load_baseline_llc_addresses_from_csv,
     load_llc_line_address_map_rows,
+    norm_address_to_files_from_line_map_rows,
     normalize_llc_address_for_compare,
     novel_source_lines_vs_baseline,
+    split_novel_addresses_by_source_prefix,
+    split_novel_lines_by_source_prefix,
 )
 from coverage.config import CoverageConfig
 from coverage.runner import TestCommandRunner, display_path_for_log
@@ -23,6 +26,12 @@ from coverage.stage_log import stage_line
 
 LLC_TEST_REPORT_CSV = "llc_test_report.csv"
 LLC_TEST_NOVEL_SOURCE_LINES_CSV = "llc_test_novel_source_lines.csv"
+LLC_TEST_NOVEL_SOURCE_LINES_IN_PREFIX_CSV = (
+    "llc_test_novel_source_lines_in_prefix.csv"
+)
+LLC_TEST_NOVEL_SOURCE_LINES_OUTSIDE_PREFIX_CSV = (
+    "llc_test_novel_source_lines_outside_prefix.csv"
+)
 
 
 def _collect_llc_input_files(test_root: Path) -> list[Path]:
@@ -76,6 +85,8 @@ class CoverageSession:
         limit = self.config.new_tests_limit
         assert limit is not None
         src_prefix = self.config.new_tests_source_path_prefix
+        sense = self.config.new_tests_sense_check
+        load_prefix: str | None = None if sense else src_prefix
 
         z = len(tests)
         y = min(limit, z)
@@ -87,14 +98,21 @@ class CoverageSession:
         if baseline_path is not None:
             baseline_norm = load_baseline_llc_addresses_from_csv(
                 baseline_path,
-                source_path_prefix=src_prefix,
-            )
-            pfx_note = (
-                f" (source path prefix {src_prefix!r})" if src_prefix is not None else ""
+                source_path_prefix=load_prefix,
             )
             stage_line(
                 "new-tests",
-                f"Loaded {len(baseline_norm)} unique llc address(es) from baseline CSV"
+                "Loaded "
+                + f"{len(baseline_norm)} unique llc address(es) from baseline CSV"
+                + (
+                    " (--sense-check: full CSV, split by prefix when reporting)"
+                    if sense
+                    else (
+                        f" (source path prefix {src_prefix!r})"
+                        if src_prefix is not None
+                        else ""
+                    )
+                ),
             )
 
         line_map_path = self.config.new_tests_line_address_map
@@ -103,24 +121,34 @@ class CoverageSession:
         if line_map_path is not None:
             line_map_rows = load_llc_line_address_map_rows(
                 line_map_path,
-                source_path_prefix=src_prefix,
+                source_path_prefix=load_prefix,
             )
             stage_line(
                 "new-tests",
                 "Loaded source lines from --line-address-map "
                 f"{display_path_for_log(line_map_path)}"
-                + (f" (prefix {src_prefix!r})" if src_prefix is not None else ""),
+                + (
+                    " (--sense-check: full map, split by prefix when reporting)"
+                    if sense
+                    else (f" (prefix {src_prefix!r})" if src_prefix is not None else "")
+                ),
             )
             assert baseline_path is not None
             baseline_by_line = load_baseline_llc_addresses_by_source_line(
                 baseline_path,
-                source_path_prefix=src_prefix,
+                source_path_prefix=load_prefix,
             )
             stage_line(
                 "new-tests",
                 f"Loaded {len(baseline_by_line)} baseline (file,function,line) location(s) "
-                "for per-line comparison",
+                "for per-line comparison"
+                + (" (--sense-check: full baseline rows)" if sense else ""),
             )
+
+        norm_to_files: dict[str, frozenset[str]] | None = None
+        if sense and line_map_rows is not None:
+            assert src_prefix is not None
+            norm_to_files = norm_address_to_files_from_line_map_rows(line_map_rows)
 
         def raw_llc_sancov_names() -> set[str]:
             return {p.name for p in self.san_cov.collect_raw(cov, "llc")}
@@ -138,8 +166,19 @@ class CoverageSession:
             "novel_source_line_count",
             "novel_vs_baseline_addresses",
         ]
+        if sense:
+            report_fields.extend(
+                [
+                    "novel_vs_baseline_addresses_in_prefix",
+                    "novel_vs_baseline_addresses_outside_prefix",
+                    "novel_source_line_count_in_prefix",
+                    "novel_source_line_count_outside_prefix",
+                ]
+            )
 
         novel_path = cov / LLC_TEST_NOVEL_SOURCE_LINES_CSV
+        novel_path_in = cov / LLC_TEST_NOVEL_SOURCE_LINES_IN_PREFIX_CSV
+        novel_path_out = cov / LLC_TEST_NOVEL_SOURCE_LINES_OUTSIDE_PREFIX_CSV
         any_failed = False
         with ExitStack() as stack:
             report_f = stack.enter_context(
@@ -151,16 +190,32 @@ class CoverageSession:
 
             novel_f = None
             novel_writer: csv.DictWriter | None = None
+            novel_f_in = None
+            novel_writer_in: csv.DictWriter | None = None
+            novel_f_out = None
+            novel_writer_out: csv.DictWriter | None = None
             if line_map_rows is not None:
-                novel_f = stack.enter_context(
-                    novel_path.open("w", newline="", encoding="utf-8")
-                )
-                novel_writer = csv.DictWriter(
-                    novel_f,
-                    fieldnames=["test", "file", "function", "line"],
-                )
-                novel_writer.writeheader()
-                novel_f.flush()
+                line_fields = ["test", "file", "function", "line"]
+                if sense:
+                    novel_f_in = stack.enter_context(
+                        novel_path_in.open("w", newline="", encoding="utf-8")
+                    )
+                    novel_writer_in = csv.DictWriter(novel_f_in, fieldnames=line_fields)
+                    novel_writer_in.writeheader()
+                    novel_f_in.flush()
+                    novel_f_out = stack.enter_context(
+                        novel_path_out.open("w", newline="", encoding="utf-8")
+                    )
+                    novel_writer_out = csv.DictWriter(novel_f_out, fieldnames=line_fields)
+                    novel_writer_out.writeheader()
+                    novel_f_out.flush()
+                else:
+                    novel_f = stack.enter_context(
+                        novel_path.open("w", newline="", encoding="utf-8")
+                    )
+                    novel_writer = csv.DictWriter(novel_f, fieldnames=line_fields)
+                    novel_writer.writeheader()
+                    novel_f.flush()
 
             for i, test_path in enumerate(to_run, start=1):
                 rel = test_path.relative_to(d)
@@ -210,27 +265,82 @@ class CoverageSession:
                     }
 
                 novel_line_count: str | int = ""
+                sense_row: dict[str, object] = {}
                 if line_map_rows is not None and baseline_by_line is not None:
                     novel_src = novel_source_lines_vs_baseline(
                         line_map_rows, baseline_by_line, test_norm
                     )
-                    novel_line_count = len(novel_src)
-                    stage_line(
-                        "new-tests",
-                        f"{novel_line_count} source line(s) for test hit by new "
-                        "coverage but no line id in baseline",
-                    )
-                    assert novel_writer is not None and novel_f is not None
-                    for file_s, func_s, line_num in novel_src:
-                        novel_writer.writerow(
-                            {
-                                "test": test_key,
-                                "file": file_s,
-                                "function": func_s,
-                                "line": line_num,
-                            }
+                    if sense:
+                        assert (
+                            norm_to_files is not None
+                            and src_prefix is not None
+                            and novel_writer_in is not None
+                            and novel_writer_out is not None
+                            and novel_f_in is not None
+                            and novel_f_out is not None
                         )
-                    novel_f.flush()
+                        in_addrs, out_addrs = split_novel_addresses_by_source_prefix(
+                            novel, norm_to_files, src_prefix
+                        )
+                        in_lines, out_lines = split_novel_lines_by_source_prefix(
+                            novel_src, src_prefix
+                        )
+                        novel_line_count = len(in_lines) + len(out_lines)
+                        sense_row = {
+                            "novel_vs_baseline_addresses_in_prefix": json.dumps(
+                                in_addrs
+                            ),
+                            "novel_vs_baseline_addresses_outside_prefix": json.dumps(
+                                out_addrs
+                            ),
+                            "novel_source_line_count_in_prefix": len(in_lines),
+                            "novel_source_line_count_outside_prefix": len(out_lines),
+                        }
+                        stage_line(
+                            "new-tests",
+                            f"{novel_line_count} novel source line(s) total "
+                            f"({len(in_lines)} under prefix, {len(out_lines)} outside); "
+                            f"{len(in_addrs)} / {len(out_addrs)} novel address(es) "
+                            "under prefix / outside",
+                        )
+                        for file_s, func_s, line_num in in_lines:
+                            novel_writer_in.writerow(
+                                {
+                                    "test": test_key,
+                                    "file": file_s,
+                                    "function": func_s,
+                                    "line": line_num,
+                                }
+                            )
+                        for file_s, func_s, line_num in out_lines:
+                            novel_writer_out.writerow(
+                                {
+                                    "test": test_key,
+                                    "file": file_s,
+                                    "function": func_s,
+                                    "line": line_num,
+                                }
+                            )
+                        novel_f_in.flush()
+                        novel_f_out.flush()
+                    else:
+                        novel_line_count = len(novel_src)
+                        stage_line(
+                            "new-tests",
+                            f"{novel_line_count} source line(s) for test hit by new "
+                            "coverage but no line id in baseline",
+                        )
+                        assert novel_writer is not None and novel_f is not None
+                        for file_s, func_s, line_num in novel_src:
+                            novel_writer.writerow(
+                                {
+                                    "test": test_key,
+                                    "file": file_s,
+                                    "function": func_s,
+                                    "line": line_num,
+                                }
+                            )
+                        novel_f.flush()
 
                 writer.writerow(
                     {
@@ -239,6 +349,7 @@ class CoverageSession:
                         "raw_sancov_files": json.dumps(new_names),
                         "novel_vs_baseline_addresses": json.dumps(novel),
                         "novel_source_line_count": novel_line_count,
+                        **sense_row,
                         **row_counts,
                     }
                 )
@@ -253,10 +364,22 @@ class CoverageSession:
             f"LLC test report CSV -> {display_path_for_log(report_path)}",
         )
         if line_map_rows is not None:
-            stage_line(
-                "new-tests",
-                f"Novel source lines (detail) -> {display_path_for_log(novel_path)}",
-            )
+            if sense:
+                stage_line(
+                    "new-tests",
+                    "Novel source lines under prefix -> "
+                    f"{display_path_for_log(novel_path_in)}",
+                )
+                stage_line(
+                    "new-tests",
+                    "Novel source lines outside prefix -> "
+                    f"{display_path_for_log(novel_path_out)}",
+                )
+            else:
+                stage_line(
+                    "new-tests",
+                    f"Novel source lines (detail) -> {display_path_for_log(novel_path)}",
+                )
 
         return 1 if any_failed else 0
 

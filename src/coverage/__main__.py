@@ -149,7 +149,9 @@ def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="PATH",
         help="point_symbol_info.json (symcov point-symbol-info extract from a LIT merge/symbolize run). "
-        "Requires --baseline-csv. Writes llc_test_novel_source_lines.csv.",
+        "Requires --baseline-csv. Writes llc_test_novel_source_lines.csv, or with --sense-check "
+        "writes llc_test_novel_source_lines_in_prefix.csv and "
+        "llc_test_novel_source_lines_outside_prefix.csv.",
     )
     p.add_argument(
         "--source-path-prefix",
@@ -159,6 +161,15 @@ def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
         help="Keep only baseline CSV rows and line-map JSON file keys whose source path is this "
         "POSIX path or under it (expanduser; compared after strip). Requires --baseline-csv. "
         "Skips non-matching rows before json.loads / line indexing to shrink memory and work.",
+    )
+    p.add_argument(
+        "--sense-check",
+        action="store_true",
+        help="With --baseline-csv, --line-address-map, and --source-path-prefix: load baseline and "
+        "line map without path filtering, compare tests against the full baseline, then report "
+        "novel addresses and source lines in two buckets—under the prefix vs outside it. "
+        "Writes llc_test_novel_source_lines_in_prefix.csv and "
+        "llc_test_novel_source_lines_outside_prefix.csv instead of a single novel-lines file.",
     )
 
 
@@ -313,6 +324,7 @@ def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfi
         new_tests_baseline_csv=None,
         new_tests_line_address_map=None,
         new_tests_source_path_prefix=None,
+        new_tests_sense_check=False,
     )
 
 
@@ -347,6 +359,14 @@ def _config_from_new_tests_args(args: argparse.Namespace, base: Path) -> Coverag
         if not source_prefix:
             raise ValueError("--source-path-prefix must be non-empty")
 
+    if args.sense_check:
+        if baseline_csv is None:
+            raise ValueError("--sense-check requires --baseline-csv")
+        if line_map is None:
+            raise ValueError("--sense-check requires --line-address-map")
+        if source_prefix is None:
+            raise ValueError("--sense-check requires --source-path-prefix")
+
     build_bin_dir = _resolve_build_bin_dir(args, base)
 
     if args.coverage_dir is not None:
@@ -374,6 +394,7 @@ def _config_from_new_tests_args(args: argparse.Namespace, base: Path) -> Coverag
         new_tests_baseline_csv=baseline_csv,
         new_tests_line_address_map=line_map,
         new_tests_source_path_prefix=source_prefix,
+        new_tests_sense_check=args.sense_check,
     )
 
 

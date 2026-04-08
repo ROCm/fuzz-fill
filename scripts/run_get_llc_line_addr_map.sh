@@ -7,6 +7,6 @@ PREFIX=$LLVM/llvm/lib/Target/AMDGPU
 
 # Gets the line-to-address map for the llc binary from the symcov file.
 python -m coverage symcov-line-map \
-      $COV_DIR/llc.0.symcov \
-      --filter "$PREFIX"
+      $COV_DIR/llc.0.symcov
+#      --filter "$PREFIX"
 
