@@ -405,10 +405,12 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="coverage",
-        description="LLVM SanitizerCoverage tools (run, new-tests, map, symcov-line-map).",
+        description="LLVM SanitizerCoverage tools (run, new-tests, map, symcov-line-map, analyse).",
     )
     sub = parser.add_subparsers(
-        dest="subcmd", metavar="{run,new-tests,map,symcov-line-map}", required=True
+        dest="subcmd",
+        metavar="{run,new-tests,map,symcov-line-map,analyse}",
+        required=True,
     )
     run_p = sub.add_parser(
         "run",
@@ -434,7 +436,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     _add_symcov_line_map_arguments(slm_p)
 
+    analyse_p = sub.add_parser(
+        "analyse",
+        help="Summarise artifacts from a coverage new-tests output directory.",
+    )
+    analyse_p.add_argument(
+        "output_dir",
+        type=Path,
+        metavar="DIR",
+        help="Directory produced by ``coverage new-tests`` (contains llc_test_report.csv and/or "
+        "per-test novel source line CSVs).",
+    )
+
     args = parser.parse_args(argv)
+
+    if args.subcmd == "analyse":
+        from coverage.analyse import analyse_main
+
+        return analyse_main(args)
 
     if args.subcmd == "map":
         from coverage.map import map_main
