@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from coverage.constants import MERGED_SANCOV_SUFFIX_ID
-from coverage.merge import collect_sancov_files, union_sancov_batched
 
 _STATS_RE = re.compile(
     r"^(all-edges|cov-edges|all-functions|cov-functions):\s*(\d+)\s*$", re.MULTILINE
@@ -56,8 +57,13 @@ class SanCov:
         return self.build_bin_dir / name
 
     def collect_raw(self, coverage_dir: Path, binary_name: str) -> list[Path]:
-        return collect_sancov_files(
-            coverage_dir, binary_name, self.merged_suffix_id
+        """Raw ``<binary>.<digits>.sancov`` only; skips the reserved merged filename."""
+        pat = re.compile(rf"^{re.escape(binary_name)}\.\d+\.sancov$")
+        merged_name = f"{binary_name}.{self.merged_suffix_id}.sancov"
+        return sorted(
+            p
+            for p in coverage_dir.iterdir()
+            if p.is_file() and pat.match(p.name) and p.name != merged_name
         )
 
     def unique_addresses_from_print(self, sancov_file: Path) -> set[str]:
@@ -83,9 +89,39 @@ class SanCov:
         raw_files: list[Path],
         merged_out: Path,
     ) -> None:
-        union_sancov_batched(
-            self.sancov_bin, raw_files, merged_out, self.union_batch
-        )
+        """Merge raw ``.sancov`` files with repeated ``sancov -union`` (batched)."""
+        if not raw_files:
+            raise FileNotFoundError(
+                f"No raw <binary>.<digits>.sancov inputs to merge under {merged_out.parent}"
+            )
+        if len(raw_files) == 1:
+            shutil.copy(raw_files[0], merged_out)
+            return
+
+        sancov = self.sancov_bin
+        batch = self.union_batch
+        layer = list(raw_files)
+        with tempfile.TemporaryDirectory(dir=merged_out.parent) as tmp:
+            tmp_path = Path(tmp)
+            round_idx = 0
+            while len(layer) > 1:
+                nxt: list[Path] = []
+                for i in range(0, len(layer), batch):
+                    chunk = layer[i : i + batch]
+                    if len(chunk) == 1:
+                        nxt.append(chunk[0])
+                        continue
+                    out_f = tmp_path / f"u_{round_idx}_{len(nxt)}.sancov"
+                    subprocess.run(
+                        [str(sancov), "-union"]
+                        + [str(p) for p in chunk]
+                        + ["--output", str(out_f)],
+                        check=True,
+                    )
+                    nxt.append(out_f)
+                layer = nxt
+                round_idx += 1
+            shutil.copy(layer[0], merged_out)
 
     def symbolize(
         self,
