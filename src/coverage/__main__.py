@@ -15,6 +15,52 @@ from coverage.constants import (
 )
 from coverage.session import CoverageSession
 
+# Default coverage output folder names under <repo>/data/coverage_output/ (see _config_from_*_args).
+_COVERAGE_DIR_PREFIX_RUN = "test_suite"
+_COVERAGE_DIR_PREFIX_NEW_TESTS = "new_tests"
+_COVERAGE_DEFAULT_FOLDER_RUN = f"{_COVERAGE_DIR_PREFIX_RUN}_<timestamp>"
+_COVERAGE_DEFAULT_FOLDER_NEW_TESTS = f"{_COVERAGE_DIR_PREFIX_NEW_TESTS}_<timestamp>"
+
+_LLVM_PROJECT_HELP = "Path to llvm-project root (default: <repo>/llvm-project)."
+_BUILD_DIR_HELP = (
+    "LLVM build directory (e.g. build/ or build-amdgpu/). Instrumented tools and sancov are "
+    "resolved from <build-dir>/bin/ unless --build-dir already names a .../bin directory. "
+    "Separate from where the test command runs (run's --cwd or new-tests' --tests-dir). "
+    "Default: <llvm-project>/build."
+)
+
+
+def _coverage_dir_help(default_folder: str) -> str:
+    return (
+        "SanitizerCoverage output directory (raw .sancov, merges, symbolized JSON, CSV reports). "
+        f"Default: <repo>/data/coverage_output/{default_folder}."
+    )
+
+
+def _add_shared_llvm_coverage_args(
+    p: argparse.ArgumentParser, *, coverage_default_folder: str
+) -> None:
+    """``run`` and ``new-tests`` share ``--llvm-project``, ``--build-dir``, ``--coverage-dir``."""
+    g = p.add_argument_group("LLVM tree and coverage output")
+    g.add_argument(
+        "--llvm-project",
+        type=Path,
+        default=None,
+        help=_LLVM_PROJECT_HELP,
+    )
+    g.add_argument(
+        "--build-dir",
+        type=Path,
+        default=None,
+        help=_BUILD_DIR_HELP,
+    )
+    g.add_argument(
+        "--coverage-dir",
+        type=Path,
+        default=None,
+        help=_coverage_dir_help(coverage_default_folder),
+    )
+
 
 def _add_run_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument(
@@ -32,26 +78,7 @@ def _add_run_arguments(p: argparse.ArgumentParser) -> None:
         help="Value for lit --filter= when using the default command (default: %(default)s). "
         "Ignored when --command (-c) is set.",
     )
-    p.add_argument(
-        "--llvm-project",
-        type=Path,
-        default=None,
-        help="Path to llvm-project root (default: <repo>/llvm-project)",
-    )
-    p.add_argument(
-        "--build-dir",
-        type=Path,
-        default=None,
-        help="LLVM build tree (e.g. build/ or build-amdgpu/); each --binary and sancov are "
-        "taken from <this>/bin/. Independent of --cwd. Default: <llvm-project>/build.",
-    )
-    p.add_argument(
-        "--coverage-dir",
-        type=Path,
-        default=None,
-        help="Directory for raw .sancov files and merged outputs "
-        "(default: <repo>/data/coverage_output/test_suite_<timestamp>)",
-    )
+    _add_shared_llvm_coverage_args(p, coverage_default_folder=_COVERAGE_DEFAULT_FOLDER_RUN)
     p.add_argument(
         "--cwd",
         type=Path,
@@ -97,24 +124,8 @@ def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
         help="Search recursively for *.ll and *.bc; run llc -o /dev/null on each selected file "
         "(cwd is this directory) with UBSAN SanitizerCoverage.",
     )
-    p.add_argument(
-        "--llvm-project",
-        type=Path,
-        default=None,
-        help="Path to llvm-project root (default: <repo>/llvm-project)",
-    )
-    p.add_argument(
-        "--build-dir",
-        type=Path,
-        default=None,
-        help="LLVM build tree; llc and sancov are taken from <build>/bin/. Default: <llvm-project>/build.",
-    )
-    p.add_argument(
-        "--coverage-dir",
-        type=Path,
-        default=None,
-        help="Directory for raw llc.*.sancov and llc_test_report.csv "
-        "(default: <repo>/data/coverage_output/new_tests_<timestamp>).",
+    _add_shared_llvm_coverage_args(
+        p, coverage_default_folder=_COVERAGE_DEFAULT_FOLDER_NEW_TESTS
     )
     p.add_argument(
         "--limit",
@@ -278,7 +289,10 @@ def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfi
         coverage_dir = Path(args.coverage_dir).resolve()
     else:
         coverage_dir = (
-            base / "data" / "coverage_output" / f"test_suite_{int(time.time())}"
+            base
+            / "data"
+            / "coverage_output"
+            / f"{_COVERAGE_DIR_PREFIX_RUN}_{int(time.time())}"
         ).resolve()
 
     outline_json = Path(args.outline_json).resolve() if args.outline_json else None
@@ -338,7 +352,10 @@ def _config_from_new_tests_args(args: argparse.Namespace, base: Path) -> Coverag
         coverage_dir = Path(args.coverage_dir).resolve()
     else:
         coverage_dir = (
-            base / "data" / "coverage_output" / f"new_tests_{int(time.time())}"
+            base
+            / "data"
+            / "coverage_output"
+            / f"{_COVERAGE_DIR_PREFIX_NEW_TESTS}_{int(time.time())}"
         ).resolve()
 
     return CoverageConfig(
