@@ -149,9 +149,11 @@ def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="PATH",
         help="point_symbol_info.json (symcov point-symbol-info extract from a LIT merge/symbolize run). "
-        "Requires --baseline-csv. Writes llc_test_novel_source_lines.csv, or with --sense-check "
-        "writes llc_test_novel_source_lines_in_prefix.csv and "
-        "llc_test_novel_source_lines_outside_prefix.csv.",
+        "Requires --baseline-csv. Writes one CSV per test under llc_test_novel_source_lines/, or "
+        "with --sense-check under llc_test_novel_source_lines_in_prefix/ and "
+        "llc_test_novel_source_lines_outside_prefix/. "
+        "When the map is loaded in full (no --source-path-prefix, or with --sense-check), aborts "
+        "with an error if any llc address from a test is missing from the map.",
     )
     p.add_argument(
         "--source-path-prefix",
@@ -168,8 +170,8 @@ def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
         help="With --baseline-csv, --line-address-map, and --source-path-prefix: load baseline and "
         "line map without path filtering, compare tests against the full baseline, then report "
         "novel addresses and source lines in two buckets—under the prefix vs outside it. "
-        "Writes llc_test_novel_source_lines_in_prefix.csv and "
-        "llc_test_novel_source_lines_outside_prefix.csv instead of a single novel-lines file.",
+        "Writes per-test CSVs under llc_test_novel_source_lines_in_prefix/ and "
+        "llc_test_novel_source_lines_outside_prefix/ instead of a single combined file.",
     )
 
 

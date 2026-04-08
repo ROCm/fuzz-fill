@@ -250,6 +250,17 @@ def novel_source_lines_vs_baseline(
     return sorted(flagged)
 
 
+def normalized_addresses_missing_from_line_map(
+    test_normalized_addresses: set[str],
+    norm_to_files: dict[str, frozenset[str]],
+) -> list[str]:
+    """
+    Normalized llc ids hit by a test that never appear in ``norm_to_files`` (built from the line
+    map). Sorted for stable diagnostics.
+    """
+    return sorted(test_normalized_addresses - norm_to_files.keys())
+
+
 def norm_address_to_files_from_line_map_rows(
     line_map_rows: list[tuple[str, str, int, frozenset[str]]],
 ) -> dict[str, frozenset[str]]:
