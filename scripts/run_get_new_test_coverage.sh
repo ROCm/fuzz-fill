@@ -12,7 +12,7 @@ PREFIX=$LLVM/llvm/lib/Target/AMDGPU
 python -m coverage new-tests \
       --build-dir "$BUILD_DIR" \
       --tests-dir "$TESTS_DIR" \
-      --limit 10 \
+      --limit 1000 \
       --baseline-csv "$COV_DIR/covered_either.csv" \
       --line-address-map "$COV_DIR/llc.0.point_symbol_info.json" \
       --source-path-prefix "$PREFIX"

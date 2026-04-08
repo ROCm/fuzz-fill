@@ -1,5 +1,6 @@
 scratch/*
 venv/*
 data/*
+logs/*
 coverage_output/*
 **/__pycache__/*

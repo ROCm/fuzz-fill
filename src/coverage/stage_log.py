@@ -15,7 +15,7 @@ def stage_line(
     """Print ``[stage]`` before each line of ``message`` (or ``[stage]`` alone if empty)."""
     out = sys.stdout if file is None else file
     if not message:
-        print(f"[{stage}]", file=out)
+        print(f"[{stage}]", file=out, flush=True)
         return
     for line in message.splitlines():
-        print(f"[{stage}] {line}", file=out)
+        print(f"[{stage}] {line}", file=out, flush=True)

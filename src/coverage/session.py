@@ -391,7 +391,7 @@ class CoverageSession:
                     "new-tests",
                     f"timing: llc {llc_s:.2f}s; novel-line work {novel_line_s:.2f}s",
                 )
-                print()
+                print(flush=True)
 
         stage_line(
             "new-tests",
