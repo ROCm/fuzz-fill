@@ -10,7 +10,6 @@ src/coverage/merge.py
 src/coverage/runner.py
 src/coverage/sancov.py
 src/coverage/session.py
-src/coverage/stats.py
 src/fuzz_fill.egg-info/PKG-INFO
 src/fuzz_fill.egg-info/SOURCES.txt
 src/fuzz_fill.egg-info/dependency_links.txt

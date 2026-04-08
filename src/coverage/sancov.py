@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from coverage.constants import MERGED_SANCOV_SUFFIX_ID
 from coverage.merge import collect_sancov_files, union_sancov_batched
-from coverage.stats import parse_stats_text
+
+_STATS_RE = re.compile(
+    r"^(all-edges|cov-edges|all-functions|cov-functions):\s*(\d+)\s*$", re.MULTILINE
+)
+
+
+def _parse_stats_text(stats_stdout: str) -> dict[str, int]:
+    """Parse sancov ``-print-coverage-stats`` stdout into a small dict."""
+    out: dict[str, int] = {}
+    for m in _STATS_RE.finditer(stats_stdout):
+        key = m.group(1).replace("-", "_")
+        out[key] = int(m.group(2))
+    return out
 
 
 @dataclass(frozen=True)
@@ -135,7 +148,7 @@ class SanCov:
             merged_symcov=symcov_path,
             raw_sancov_count=len(raw_files),
             stats_text=stats_text,
-            stats=parse_stats_text(stats_text),
+            stats=_parse_stats_text(stats_text),
         )
 
     def process_binary(
