@@ -12,9 +12,17 @@ from pathlib import Path
 
 import pandas as pd
 
+from coverage.stage_log import stage_line
+
 
 def _map_log(msg: str) -> None:
-    print(msg, file=sys.stderr)
+    if msg.startswith("[map] "):
+        body = msg[6:]
+    elif msg.startswith("[map]"):
+        body = msg[5:].lstrip()
+    else:
+        body = msg
+    stage_line("map", body, file=sys.stderr)
 
 
 def _joint_path_filter_from_args(args: Namespace) -> Callable[[str], bool] | None:
@@ -209,7 +217,7 @@ def write_symcov_point_symbol_extract(
 def symcov_line_map_main(args: Namespace) -> int:
     symcov_path = Path(args.symcov).resolve()
     if not symcov_path.is_file():
-        print(f"ERROR: symcov is not a file: {symcov_path}", file=sys.stderr)
+        stage_line("map", f"ERROR: symcov is not a file: {symcov_path}", file=sys.stderr)
         return 1
     out_arg = getattr(args, "output", None)
     out_path = Path(out_arg).resolve() if out_arg else None
@@ -219,16 +227,16 @@ def symcov_line_map_main(args: Namespace) -> int:
         try:
             path_rx = re.compile(str(pat).strip())
         except re.error as e:
-            print(f"ERROR: invalid --filter regex: {e}", file=sys.stderr)
+            stage_line("map", f"ERROR: invalid --filter regex: {e}", file=sys.stderr)
             return 1
     try:
         written = write_symcov_point_symbol_extract(
             symcov_path, out_path, path_filter=path_rx
         )
     except (json.JSONDecodeError, OSError, TypeError, ValueError) as e:
-        print(f"ERROR: {e}", file=sys.stderr)
+        stage_line("map", f"ERROR: {e}", file=sys.stderr)
         return 1
-    print(f"Wrote {written}")
+    stage_line("map", f"Wrote {written}")
     return 0
 
 
@@ -492,13 +500,15 @@ def map_main(args: Namespace) -> int:
     create_joint = getattr(args, "create_joint_sancov", False)
     joint_csv = getattr(args, "joint_csv", None)
     if joint_csv is not None and not create_joint:
-        print(
+        stage_line(
+            "map",
             "ERROR: --joint-csv requires --create-joint-sancov",
             file=sys.stderr,
         )
         return 1
     if not get_summary and not create_joint:
-        print(
+        stage_line(
+            "map",
             "ERROR: specify at least one of --get-summary or --create-joint-sancov",
             file=sys.stderr,
         )
@@ -525,7 +535,7 @@ def map_main(args: Namespace) -> int:
         ("opt-sancov", opt_sancov),
     ):
         if not p.is_file():
-            print(f"ERROR: {label} is not a file: {p}", file=sys.stderr)
+            stage_line("map", f"ERROR: {label} is not a file: {p}", file=sys.stderr)
             return 1
 
     _map_log(f"[map] llc symcov:  {llc_symcov} ({llc_symcov.stat().st_size:,} bytes)")
@@ -617,7 +627,7 @@ def map_main(args: Namespace) -> int:
                 csv_df.to_csv(out_csv, index=False)
                 _map_log("[map] Joint CSV write complete.")
         except (json.JSONDecodeError, OSError, TypeError, ValueError) as e:
-            print(f"ERROR: {e}", file=sys.stderr)
+            stage_line("map", f"ERROR: {e}", file=sys.stderr)
             return 1
 
     if get_summary:
@@ -639,10 +649,10 @@ def map_main(args: Namespace) -> int:
                 if getattr(args, "output", None):
                     payload["joint_covered_locations"] = joint_locations
         except json.JSONDecodeError as e:
-            print(f"ERROR: invalid JSON in symcov: {e}", file=sys.stderr)
+            stage_line("map", f"ERROR: invalid JSON in symcov: {e}", file=sys.stderr)
             return 1
         except OSError as e:
-            print(f"ERROR: {e}", file=sys.stderr)
+            stage_line("map", f"ERROR: {e}", file=sys.stderr)
             return 1
 
         text = json.dumps(payload, indent=2)
@@ -650,7 +660,7 @@ def map_main(args: Namespace) -> int:
             out_path = Path(args.output).resolve()
             out_path.write_text(text, encoding="utf-8")
             _map_log(f"[map] Wrote JSON summary ({len(text):,} chars) → {out_path}")
-            print(f"Wrote {out_path}")
+            stage_line("map", f"Wrote {out_path}")
         else:
             _map_log(
                 f"[map] Writing JSON summary to stdout ({len(text):,} chars, "
@@ -666,10 +676,10 @@ def map_main(args: Namespace) -> int:
         )
         if not get_summary:
             _map_log("[map] Summary:")
-            print(msg)
+            stage_line("map", msg)
         elif getattr(args, "output", None):
             _map_log("[map] Summary:")
-            print(msg)
+            stage_line("map", msg)
 
     _map_log("[map] Done.")
     return 0

@@ -14,6 +14,7 @@ from coverage.constants import (
     default_lit_command,
 )
 from coverage.session import CoverageSession
+from coverage.stage_log import stage_line
 
 # Default coverage output folder names under <repo>/data/coverage_output/ (see _config_from_*_args).
 _COVERAGE_DIR_PREFIX_RUN = "test_suite"
@@ -427,12 +428,12 @@ def main(argv: list[str] | None = None) -> int:
         try:
             config = _config_from_run_args(args, base)
         except ValueError as e:
-            print(f"ERROR: {e}")
+            stage_line("coverage", f"ERROR: {e}")
             return 2
         try:
             return CoverageSession(config).run()
         except (FileNotFoundError, RuntimeError) as e:
-            print(f"ERROR: {e}")
+            stage_line("coverage", f"ERROR: {e}")
             return 1
 
     if args.subcmd == "new-tests":
@@ -440,12 +441,12 @@ def main(argv: list[str] | None = None) -> int:
         try:
             config = _config_from_new_tests_args(args, base)
         except ValueError as e:
-            print(f"ERROR: {e}")
+            stage_line("coverage", f"ERROR: {e}")
             return 2
         try:
             return CoverageSession(config).run()
         except (FileNotFoundError, RuntimeError) as e:
-            print(f"ERROR: {e}")
+            stage_line("coverage", f"ERROR: {e}")
             return 1
 
     raise AssertionError(f"unknown subcommand: {args.subcmd}")
