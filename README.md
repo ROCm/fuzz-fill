@@ -34,6 +34,13 @@ To get the single `sancov` file, run:
 
 This will output a `csv` file in the coverage directory that contains all lines covered by either `opt` or `llc` and the list of addresses in the `llc` `sancov` binary that those lines correspond to. This is the set of addresses that new coverage output should be checked against. If the `sancov` file of a test run with `llc` contains an address that does *not* appear in the output `csv` file, then the test has achieved new coverage and should be a candidate test for addition to the test suite.
 
+Next, run:
+```
+./scripts/run_get_new_test_coverage.sh
+```
+
+This will run a set of new tests (that must be pre-existing in a directory), get the line coverage of these tests, and record whether any additional lines have been covered. Information on each test will be saved in `data/coverage_output/new_tests_$ID`.
+
 ### Summary
 
 The `coverage` package (under `src/coverage/`) drives **LLVM SanitizerCoverage** from **llvm-lit** (or a custom command): it sets `UBSAN_OPTIONS` so runs emit raw `*.sancov` files, **merges** them per instrumented binary with `llvm-sancov -union`, **symbolizes** with `sancov -symbolize`, prints **coverage stats**, and writes **`coverage_outline.txt`** in the chosen output directory (and optional **`--outline-json`**).
