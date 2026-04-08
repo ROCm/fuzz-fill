@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import time
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -70,6 +71,17 @@ def _collect_llc_input_files(test_root: Path) -> list[Path]:
     return sorted(paths)
 
 
+def _format_duration_hms(seconds: float) -> str:
+    """Human-readable duration for logs (minutes + seconds, or seconds only)."""
+    if seconds >= 60.0:
+        m = int(seconds // 60)
+        s = seconds - m * 60
+        if m == 1:
+            return f"1 minute {s:.1f} seconds" if s >= 0.05 else "1 minute"
+        return f"{m} minutes {s:.1f} seconds"
+    return f"{seconds:.1f} seconds"
+
+
 class CoverageSession:
     """One llvm-lit (or custom) run plus merge/symbolize for configured binaries."""
 
@@ -109,6 +121,8 @@ class CoverageSession:
         tests = _collect_llc_input_files(d)
         if not tests:
             raise RuntimeError(f"no .ll or .bc files under {d}")
+
+        t0 = time.perf_counter()
 
         limit = self.config.new_tests_limit
         assert limit is not None
@@ -208,6 +222,8 @@ class CoverageSession:
         novel_dir_in = cov / LLC_TEST_NOVEL_SOURCE_LINES_IN_PREFIX_DIR
         novel_dir_out = cov / LLC_TEST_NOVEL_SOURCE_LINES_OUTSIDE_PREFIX_DIR
         any_failed = False
+        sum_llc_s = 0.0
+        sum_novel_line_s = 0.0
         with ExitStack() as stack:
             report_f = stack.enter_context(
                 report_path.open("w", newline="", encoding="utf-8")
@@ -216,6 +232,7 @@ class CoverageSession:
             writer.writeheader()
             report_f.flush()
 
+            tests_with_novel_line = 0
             for i, test_path in enumerate(to_run, start=1):
                 rel = test_path.relative_to(d)
                 test_key = rel.as_posix()
@@ -226,7 +243,10 @@ class CoverageSession:
                 )
                 before = raw_llc_sancov_names()
                 argv = [str(llc), "-o", "/dev/null", str(rel)]
+                t_llc = time.perf_counter()
                 rc = self._runner.run_argv(argv, d, cov, log_per_test=True)
+                llc_s = time.perf_counter() - t_llc
+                sum_llc_s += llc_s
                 after = raw_llc_sancov_names()
                 new_names = sorted(after - before)
 
@@ -280,7 +300,9 @@ class CoverageSession:
 
                 novel_line_count: str | int = ""
                 sense_row: dict[str, object] = {}
+                novel_line_s = 0.0
                 if line_map_rows is not None and baseline_by_line is not None:
+                    t_novel_lines = time.perf_counter()
                     novel_src = novel_source_lines_vs_baseline(
                         line_map_rows, baseline_by_line, test_norm
                     )
@@ -328,6 +350,8 @@ class CoverageSession:
                             novel_dir / _safe_novel_lines_csv_filename(test_key),
                             novel_src,
                         )
+                    novel_line_s = time.perf_counter() - t_novel_lines
+                    sum_novel_line_s += novel_line_s
 
                 writer.writerow(
                     {
@@ -345,6 +369,29 @@ class CoverageSession:
                 if rc != 0:
                     any_failed = True
                     stage_line("new-tests", f"FAILED: test (exit {rc})")
+
+                if (
+                    line_map_rows is not None
+                    and isinstance(novel_line_count, int)
+                    and novel_line_count > 0
+                ):
+                    tests_with_novel_line += 1
+                if line_map_rows is not None:
+                    stage_line(
+                        "new-tests",
+                        f"{i} out of {y} tests processed, "
+                        f"{tests_with_novel_line} cover at least 1 new line",
+                    )
+                else:
+                    stage_line(
+                        "new-tests",
+                        f"{i} out of {y} tests processed",
+                    )
+                stage_line(
+                    "new-tests",
+                    f"timing: llc {llc_s:.2f}s; novel-line work {novel_line_s:.2f}s",
+                )
+                print()
 
         stage_line(
             "new-tests",
@@ -368,6 +415,22 @@ class CoverageSession:
                     "Novel source lines (one CSV per test) -> "
                     f"{display_path_for_log(novel_dir)}/",
                 )
+
+        elapsed = time.perf_counter() - t0
+        per_test = elapsed / y if y else 0.0
+        stage_line(
+            "new-tests",
+            f"{y} tests processed in {_format_duration_hms(elapsed)} "
+            f"-> {per_test:.2f} seconds per test",
+        )
+        if y:
+            avg_llc = sum_llc_s / y
+            avg_nl = sum_novel_line_s / y
+            stage_line(
+                "new-tests",
+                f"Average timing per test: llc {avg_llc:.2f}s, "
+                f"novel-line work {avg_nl:.2f}s",
+            )
 
         return 1 if any_failed else 0
 
@@ -469,7 +532,7 @@ class CoverageSession:
             raw = self.san_cov.collect_raw(self.config.coverage_dir, "llc")
             stage_line(
                 "new-tests",
-                f"({len(raw)} raw llc.*.sancov in {display_path_for_log(self.config.coverage_dir)}; "
+                f"{len(raw)} raw llc.*.sancov in {display_path_for_log(self.config.coverage_dir)}; "
             )
             return run_returncode if run_returncode is not None else 1
 
