@@ -175,7 +175,7 @@ def load_llc_line_address_map_rows(
     With ``source_path_prefix``, drop non-matching top-level file paths from ``point-symbol-info``
     immediately after JSON parse (before building line rows).
     """
-    from coverage.map_cmd import line_address_map_rows_from_symcov
+    from coverage.map import line_address_map_rows_from_symcov
 
     path = Path(map_path)
     data = json.loads(path.read_text(encoding="utf-8"))

@@ -12,7 +12,7 @@ source venv/bin/activate
 pip install -e .
 ```
 
-This installs editable packages, console scripts (`reduce`, `llvm-test-suite-coverage`), and **`pandas`** (used by **`coverage map`**). **`coverage run`** does not import **`map_cmd`**, but pandas is still a declared dependency of the package.
+This installs editable packages, console scripts (`reduce`, `llvm-test-suite-coverage`), and **`pandas`** (used by **`coverage map`**). **`coverage run`** does not import **`coverage.map`**, but pandas is still a declared dependency of the package.
 
 ## Coverage module
 

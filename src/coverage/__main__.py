@@ -413,12 +413,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.subcmd == "map":
-        from coverage.map_cmd import map_main
+        from coverage.map import map_main
 
         return map_main(args)
 
     if args.subcmd == "symcov-line-map":
-        from coverage.map_cmd import symcov_line_map_main
+        from coverage.map import symcov_line_map_main
 
         return symcov_line_map_main(args)
 
