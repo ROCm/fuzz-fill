@@ -17,4 +17,5 @@ python -m coverage new-tests \
       --baseline-csv "$COV_DIR/covered_either.csv" \
       --line-address-map "$COV_DIR/llc.0.point_symbol_info.json" \
       --source-path-prefix "$PREFIX" \
-      --existing-sancov-dir "$SANCOV_DIR"
+      --existing-sancov-dir "$SANCOV_DIR" \
+      --novel-line-coverage-level full

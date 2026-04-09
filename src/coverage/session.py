@@ -13,17 +13,16 @@ from pathlib import Path
 import pandas as pd
 
 from coverage.baseline_csv import (
-    addresses_in_test_not_in_baseline,
+    build_novel_line_map_precompute,
     load_baseline_llc_addresses_by_source_line,
     load_baseline_llc_addresses_from_csv,
     load_llc_line_address_map_rows,
     norm_address_to_files_from_line_map_rows,
-    normalized_addresses_missing_from_line_map,
+    normalize_llc_address_for_compare,
     novel_source_lines_vs_baseline,
     split_novel_addresses_by_source_prefix,
     split_novel_lines_by_source_prefix,
     test_hit_addresses_normalized_df,
-    test_raw_addresses_df,
 )
 from coverage.config import CoverageConfig
 from coverage.runner import TestCommandRunner, display_path_for_log
@@ -359,6 +358,20 @@ class CoverageSession:
         if line_map_df is not None and load_prefix is None:
             norm_addr_files_df = norm_address_to_files_from_line_map_rows(line_map_df)
 
+        novel_line_pre = None
+        if line_map_df is not None and baseline_long_df is not None:
+            novel_line_pre = build_novel_line_map_precompute(
+                line_map_df, baseline_long_df
+            )
+
+        baseline_addr_set: frozenset[str] | None = None
+        if baseline_norm_df is not None and not baseline_norm_df.empty:
+            baseline_addr_set = frozenset(baseline_norm_df["addr"])
+
+        line_map_addr_set: frozenset[str] | None = None
+        if norm_addr_files_df is not None and line_map_df is not None:
+            line_map_addr_set = frozenset(line_map_df["addr"])
+
         def raw_llc_sancov_names() -> set[str]:
             return {p.name for p in self.san_cov.collect_raw(cov, "llc")}
 
@@ -448,21 +461,19 @@ class CoverageSession:
                     sp = sancov_root / basename
                     if sp.is_file():
                         addr_strings |= self.san_cov.unique_addresses_from_print(sp)
-                test_raw_df = test_raw_addresses_df(addr_strings)
                 test_norm_df = test_hit_addresses_normalized_df(addr_strings)
+                tt_set = {normalize_llc_address_for_compare(a) for a in addr_strings}
                 stage_line(
                     "new-tests",
-                    f"{len(test_norm_df)} addresses covered by test",
+                    f"{len(tt_set)} addresses covered by test",
                 )
 
-                if norm_addr_files_df is not None and line_map_df is not None:
-                    missing_df = normalized_addresses_missing_from_line_map(
-                        test_norm_df, line_map_df
-                    )
-                    if not missing_df.empty:
-                        n = len(missing_df)
+                if line_map_addr_set is not None:
+                    missing_norms = sorted(tt_set - line_map_addr_set)
+                    if missing_norms:
+                        n = len(missing_norms)
                         cap = 20
-                        shown = ", ".join(missing_df["addr"].head(cap).astype(str))
+                        shown = ", ".join(missing_norms[:cap])
                         more = f" ... and {n - cap} more" if n > cap else ""
                         raise RuntimeError(
                             f"Test {test_key!r}: {n} llc address(es) from this run are not "
@@ -470,30 +481,31 @@ class CoverageSession:
                             f"{shown}{more}"
                         )
 
-                if baseline_norm_df is not None:
-                    novel_df = addresses_in_test_not_in_baseline(
-                        test_raw_df, baseline_norm_df
-                    )
-                    novel = novel_df["raw"].tolist()
+                novel: list[str] = []
+                novel_df = pd.DataFrame(columns=["raw", "norm"])
+                if baseline_addr_set is not None:
+                    seen_norm: set[str] = set()
+                    for a in sorted(addr_strings):
+                        n = normalize_llc_address_for_compare(a)
+                        if n in baseline_addr_set or n in seen_norm:
+                            continue
+                        seen_norm.add(n)
+                        novel.append(a)
                     stage_line(
                         "new-tests",
                         f"{len(novel)} address(es) from test not in baseline CSV",
                     )
-                    bl = baseline_norm_df["addr"]
-                    tt = test_norm_df["addr"]
                     row_counts = {
-                        "baseline_unique_address_count": int(bl.nunique()),
-                        "test_unique_address_count": int(tt.nunique()),
-                        "test_only_address_count": int(tt.loc[~tt.isin(bl)].nunique()),
-                        "baseline_only_address_count": int(bl.loc[~bl.isin(tt)].nunique()),
-                        "both_address_count": int(tt.loc[tt.isin(bl)].nunique()),
+                        "baseline_unique_address_count": len(baseline_addr_set),
+                        "test_unique_address_count": len(tt_set),
+                        "test_only_address_count": len(tt_set - baseline_addr_set),
+                        "baseline_only_address_count": len(baseline_addr_set - tt_set),
+                        "both_address_count": len(tt_set & baseline_addr_set),
                     }
                 else:
-                    novel_df = pd.DataFrame(columns=["raw", "norm"])
-                    novel = []
                     row_counts = {
                         "baseline_unique_address_count": "",
-                        "test_unique_address_count": int(test_norm_df["addr"].nunique()),
+                        "test_unique_address_count": len(tt_set),
                         "test_only_address_count": "",
                         "baseline_only_address_count": "",
                         "both_address_count": "",
@@ -512,9 +524,19 @@ class CoverageSession:
                         baseline_long_df,
                         test_norm_df,
                         coverage_level=self.config.new_tests_novel_line_coverage_level,
+                        precompute=novel_line_pre,
                     )
                     if sense:
                         assert norm_addr_files_df is not None and src_prefix is not None
+                        if novel:
+                            novel_df = pd.DataFrame(
+                                {
+                                    "raw": novel,
+                                    "norm": [
+                                        normalize_llc_address_for_compare(r) for r in novel
+                                    ],
+                                }
+                            )
                         in_addrs_df, out_addrs_df = split_novel_addresses_by_source_prefix(
                             novel_df, norm_addr_files_df, src_prefix
                         )

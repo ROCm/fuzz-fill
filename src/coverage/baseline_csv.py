@@ -9,9 +9,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import pandas as pd
+
+
+class NovelLineMapPrecompute(NamedTuple):
+    """Cached tables for :func:`novel_source_lines_vs_baseline` (same for every test input)."""
+
+    lm_u: pd.DataFrame
+    overlap_line_keys: pd.DataFrame
+    line_n_addrs: pd.DataFrame
 
 
 def source_path_has_prefix(path_str: str, prefix: str) -> bool:
@@ -227,12 +235,90 @@ def _filter_point_symbol_info_files(
     return out
 
 
+def build_novel_line_map_precompute(
+    full_line_addr_map_df: pd.DataFrame,
+    baseline_line_addr_df: pd.DataFrame,
+) -> NovelLineMapPrecompute:
+    """
+    Build tables shared by every call to :func:`novel_source_lines_vs_baseline` for the same
+    line map and baseline (avoids repeating the line-map × baseline merge per test).
+    """
+    cols = ["file", "function", "line", "addr"]
+    if full_line_addr_map_df.empty or "addr" not in full_line_addr_map_df.columns:
+        lm_u = pd.DataFrame(columns=cols)
+        return NovelLineMapPrecompute(
+            lm_u=lm_u,
+            overlap_line_keys=_empty_loc_df(),
+            line_n_addrs=pd.DataFrame(columns=["file", "function", "line", "n_addrs"]),
+        )
+
+    lm = full_line_addr_map_df[cols].copy()
+    lm_u = lm.drop_duplicates(subset=["file", "function", "line", "addr"])
+    line_n_addrs = (
+        lm_u.groupby(["file", "function", "line"], as_index=False)
+        .agg(n_addrs=("addr", "count"))
+    )
+    if baseline_line_addr_df.empty:
+        overlap_line_keys = _empty_loc_df()
+    else:
+        base = baseline_line_addr_df[cols].copy()
+        overlap = lm.merge(base, on=cols, how="inner")
+        overlap_line_keys = (
+            overlap[cols[:3]].drop_duplicates()
+            if not overlap.empty
+            else _empty_loc_df()
+        )
+    return NovelLineMapPrecompute(
+        lm_u=lm_u,
+        overlap_line_keys=overlap_line_keys,
+        line_n_addrs=line_n_addrs,
+    )
+
+
+def _novel_lines_from_precompute(
+    precompute: NovelLineMapPrecompute,
+    new_test_line_addr_df: pd.DataFrame,
+    coverage_level: Literal["partial", "full"],
+) -> pd.DataFrame:
+    if new_test_line_addr_df.empty or precompute.lm_u.empty:
+        return _empty_loc_df()
+    test_addrs = new_test_line_addr_df["addr"]
+    hit_rows = precompute.lm_u.loc[precompute.lm_u["addr"].isin(test_addrs)]
+    hit_summary = hit_rows.groupby(
+        ["file", "function", "line"], as_index=False
+    ).agg(n_hits=("addr", "count"))
+    merged = precompute.line_n_addrs.merge(
+        hit_summary,
+        on=["file", "function", "line"],
+        how="left",
+    )
+    merged["n_hits"] = merged["n_hits"].fillna(0).astype(int)
+    if coverage_level == "partial":
+        qualifying = merged.loc[merged["n_hits"] > 0, ["file", "function", "line"]]
+    else:
+        qualifying = merged.loc[
+            (merged["n_addrs"] > 0) & (merged["n_hits"] == merged["n_addrs"]),
+            ["file", "function", "line"],
+        ]
+    if qualifying.empty:
+        return _empty_loc_df()
+    out = qualifying.merge(
+        precompute.overlap_line_keys,
+        on=["file", "function", "line"],
+        how="left",
+        indicator=True,
+    )
+    novel = out.loc[out["_merge"] == "left_only", ["file", "function", "line"]]
+    return novel.sort_values(["file", "function", "line"]).reset_index(drop=True)
+
+
 def novel_source_lines_vs_baseline(
     full_line_addr_map_df: pd.DataFrame,
     baseline_line_addr_df: pd.DataFrame,
     new_test_line_addr_df: pd.DataFrame,
     *,
     coverage_level: Literal["partial", "full"] = "partial",
+    precompute: NovelLineMapPrecompute | None = None,
 ) -> pd.DataFrame:
     """
     Lines (``file``, ``function``, ``line``) where no ``addr`` on that line appears in the
@@ -244,6 +330,10 @@ def novel_source_lines_vs_baseline(
     * ``partial`` (default): at least one map ``addr`` on the line is in
       ``new_test_line_addr_df``.
     * ``full``: every distinct map ``addr`` on the line is in ``new_test_line_addr_df``.
+
+    Pass ``precompute`` from :func:`build_novel_line_map_precompute` when evaluating many tests
+    against the same line map and baseline (e.g. ``coverage new-tests``); otherwise the
+    precompute is built on each call.
 
     Missing baseline rows are treated as empty address sets.
     """
@@ -258,48 +348,10 @@ def novel_source_lines_vs_baseline(
     ):
         return _empty_loc_df()
 
-    lm = full_line_addr_map_df[["file", "function", "line", "addr"]].copy()
-    lm_u = lm.drop_duplicates(subset=["file", "function", "line", "addr"])
-    hit_mask = lm_u["addr"].isin(new_test_line_addr_df["addr"])
-    summary = (
-        lm_u.assign(_hit=hit_mask)
-        .groupby(["file", "function", "line"], as_index=False)
-        .agg(n_addrs=("addr", "count"), n_hits=("_hit", "sum"))
+    pc = precompute or build_novel_line_map_precompute(
+        full_line_addr_map_df, baseline_line_addr_df
     )
-
-    if coverage_level == "partial":
-        qualifying = summary.loc[summary["n_hits"] > 0, ["file", "function", "line"]]
-    else:
-        qualifying = summary.loc[
-            (summary["n_addrs"] > 0) & (summary["n_hits"] == summary["n_addrs"]),
-            ["file", "function", "line"],
-        ]
-
-    if qualifying.empty:
-        return _empty_loc_df()
-
-    if baseline_line_addr_df.empty:
-        overlap_keys = pd.DataFrame(columns=["file", "function", "line"])
-    else:
-        base = baseline_line_addr_df[["file", "function", "line", "addr"]].copy()
-        overlap = lm.merge(
-            base,
-            on=["file", "function", "line", "addr"],
-            how="inner",
-        )
-        if overlap.empty:
-            overlap_keys = pd.DataFrame(columns=["file", "function", "line"])
-        else:
-            overlap_keys = overlap[["file", "function", "line"]].drop_duplicates()
-
-    merged = qualifying.merge(
-        overlap_keys,
-        on=["file", "function", "line"],
-        how="left",
-        indicator=True,
-    )
-    novel = merged.loc[merged["_merge"] == "left_only", ["file", "function", "line"]]
-    return novel.sort_values(["file", "function", "line"]).reset_index(drop=True)
+    return _novel_lines_from_precompute(pc, new_test_line_addr_df, coverage_level)
 
 
 def normalized_addresses_missing_from_line_map(
