@@ -10,17 +10,20 @@ import time
 from contextlib import ExitStack
 from pathlib import Path
 
+import pandas as pd
+
 from coverage.baseline_csv import (
     addresses_in_test_not_in_baseline,
     load_baseline_llc_addresses_by_source_line,
     load_baseline_llc_addresses_from_csv,
     load_llc_line_address_map_rows,
     norm_address_to_files_from_line_map_rows,
-    normalize_llc_address_for_compare,
     normalized_addresses_missing_from_line_map,
     novel_source_lines_vs_baseline,
     split_novel_addresses_by_source_prefix,
     split_novel_lines_by_source_prefix,
+    test_hit_addresses_normalized_df,
+    test_raw_addresses_df,
 )
 from coverage.config import CoverageConfig
 from coverage.runner import TestCommandRunner, display_path_for_log
@@ -108,18 +111,11 @@ def _safe_novel_lines_csv_filename(test_key: str) -> str:
     return name
 
 
-def _write_novel_lines_per_test_csv(
-    path: Path,
-    rows: list[tuple[str, str, int]],
-) -> None:
+def _write_novel_lines_per_test_csv(path: Path, df: pd.DataFrame) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["file", "function", "line"])
-        w.writeheader()
-        for file_s, func_s, line_num in rows:
-            w.writerow(
-                {"file": file_s, "function": func_s, "line": line_num},
-            )
+    cols = ["file", "function", "line"]
+    out = df[cols] if not df.empty else pd.DataFrame(columns=cols)
+    out.to_csv(path, index=False, lineterminator="\n", encoding="utf-8")
 
 
 def _collect_llc_input_files(test_root: Path) -> list[Path]:
@@ -302,16 +298,16 @@ class CoverageSession:
                 )
 
         baseline_path = self.config.new_tests_baseline_csv
-        baseline_norm: set[str] | None = None
+        baseline_norm_df: pd.DataFrame | None = None
         if baseline_path is not None:
-            baseline_norm = load_baseline_llc_addresses_from_csv(
+            baseline_norm_df = load_baseline_llc_addresses_from_csv(
                 baseline_path,
                 source_path_prefix=load_prefix,
             )
             stage_line(
                 "new-tests",
                 "Loaded "
-                + f"{len(baseline_norm)} unique llc address(es) from baseline CSV"
+                + f"{len(baseline_norm_df)} unique llc address(es) from baseline CSV"
                 + (
                     " (--sense-check: full CSV, split by prefix when reporting)"
                     if sense
@@ -324,10 +320,10 @@ class CoverageSession:
             )
 
         line_map_path = self.config.new_tests_line_address_map
-        line_map_rows: list[tuple[str, str, int, frozenset[str]]] | None = None
-        baseline_by_line: dict[tuple[str, str, int], frozenset[str]] | None = None
+        line_map_df: pd.DataFrame | None = None
+        baseline_long_df: pd.DataFrame | None = None
         if line_map_path is not None:
-            line_map_rows = load_llc_line_address_map_rows(
+            line_map_df = load_llc_line_address_map_rows(
                 line_map_path,
                 source_path_prefix=load_prefix,
             )
@@ -342,21 +338,26 @@ class CoverageSession:
                 ),
             )
             assert baseline_path is not None
-            baseline_by_line = load_baseline_llc_addresses_by_source_line(
+            baseline_long_df = load_baseline_llc_addresses_by_source_line(
                 baseline_path,
                 source_path_prefix=load_prefix,
             )
+            n_loc = (
+                len(baseline_long_df[["file", "function", "line"]].drop_duplicates())
+                if not baseline_long_df.empty
+                else 0
+            )
             stage_line(
                 "new-tests",
-                f"Loaded {len(baseline_by_line)} baseline (file,function,line) location(s) "
+                f"Loaded {n_loc} baseline (file,function,line) location(s) "
                 "for per-line comparison"
                 + (" (--sense-check: full baseline rows)" if sense else ""),
             )
 
         # Full line map (no path filtering on load): every test hit address must appear in the map.
-        norm_to_files: dict[str, frozenset[str]] | None = None
-        if line_map_rows is not None and load_prefix is None:
-            norm_to_files = norm_address_to_files_from_line_map_rows(line_map_rows)
+        norm_addr_files_df: pd.DataFrame | None = None
+        if line_map_df is not None and load_prefix is None:
+            norm_addr_files_df = norm_address_to_files_from_line_map_rows(line_map_df)
 
         def raw_llc_sancov_names() -> set[str]:
             return {p.name for p in self.san_cov.collect_raw(cov, "llc")}
@@ -447,19 +448,21 @@ class CoverageSession:
                     sp = sancov_root / basename
                     if sp.is_file():
                         addr_strings |= self.san_cov.unique_addresses_from_print(sp)
-                test_norm = {
-                    normalize_llc_address_for_compare(a) for a in addr_strings
-                }
-                stage_line("new-tests", f"{len(test_norm)} addresses covered by test")
+                test_raw_df = test_raw_addresses_df(addr_strings)
+                test_norm_df = test_hit_addresses_normalized_df(addr_strings)
+                stage_line(
+                    "new-tests",
+                    f"{len(test_norm_df)} addresses covered by test",
+                )
 
-                if norm_to_files is not None:
-                    missing = normalized_addresses_missing_from_line_map(
-                        test_norm, norm_to_files
+                if norm_addr_files_df is not None and line_map_df is not None:
+                    missing_df = normalized_addresses_missing_from_line_map(
+                        test_norm_df, line_map_df
                     )
-                    if missing:
-                        n = len(missing)
+                    if not missing_df.empty:
+                        n = len(missing_df)
                         cap = 20
-                        shown = ", ".join(missing[:cap])
+                        shown = ", ".join(missing_df["addr"].head(cap).astype(str))
                         more = f" ... and {n - cap} more" if n > cap else ""
                         raise RuntimeError(
                             f"Test {test_key!r}: {n} llc address(es) from this run are not "
@@ -467,24 +470,30 @@ class CoverageSession:
                             f"{shown}{more}"
                         )
 
-                if baseline_norm is not None:
-                    novel = addresses_in_test_not_in_baseline(addr_strings, baseline_norm)
+                if baseline_norm_df is not None:
+                    novel_df = addresses_in_test_not_in_baseline(
+                        test_raw_df, baseline_norm_df
+                    )
+                    novel = novel_df["raw"].tolist()
                     stage_line(
                         "new-tests",
                         f"{len(novel)} address(es) from test not in baseline CSV",
                     )
+                    bl = baseline_norm_df["addr"]
+                    tt = test_norm_df["addr"]
                     row_counts = {
-                        "baseline_unique_address_count": len(baseline_norm),
-                        "test_unique_address_count": len(test_norm),
-                        "test_only_address_count": len(test_norm - baseline_norm),
-                        "baseline_only_address_count": len(baseline_norm - test_norm),
-                        "both_address_count": len(test_norm & baseline_norm),
+                        "baseline_unique_address_count": int(bl.nunique()),
+                        "test_unique_address_count": int(tt.nunique()),
+                        "test_only_address_count": int(tt.loc[~tt.isin(bl)].nunique()),
+                        "baseline_only_address_count": int(bl.loc[~bl.isin(tt)].nunique()),
+                        "both_address_count": int(tt.loc[tt.isin(bl)].nunique()),
                     }
                 else:
+                    novel_df = pd.DataFrame(columns=["raw", "norm"])
                     novel = []
                     row_counts = {
                         "baseline_unique_address_count": "",
-                        "test_unique_address_count": len(test_norm),
+                        "test_unique_address_count": int(test_norm_df["addr"].nunique()),
                         "test_only_address_count": "",
                         "baseline_only_address_count": "",
                         "both_address_count": "",
@@ -493,46 +502,49 @@ class CoverageSession:
                 novel_line_count: str | int = ""
                 sense_row: dict[str, object] = {}
                 novel_line_s = 0.0
-                if line_map_rows is not None and baseline_by_line is not None:
+                if (
+                    line_map_df is not None
+                    and baseline_long_df is not None
+                ):
                     t_novel_lines = time.perf_counter()
-                    novel_src = novel_source_lines_vs_baseline(
-                        line_map_rows, baseline_by_line, test_norm
+                    novel_src_df = novel_source_lines_vs_baseline(
+                        line_map_df, baseline_long_df, test_norm_df
                     )
                     if sense:
-                        assert norm_to_files is not None and src_prefix is not None
-                        in_addrs, out_addrs = split_novel_addresses_by_source_prefix(
-                            novel, norm_to_files, src_prefix
+                        assert norm_addr_files_df is not None and src_prefix is not None
+                        in_addrs_df, out_addrs_df = split_novel_addresses_by_source_prefix(
+                            novel_df, norm_addr_files_df, src_prefix
                         )
-                        in_lines, out_lines = split_novel_lines_by_source_prefix(
-                            novel_src, src_prefix
+                        in_lines_df, out_lines_df = split_novel_lines_by_source_prefix(
+                            novel_src_df, src_prefix
                         )
-                        novel_line_count = len(in_lines) + len(out_lines)
+                        novel_line_count = len(in_lines_df) + len(out_lines_df)
                         sense_row = {
                             "novel_vs_baseline_addresses_in_prefix": json.dumps(
-                                in_addrs
+                                in_addrs_df["raw"].tolist()
                             ),
                             "novel_vs_baseline_addresses_outside_prefix": json.dumps(
-                                out_addrs
+                                out_addrs_df["raw"].tolist()
                             ),
-                            "novel_source_line_count_in_prefix": len(in_lines),
-                            "novel_source_line_count_outside_prefix": len(out_lines),
+                            "novel_source_line_count_in_prefix": len(in_lines_df),
+                            "novel_source_line_count_outside_prefix": len(out_lines_df),
                         }
                         stage_line(
                             "new-tests",
                             f"{novel_line_count} novel source line(s) total "
-                            f"({len(in_lines)} under prefix, {len(out_lines)} outside); "
-                            f"{len(in_addrs)} / {len(out_addrs)} novel address(es) "
+                            f"({len(in_lines_df)} under prefix, {len(out_lines_df)} outside); "
+                            f"{len(in_addrs_df)} / {len(out_addrs_df)} novel address(es) "
                             "under prefix / outside",
                         )
                         stem = _safe_novel_lines_csv_filename(test_key)
                         _write_novel_lines_per_test_csv(
-                            novel_dir_in / stem, in_lines
+                            novel_dir_in / stem, in_lines_df
                         )
                         _write_novel_lines_per_test_csv(
-                            novel_dir_out / stem, out_lines
+                            novel_dir_out / stem, out_lines_df
                         )
                     else:
-                        novel_line_count = len(novel_src)
+                        novel_line_count = len(novel_src_df)
                         stage_line(
                             "new-tests",
                             f"{novel_line_count} source line(s) for test hit by new "
@@ -540,7 +552,7 @@ class CoverageSession:
                         )
                         _write_novel_lines_per_test_csv(
                             novel_dir / _safe_novel_lines_csv_filename(test_key),
-                            novel_src,
+                            novel_src_df,
                         )
                     novel_line_s = time.perf_counter() - t_novel_lines
                     sum_novel_line_s += novel_line_s
@@ -563,12 +575,12 @@ class CoverageSession:
                     stage_line("new-tests", f"FAILED: test (exit {rc})")
 
                 if (
-                    line_map_rows is not None
+                    line_map_df is not None
                     and isinstance(novel_line_count, int)
                     and novel_line_count > 0
                 ):
                     tests_with_novel_line += 1
-                if line_map_rows is not None:
+                if line_map_df is not None:
                     stage_line(
                         "new-tests",
                         f"{i} out of {y} tests processed, "
@@ -589,7 +601,7 @@ class CoverageSession:
             "new-tests",
             f"LLC test report CSV -> {display_path_for_log(report_path)}",
         )
-        if line_map_rows is not None:
+        if line_map_df is not None:
             if sense:
                 stage_line(
                     "new-tests",

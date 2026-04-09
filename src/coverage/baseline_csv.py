@@ -1,10 +1,16 @@
-"""Load deduplicated llc address ids from joint coverage CSV (``llc_addresses`` column)."""
+"""
+Joint coverage CSV and line maps as pandas DataFrames (``pd.read_csv``, merges, groupby).
+
+Public load/compare helpers return DataFrames with documented columns—no tuple-of-frozenset
+representations in the API.
+"""
 
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
+
+import pandas as pd
 
 
 def source_path_has_prefix(path_str: str, prefix: str) -> bool:
@@ -30,150 +36,144 @@ def normalize_llc_address_for_compare(addr: str) -> str:
     return t.lower()
 
 
+def _empty_addr_df() -> pd.DataFrame:
+    return pd.DataFrame(columns=["addr"])
+
+
+def _empty_raw_df() -> pd.DataFrame:
+    return pd.DataFrame(columns=["raw"])
+
+
+def _empty_loc_df() -> pd.DataFrame:
+    return pd.DataFrame(columns=["file", "function", "line"])
+
+
+def _parse_llc_address_cell(cell: object) -> list[str]:
+    cell_s = (str(cell) if cell is not None else "").strip()
+    if not cell_s or cell_s == "[]":
+        return []
+    try:
+        parsed = json.loads(cell_s)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [
+        normalize_llc_address_for_compare(x)
+        for x in parsed
+        if isinstance(x, str) and x.strip()
+    ]
+
+
+def read_baseline_joint_csv_long(
+    csv_path: Path,
+    *,
+    source_path_prefix: str | None = None,
+) -> pd.DataFrame:
+    """
+    Read joint baseline CSV into long form: columns ``file``, ``function``, ``line``, ``addr``.
+
+    Each JSON element in ``llc_addresses`` becomes one row (normalized ``addr``).
+    """
+    df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
+    if df.empty:
+        return pd.DataFrame(columns=["file", "function", "line", "addr"])
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    for col in ("file", "function", "line", "llc_addresses"):
+        if col not in df.columns:
+            raise ValueError(
+                f"CSV must include {col!r} column (got {list(df.columns)!r}): {csv_path}"
+            )
+    if source_path_prefix is not None:
+        mask = df["file"].map(
+            lambda f: bool(str(f).strip())
+            and source_path_has_prefix(str(f).strip(), source_path_prefix)
+        )
+        df = df.loc[mask]
+    df["_addrs"] = df["llc_addresses"].map(_parse_llc_address_cell)
+    df = df.explode("_addrs", ignore_index=True)
+    df = df.rename(columns={"_addrs": "addr"})
+    df = df.dropna(subset=["addr"])
+    df["addr"] = df["addr"].astype(str)
+    df = df[df["addr"].str.len() > 0]
+    df["line"] = pd.to_numeric(df["line"], errors="coerce")
+    df = df.dropna(subset=["line"])
+    df["line"] = df["line"].astype(int)
+    df["file"] = df["file"].map(lambda s: str(s).strip())
+    df["function"] = df["function"].map(lambda s: str(s).strip())
+    df = df[(df["file"] != "") & (df["function"] != "")]
+    return df[["file", "function", "line", "addr"]].drop_duplicates().reset_index(
+        drop=True
+    )
+
+
 def load_baseline_llc_addresses_from_csv(
     csv_path: Path,
     *,
     source_path_prefix: str | None = None,
-) -> set[str]:
+) -> pd.DataFrame:
     """
-    Read ``file,function,line,llc_addresses`` CSV; parse each ``llc_addresses`` cell as JSON
-    array of strings; return a deduplicated set of **normalized** address ids.
-
-    With ``source_path_prefix``, skip rows whose ``file`` path is not under that prefix (no
-    ``json.loads`` for those rows).
+    Baseline as a deduplicated DataFrame: column ``addr`` (normalized instrumentation ids).
     """
-    out: set[str] = set()
-    with csv_path.open(newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        if reader.fieldnames is None:
-            raise ValueError(f"CSV has no header row: {csv_path}")
-        by_lower = {
-            (name or "").strip().lower(): name for name in reader.fieldnames if name
-        }
-        col = by_lower.get("llc_addresses")
-        if col is None:
-            raise ValueError(
-                f"CSV must include an 'llc_addresses' column (got {list(reader.fieldnames)!r})"
-            )
-        cf: str | None = None
-        if source_path_prefix is not None:
-            cf = by_lower.get("file")
-            if cf is None:
-                raise ValueError(
-                    "--source-path-prefix requires a 'file' column in the baseline CSV "
-                    f"(got {list(reader.fieldnames)!r})"
-                )
-        for row in reader:
-            if cf is not None:
-                file_s = (row.get(cf) or "").strip()
-                if not file_s or not source_path_has_prefix(file_s, source_path_prefix):
-                    continue
-            cell = (row.get(col) or "").strip()
-            if not cell or cell == "[]":
-                continue
-            try:
-                parsed = json.loads(cell)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(parsed, list):
-                continue
-            for item in parsed:
-                if isinstance(item, str) and item.strip():
-                    out.add(normalize_llc_address_for_compare(item))
-    return out
+    long_df = read_baseline_joint_csv_long(
+        csv_path, source_path_prefix=source_path_prefix
+    )
+    if long_df.empty:
+        return _empty_addr_df()
+    return long_df[["addr"]].drop_duplicates().reset_index(drop=True)
 
 
 def load_baseline_llc_addresses_by_source_line(
     csv_path: Path,
     *,
     source_path_prefix: str | None = None,
-) -> dict[tuple[str, str, int], frozenset[str]]:
+) -> pd.DataFrame:
     """
-    Same CSV as :func:`load_baseline_llc_addresses_from_csv`, keyed by ``(file, function, line)``.
-
-    Rows with duplicate keys merge address sets. Line numbers are integers; file/function strings
-    are stripped from the CSV.
-
-    With ``source_path_prefix``, skip rows whose ``file`` is not under that prefix before
-    parsing ``llc_addresses``.
+    Same CSV as :func:`load_baseline_llc_addresses_from_csv`, long form with
+    ``file``, ``function``, ``line``, ``addr``.
     """
-    buckets: dict[tuple[str, str, int], set[str]] = {}
-    with csv_path.open(newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        if reader.fieldnames is None:
-            raise ValueError(f"CSV has no header row: {csv_path}")
-        by_lower = {
-            (name or "").strip().lower(): name for name in reader.fieldnames if name
-        }
-        for key in ("file", "function", "line", "llc_addresses"):
-            if key not in by_lower:
-                raise ValueError(
-                    f"CSV must include {key!r} column (got {list(reader.fieldnames)!r})"
-                )
-        cf = by_lower["file"]
-        cfn = by_lower["function"]
-        cln = by_lower["line"]
-        caddr = by_lower["llc_addresses"]
-        for row in reader:
-            file_s = (row.get(cf) or "").strip()
-            if source_path_prefix is not None and (
-                not file_s or not source_path_has_prefix(file_s, source_path_prefix)
-            ):
-                continue
-            func_s = (row.get(cfn) or "").strip()
-            line_s = (row.get(cln) or "").strip()
-            cell = (row.get(caddr) or "").strip()
-            if not file_s or not func_s or not line_s or not cell or cell == "[]":
-                continue
-            try:
-                line_num = int(line_s)
-            except ValueError:
-                continue
-            try:
-                parsed = json.loads(cell)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(parsed, list):
-                continue
-            loc_key = (file_s, func_s, line_num)
-            acc = buckets.setdefault(loc_key, set())
-            for item in parsed:
-                if isinstance(item, str) and item.strip():
-                    acc.add(normalize_llc_address_for_compare(item))
-    return {k: frozenset(v) for k, v in buckets.items()}
+    return read_baseline_joint_csv_long(
+        csv_path, source_path_prefix=source_path_prefix
+    )
+
+
+def test_hit_addresses_normalized_df(addr_strings: set[str]) -> pd.DataFrame:
+    """One row per distinct normalized address from raw ``sancov --print`` lines."""
+    if not addr_strings:
+        return _empty_addr_df()
+    s = pd.Series(sorted(addr_strings), dtype=object)
+    out = pd.DataFrame({"addr": s.map(normalize_llc_address_for_compare)})
+    return out.drop_duplicates(subset="addr").reset_index(drop=True)
 
 
 def addresses_in_test_not_in_baseline(
-    test_addresses_from_print: set[str],
-    baseline_normalized: set[str],
-) -> list[str]:
+    test_raw_df: pd.DataFrame,
+    baseline_addr_df: pd.DataFrame,
+) -> pd.DataFrame:
     """
-    ``sancov --print`` strings that are not in the baseline when compared by
-    :func:`normalize_llc_address_for_compare`. Sorted for stable output; one representative
-    string per normalized id.
+    Rows with columns ``raw`` (original print string) and ``norm``; one ``raw`` per distinct
+    ``norm`` not present in ``baseline_addr_df['addr']``. ``test_raw_df`` must have column ``raw``.
     """
-    seen_norm: set[str] = set()
-    result: list[str] = []
-    for a in sorted(test_addresses_from_print):
-        n = normalize_llc_address_for_compare(a)
-        if n in baseline_normalized or n in seen_norm:
-            continue
-        seen_norm.add(n)
-        result.append(a)
-    return result
+    if test_raw_df.empty:
+        return pd.DataFrame(columns=["raw", "norm"])
+    df = test_raw_df[["raw"]].copy()
+    df["norm"] = df["raw"].map(normalize_llc_address_for_compare)
+    if baseline_addr_df.empty or baseline_addr_df["addr"].empty:
+        return df.drop_duplicates(subset="norm", keep="first").reset_index(drop=True)
+    df = df.loc[~df["norm"].isin(baseline_addr_df["addr"])]
+    return df.drop_duplicates(subset="norm", keep="first").reset_index(drop=True)
 
 
 def load_llc_line_address_map_rows(
     map_path: Path,
     *,
     source_path_prefix: str | None = None,
-) -> list[tuple[str, str, int, frozenset[str]]]:
+) -> pd.DataFrame:
     """
-    Load ``*.point_symbol_info.json`` (or any symcov-shaped JSON with ``point-symbol-info``)
-    produced by ``symcov-line-map`` / per-test symbolize extract.
+    Load ``*.point_symbol_info.json`` into long form: ``file``, ``function``, ``line``, ``addr``.
 
     With ``source_path_prefix``, drop non-matching top-level file paths from ``point-symbol-info``
-    immediately after JSON parse (before building line rows).
+    before building rows.
     """
     from coverage.map import line_address_map_rows_from_symcov
 
@@ -186,27 +186,28 @@ def load_llc_line_address_map_rows(
     if source_path_prefix is not None:
         data = _filter_point_symbol_info_files(data, source_path_prefix)
     rows = line_address_map_rows_from_symcov(data)
-    out: list[tuple[str, str, int, frozenset[str]]] = []
+    if not rows:
+        return pd.DataFrame(columns=["file", "function", "line", "addr"])
+    recs: list[tuple[str, str, int, str]] = []
     for r in rows:
         addrs = r.get("llc_addresses")
         if not isinstance(addrs, list) or not addrs:
             continue
-        norm = frozenset(
-            normalize_llc_address_for_compare(x)
-            for x in addrs
-            if isinstance(x, str) and x.strip()
-        )
-        if not norm:
-            continue
-        out.append(
-            (
-                str(r["file"]),
-                str(r["function"]),
-                int(r["line"]),
-                norm,
+        for x in addrs:
+            if not isinstance(x, str) or not x.strip():
+                continue
+            recs.append(
+                (
+                    str(r["file"]),
+                    str(r["function"]),
+                    int(r["line"]),
+                    normalize_llc_address_for_compare(x),
+                )
             )
-        )
-    return out
+    if not recs:
+        return pd.DataFrame(columns=["file", "function", "line", "addr"])
+    out = pd.DataFrame(recs, columns=["file", "function", "line", "addr"])
+    return out.drop_duplicates().reset_index(drop=True)
 
 
 def _filter_point_symbol_info_files(
@@ -226,83 +227,137 @@ def _filter_point_symbol_info_files(
 
 
 def novel_source_lines_vs_baseline(
-    line_map_rows: list[tuple[str, str, int, frozenset[str]]],
-    baseline_by_line: dict[tuple[str, str, int], frozenset[str]],
-    test_norm: set[str],
-) -> list[tuple[str, str, int]]:
+    line_map_df: pd.DataFrame,
+    baseline_long_df: pd.DataFrame,
+    test_norm_df: pd.DataFrame,
+) -> pd.DataFrame:
     """
-    Lines where **no** instrumentation id for that ``(file, function, line)`` appears in the
-    baseline row for that same location, but **at least one** id for that line appears in
-    ``test_norm``.
+    Lines (``file``, ``function``, ``line``) where no ``addr`` on that line appears in the
+    baseline for that location, but at least one ``addr`` on that line is in ``test_norm_df``.
 
-    If the baseline CSV has no row for that location, the baseline address set for that line is
-    treated as empty.
+    Missing baseline rows are treated as empty address sets.
     """
-    flagged: list[tuple[str, str, int]] = []
-    for file_s, func_s, line_num, addrs in line_map_rows:
-        if not addrs:
-            continue
-        base_line = baseline_by_line.get((file_s, func_s, line_num), frozenset())
-        if addrs & base_line:
-            continue
-        if addrs & test_norm:
-            flagged.append((file_s, func_s, line_num))
-    return sorted(flagged)
+    if (
+        line_map_df.empty
+        or test_norm_df.empty
+        or "addr" not in line_map_df.columns
+    ):
+        return _empty_loc_df()
+
+    lm = line_map_df[["file", "function", "line", "addr"]].copy()
+    lm_hits = lm.loc[lm["addr"].isin(test_norm_df["addr"])]
+    if lm_hits.empty:
+        return _empty_loc_df()
+
+    hit_keys = lm_hits[["file", "function", "line"]].drop_duplicates()
+
+    if baseline_long_df.empty:
+        novel = hit_keys.sort_values(["file", "function", "line"])
+        return novel.reset_index(drop=True)
+
+    base = baseline_long_df[["file", "function", "line", "addr"]].copy()
+    overlap = lm.merge(
+        base,
+        on=["file", "function", "line", "addr"],
+        how="inner",
+    )
+    if overlap.empty:
+        overlap_keys = pd.DataFrame(columns=["file", "function", "line"])
+    else:
+        overlap_keys = overlap[["file", "function", "line"]].drop_duplicates()
+
+    merged = hit_keys.merge(
+        overlap_keys,
+        on=["file", "function", "line"],
+        how="left",
+        indicator=True,
+    )
+    novel = merged.loc[merged["_merge"] == "left_only", ["file", "function", "line"]]
+    return novel.sort_values(["file", "function", "line"]).reset_index(drop=True)
 
 
 def normalized_addresses_missing_from_line_map(
-    test_normalized_addresses: set[str],
-    norm_to_files: dict[str, frozenset[str]],
-) -> list[str]:
+    test_norm_df: pd.DataFrame,
+    line_map_df: pd.DataFrame,
+) -> pd.DataFrame:
     """
-    Normalized llc ids hit by a test that never appear in ``norm_to_files`` (built from the line
-    map). Sorted for stable diagnostics.
+    Rows of ``test_norm_df`` whose ``addr`` does not appear in ``line_map_df['addr']``.
+    Sorted by ``addr``.
     """
-    return sorted(test_normalized_addresses - norm_to_files.keys())
+    if test_norm_df.empty:
+        return _empty_addr_df()
+    if line_map_df.empty or "addr" not in line_map_df.columns:
+        return test_norm_df.sort_values("addr").reset_index(drop=True)
+    map_addrs = line_map_df["addr"]
+    return (
+        test_norm_df.loc[~test_norm_df["addr"].isin(map_addrs)]
+        .sort_values("addr")
+        .reset_index(drop=True)
+    )
 
 
 def norm_address_to_files_from_line_map_rows(
-    line_map_rows: list[tuple[str, str, int, frozenset[str]]],
-) -> dict[str, frozenset[str]]:
+    line_map_df: pd.DataFrame,
+) -> pd.DataFrame:
     """
-    Map each normalized llc address id to the set of source ``file`` paths that reference it in
-    the line map (union across all rows).
+    Long table ``addr``, ``file`` (deduplicated) for joins and prefix splits.
     """
-    m: dict[str, set[str]] = {}
-    for file_s, _func, _line, addrs in line_map_rows:
-        for n in addrs:
-            m.setdefault(n, set()).add(file_s)
-    return {k: frozenset(v) for k, v in m.items()}
+    if line_map_df.empty:
+        return pd.DataFrame(columns=["addr", "file"])
+    return line_map_df[["addr", "file"]].drop_duplicates().reset_index(drop=True)
 
 
 def split_novel_addresses_by_source_prefix(
-    novel_addresses: list[str],
-    norm_to_files: dict[str, frozenset[str]],
+    novel_raw_df: pd.DataFrame,
+    addr_files_long_df: pd.DataFrame,
     source_path_prefix: str,
-) -> tuple[list[str], list[str]]:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Partition ``novel_addresses`` using :func:`source_path_has_prefix` on mapped file paths.
+    Partition ``novel_raw_df`` (column ``raw``) using mapped ``file`` paths under ``addr``.
 
-    An address is *in* the prefix bucket if any mapped file lies under ``source_path_prefix``.
-    Addresses with no line-map entry go to the *outside* bucket.
+    Returns two DataFrames with column ``raw`` only, preserving input row order.
     """
-    in_prefix: list[str] = []
-    outside: list[str] = []
-    for a in novel_addresses:
-        n = normalize_llc_address_for_compare(a)
-        files = norm_to_files.get(n)
-        if files and any(source_path_has_prefix(f, source_path_prefix) for f in files):
-            in_prefix.append(a)
-        else:
-            outside.append(a)
-    return in_prefix, outside
+    empty = pd.DataFrame(columns=["raw"])
+    if novel_raw_df.empty:
+        return empty.copy(), empty.copy()
+    if addr_files_long_df.empty:
+        return empty.copy(), novel_raw_df[["raw"]].reset_index(drop=True)
+
+    df = novel_raw_df.copy()
+    if "norm" not in df.columns:
+        df["norm"] = df["raw"].map(normalize_llc_address_for_compare)
+    files_side = addr_files_long_df.rename(columns={"addr": "norm"})
+    merged = df.merge(files_side, on="norm", how="left")
+    merged["in_p"] = merged["file"].notna() & merged["file"].map(
+        lambda f: source_path_has_prefix(str(f), source_path_prefix)
+    )
+    norm_in = merged.groupby("norm", sort=False)["in_p"].any()
+    df = df.reset_index(drop=True)
+    df["_in"] = df["norm"].map(norm_in).fillna(False).astype(bool)
+    in_df = df.loc[df["_in"], ["raw"]].reset_index(drop=True)
+    out_df = df.loc[~df["_in"], ["raw"]].reset_index(drop=True)
+    return in_df, out_df
 
 
 def split_novel_lines_by_source_prefix(
-    novel_lines: list[tuple[str, str, int]],
+    novel_lines_df: pd.DataFrame,
     source_path_prefix: str,
-) -> tuple[list[tuple[str, str, int]], list[tuple[str, str, int]]]:
-    """Split ``(file, function, line)`` tuples by whether ``file`` is under ``source_path_prefix``."""
-    in_p = [t for t in novel_lines if source_path_has_prefix(t[0], source_path_prefix)]
-    out_p = [t for t in novel_lines if not source_path_has_prefix(t[0], source_path_prefix)]
-    return in_p, out_p
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split rows by whether ``file`` is under ``source_path_prefix``."""
+    cols = ["file", "function", "line"]
+    empty = pd.DataFrame(columns=cols)
+    if novel_lines_df.empty:
+        return empty.copy(), empty.copy()
+    df = novel_lines_df[cols].copy()
+    mask = df["file"].map(lambda f: source_path_has_prefix(f, source_path_prefix))
+    return (
+        df.loc[mask].reset_index(drop=True),
+        df.loc[~mask].reset_index(drop=True),
+    )
+
+
+def test_raw_addresses_df(addr_strings: set[str]) -> pd.DataFrame:
+    """Sorted unique raw strings as a single-column DataFrame for :func:`addresses_in_test_not_in_baseline`."""
+    if not addr_strings:
+        return _empty_raw_df()
+    return pd.DataFrame({"raw": sorted(addr_strings)})
