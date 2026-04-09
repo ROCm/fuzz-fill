@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -29,3 +30,5 @@ class CoverageConfig:
     new_tests_existing_sancov_dir: Path | None
     # Optional previous llc_test_report.csv mapping test -> raw_sancov_files JSON (and exit codes).
     new_tests_reuse_report: Path | None
+    # With --line-address-map: partial (≥1 addr on line hit) vs full (all map addrs on line hit).
+    new_tests_novel_line_coverage_level: Literal["partial", "full"]

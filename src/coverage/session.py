@@ -508,7 +508,10 @@ class CoverageSession:
                 ):
                     t_novel_lines = time.perf_counter()
                     novel_src_df = novel_source_lines_vs_baseline(
-                        line_map_df, baseline_long_df, test_norm_df
+                        line_map_df,
+                        baseline_long_df,
+                        test_norm_df,
+                        coverage_level=self.config.new_tests_novel_line_coverage_level,
                     )
                     if sense:
                         assert norm_addr_files_df is not None and src_prefix is not None

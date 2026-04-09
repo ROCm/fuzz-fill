@@ -196,6 +196,16 @@ def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
         "``raw_sancov_files`` columns list which basenames belong to each input (and ``llc_exit_code`` "
         "for the report). Required when multiple raw files exist per test or ordering is ambiguous.",
     )
+    p.add_argument(
+        "--novel-line-coverage-level",
+        choices=("partial", "full"),
+        default="partial",
+        help="With --line-address-map: how to flag novel source lines. "
+        "partial: at least one line-map address on the source line is hit by the test and none of "
+        "those addresses appear in the baseline for that location (default). "
+        "full: every line-map address on that source line is hit by the test and none appear in the "
+        "baseline for that location.",
+    )
 
 
 def _add_symcov_line_map_arguments(p: argparse.ArgumentParser) -> None:
@@ -352,6 +362,7 @@ def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfi
         new_tests_sense_check=False,
         new_tests_existing_sancov_dir=None,
         new_tests_reuse_report=None,
+        new_tests_novel_line_coverage_level="partial",
     )
 
 
@@ -438,6 +449,7 @@ def _config_from_new_tests_args(args: argparse.Namespace, base: Path) -> Coverag
         new_tests_sense_check=args.sense_check,
         new_tests_existing_sancov_dir=existing_sancov,
         new_tests_reuse_report=reuse_report,
+        new_tests_novel_line_coverage_level=args.novel_line_coverage_level,
     )
 
 

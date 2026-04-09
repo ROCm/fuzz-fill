@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 import pandas as pd
 
@@ -227,46 +228,71 @@ def _filter_point_symbol_info_files(
 
 
 def novel_source_lines_vs_baseline(
-    line_map_df: pd.DataFrame,
-    baseline_long_df: pd.DataFrame,
-    test_norm_df: pd.DataFrame,
+    full_line_addr_map_df: pd.DataFrame,
+    baseline_line_addr_df: pd.DataFrame,
+    new_test_line_addr_df: pd.DataFrame,
+    *,
+    coverage_level: Literal["partial", "full"] = "partial",
 ) -> pd.DataFrame:
     """
     Lines (``file``, ``function``, ``line``) where no ``addr`` on that line appears in the
-    baseline for that location, but at least one ``addr`` on that line is in ``test_norm_df``.
+    baseline for that location, and the test satisfies ``coverage_level`` w.r.t. addresses
+    listed for that line in ``full_line_addr_map_df``.
+
+    ``coverage_level``:
+
+    * ``partial`` (default): at least one map ``addr`` on the line is in
+      ``new_test_line_addr_df``.
+    * ``full``: every distinct map ``addr`` on the line is in ``new_test_line_addr_df``.
 
     Missing baseline rows are treated as empty address sets.
     """
+    if coverage_level not in ("partial", "full"):
+        raise ValueError(
+            f"coverage_level must be 'partial' or 'full', got {coverage_level!r}"
+        )
     if (
-        line_map_df.empty
-        or test_norm_df.empty
-        or "addr" not in line_map_df.columns
+        full_line_addr_map_df.empty
+        or new_test_line_addr_df.empty
+        or "addr" not in full_line_addr_map_df.columns
     ):
         return _empty_loc_df()
 
-    lm = line_map_df[["file", "function", "line", "addr"]].copy()
-    lm_hits = lm.loc[lm["addr"].isin(test_norm_df["addr"])]
-    if lm_hits.empty:
+    lm = full_line_addr_map_df[["file", "function", "line", "addr"]].copy()
+    lm_u = lm.drop_duplicates(subset=["file", "function", "line", "addr"])
+    hit_mask = lm_u["addr"].isin(new_test_line_addr_df["addr"])
+    summary = (
+        lm_u.assign(_hit=hit_mask)
+        .groupby(["file", "function", "line"], as_index=False)
+        .agg(n_addrs=("addr", "count"), n_hits=("_hit", "sum"))
+    )
+
+    if coverage_level == "partial":
+        qualifying = summary.loc[summary["n_hits"] > 0, ["file", "function", "line"]]
+    else:
+        qualifying = summary.loc[
+            (summary["n_addrs"] > 0) & (summary["n_hits"] == summary["n_addrs"]),
+            ["file", "function", "line"],
+        ]
+
+    if qualifying.empty:
         return _empty_loc_df()
 
-    hit_keys = lm_hits[["file", "function", "line"]].drop_duplicates()
-
-    if baseline_long_df.empty:
-        novel = hit_keys.sort_values(["file", "function", "line"])
-        return novel.reset_index(drop=True)
-
-    base = baseline_long_df[["file", "function", "line", "addr"]].copy()
-    overlap = lm.merge(
-        base,
-        on=["file", "function", "line", "addr"],
-        how="inner",
-    )
-    if overlap.empty:
+    if baseline_line_addr_df.empty:
         overlap_keys = pd.DataFrame(columns=["file", "function", "line"])
     else:
-        overlap_keys = overlap[["file", "function", "line"]].drop_duplicates()
+        base = baseline_line_addr_df[["file", "function", "line", "addr"]].copy()
+        overlap = lm.merge(
+            base,
+            on=["file", "function", "line", "addr"],
+            how="inner",
+        )
+        if overlap.empty:
+            overlap_keys = pd.DataFrame(columns=["file", "function", "line"])
+        else:
+            overlap_keys = overlap[["file", "function", "line"]].drop_duplicates()
 
-    merged = hit_keys.merge(
+    merged = qualifying.merge(
         overlap_keys,
         on=["file", "function", "line"],
         how="left",
