@@ -25,3 +25,7 @@ class CoverageConfig:
     new_tests_line_address_map: Path | None
     new_tests_source_path_prefix: str | None
     new_tests_sense_check: bool
+    # If set, new-tests does not run llc; reads raw llc.*.sancov from this directory instead.
+    new_tests_existing_sancov_dir: Path | None
+    # Optional previous llc_test_report.csv mapping test -> raw_sancov_files JSON (and exit codes).
+    new_tests_reuse_report: Path | None

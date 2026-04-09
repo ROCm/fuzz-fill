@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import re
 import time
 from contextlib import ExitStack
 from pathlib import Path
@@ -34,6 +35,64 @@ LLC_TEST_NOVEL_SOURCE_LINES_IN_PREFIX_DIR = "llc_test_novel_source_lines_in_pref
 LLC_TEST_NOVEL_SOURCE_LINES_OUTSIDE_PREFIX_DIR = (
     "llc_test_novel_source_lines_outside_prefix"
 )
+
+
+def _new_tests_prior_outputs_present(cov: Path) -> bool:
+    """Whether canonical new-tests artifacts already exist under ``cov``."""
+    if (cov / LLC_TEST_REPORT_CSV).is_file():
+        return True
+    for base in (
+        LLC_TEST_NOVEL_SOURCE_LINES_DIR,
+        LLC_TEST_NOVEL_SOURCE_LINES_IN_PREFIX_DIR,
+        LLC_TEST_NOVEL_SOURCE_LINES_OUTSIDE_PREFIX_DIR,
+    ):
+        d = cov / base
+        if d.is_dir() and any(d.iterdir()):
+            return True
+    return False
+
+
+def _new_tests_version_paths_unused(cov: Path, version_suffix: str) -> bool:
+    """True if report ``llc_test_report{suffix}.csv`` and sibling novel dirs do not exist."""
+    if (cov / f"llc_test_report{version_suffix}.csv").exists():
+        return False
+    for base in (
+        LLC_TEST_NOVEL_SOURCE_LINES_DIR,
+        LLC_TEST_NOVEL_SOURCE_LINES_IN_PREFIX_DIR,
+        LLC_TEST_NOVEL_SOURCE_LINES_OUTSIDE_PREFIX_DIR,
+    ):
+        if (cov / f"{base}{version_suffix}").exists():
+            return False
+    return True
+
+
+def _resolve_new_tests_output_paths(
+    cov: Path, reuse_dir: Path | None
+) -> tuple[Path, Path, Path, Path, str | None]:
+    """
+    With ``--existing-sancov-dir``, if ``llc_test_report.csv`` or novel-line dirs already exist
+    under ``cov``, write to ``llc_test_report_v2.csv`` (then ``_v3``, ...) and matching ``*_vN`` dirs.
+    """
+    if reuse_dir is None or not _new_tests_prior_outputs_present(cov):
+        return (
+            cov / LLC_TEST_REPORT_CSV,
+            cov / LLC_TEST_NOVEL_SOURCE_LINES_DIR,
+            cov / LLC_TEST_NOVEL_SOURCE_LINES_IN_PREFIX_DIR,
+            cov / LLC_TEST_NOVEL_SOURCE_LINES_OUTSIDE_PREFIX_DIR,
+            None,
+        )
+    n = 2
+    while True:
+        suf = f"_v{n}"
+        if _new_tests_version_paths_unused(cov, suf):
+            return (
+                cov / f"llc_test_report{suf}.csv",
+                cov / f"{LLC_TEST_NOVEL_SOURCE_LINES_DIR}{suf}",
+                cov / f"{LLC_TEST_NOVEL_SOURCE_LINES_IN_PREFIX_DIR}{suf}",
+                cov / f"{LLC_TEST_NOVEL_SOURCE_LINES_OUTSIDE_PREFIX_DIR}{suf}",
+                suf,
+            )
+        n += 1
 
 
 def _safe_novel_lines_csv_filename(test_key: str) -> str:
@@ -69,6 +128,88 @@ def _collect_llc_input_files(test_root: Path) -> list[Path]:
     for pattern in ("*.ll", "*.bc"):
         paths.update(p for p in test_root.rglob(pattern) if p.is_file())
     return sorted(paths)
+
+
+_RAW_LLC_SANCOV_RE = re.compile(r"^llc\.(\d+)\.sancov$")
+
+
+def _sorted_raw_llc_sancov_paths(
+    directory: Path, *, merged_suffix_id: str
+) -> list[Path]:
+    """Raw ``llc.<pid>.sancov`` under ``directory``, sorted by numeric PID (excludes merged file)."""
+    merged_name = f"llc.{merged_suffix_id}.sancov"
+    found: list[tuple[int, Path]] = []
+    for p in directory.iterdir():
+        if not p.is_file() or p.name == merged_name:
+            continue
+        m = _RAW_LLC_SANCOV_RE.match(p.name)
+        if m:
+            found.append((int(m.group(1)), p))
+    return [p for _, p in sorted(found, key=lambda t: t[0])]
+
+
+def _pair_tests_to_sancov_by_pid_order(
+    to_run: list[Path],
+    tests_root: Path,
+    existing_dir: Path,
+    merged_suffix_id: str,
+) -> dict[str, list[str]]:
+    files = _sorted_raw_llc_sancov_paths(existing_dir, merged_suffix_id=merged_suffix_id)
+    n = len(to_run)
+    if len(files) != n:
+        raise RuntimeError(
+            f"--existing-sancov-dir {existing_dir}: found {len(files)} raw llc.<pid>.sancov "
+            f"file(s), but {n} test input(s) selected (after --limit). Use --reuse-report with a "
+            f"prior llc_test_report.csv to map tests to files, or ensure exactly one raw file per test."
+        )
+    return {
+        to_run[i].relative_to(tests_root).as_posix(): [files[i].name] for i in range(n)
+    }
+
+
+def _load_llc_test_reuse_report(
+    report_path: Path,
+    to_run: list[Path],
+    tests_root: Path,
+    existing_dir: Path,
+) -> tuple[dict[str, list[str]], dict[str, int]]:
+    with report_path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            raise ValueError(f"empty or invalid CSV: {report_path}")
+        for col in ("test", "raw_sancov_files", "llc_exit_code"):
+            if col not in reader.fieldnames:
+                raise ValueError(
+                    f"reuse report {report_path} missing required column {col!r}"
+                )
+        by_test = {row["test"]: row for row in reader}
+
+    sancov_by_test: dict[str, list[str]] = {}
+    rc_by_test: dict[str, int] = {}
+    for test_path in to_run:
+        key = test_path.relative_to(tests_root).as_posix()
+        row = by_test.get(key)
+        if row is None:
+            raise RuntimeError(
+                f"--reuse-report {report_path} has no row for test {key!r}"
+            )
+        raw_cell = (row.get("raw_sancov_files") or "").strip()
+        basenames: list[str] = json.loads(raw_cell) if raw_cell else []
+        for b in basenames:
+            p = existing_dir / b
+            if not p.is_file():
+                raise FileNotFoundError(
+                    f"reuse report lists {b!r} for test {key!r} but file is missing under "
+                    f"{existing_dir}"
+                )
+        sancov_by_test[key] = basenames
+        rc_cell = row.get("llc_exit_code", "")
+        try:
+            rc = int(rc_cell) if str(rc_cell).strip() != "" else 0
+        except ValueError:
+            rc = 0
+        rc_by_test[key] = rc
+    return sancov_by_test, rc_by_test
 
 
 def _format_duration_hms(seconds: float) -> str:
@@ -111,12 +252,14 @@ class CoverageSession:
         """Run ``llc -o /dev/null`` on each ``*.ll`` / ``*.bc`` under ``new_tests_dir``; per-test addresses via ``sancov --print`` only (no merge/symbolize)."""
         d = self.config.new_tests_dir
         assert d is not None
-        llc = self.san_cov.tool_binary("llc")
-        if not llc.exists():
-            raise FileNotFoundError(f"llc not found at {llc}")
-        sancov_tool = self.san_cov.sancov_bin
-        if not sancov_tool.exists():
-            raise FileNotFoundError(f"sancov not found at {sancov_tool}")
+        reuse_dir = self.config.new_tests_existing_sancov_dir
+        llc_path: Path | None = None
+        if reuse_dir is None:
+            llc_path = self.san_cov.tool_binary("llc")
+            if not llc_path.exists():
+                raise FileNotFoundError(f"llc not found at {llc_path}")
+        if not self.san_cov.sancov_bin.exists():
+            raise FileNotFoundError(f"sancov not found at {self.san_cov.sancov_bin}")
 
         tests = _collect_llc_input_files(d)
         if not tests:
@@ -135,6 +278,29 @@ class CoverageSession:
         to_run = tests[:y]
 
         cov = self.config.coverage_dir
+        sancov_by_test: dict[str, list[str]] | None = None
+        rc_by_test: dict[str, int] = {}
+        if reuse_dir is not None:
+            if self.config.new_tests_reuse_report is not None:
+                sancov_by_test, rc_by_test = _load_llc_test_reuse_report(
+                    self.config.new_tests_reuse_report, to_run, d, reuse_dir
+                )
+                stage_line(
+                    "new-tests",
+                    "Mapped tests to raw .sancov via "
+                    f"{display_path_for_log(self.config.new_tests_reuse_report)}",
+                )
+            else:
+                sancov_by_test = _pair_tests_to_sancov_by_pid_order(
+                    to_run, d, reuse_dir, self.config.merged_suffix_id
+                )
+                stage_line(
+                    "new-tests",
+                    "Mapped tests to .sancov by pairing sorted test paths with raw files sorted by "
+                    f"numeric PID under {display_path_for_log(reuse_dir)}; use --reuse-report if "
+                    "that order does not match your capture.",
+                )
+
         baseline_path = self.config.new_tests_baseline_csv
         baseline_norm: set[str] | None = None
         if baseline_path is not None:
@@ -195,7 +361,17 @@ class CoverageSession:
         def raw_llc_sancov_names() -> set[str]:
             return {p.name for p in self.san_cov.collect_raw(cov, "llc")}
 
-        report_path = cov / LLC_TEST_REPORT_CSV
+        report_path, novel_dir, novel_dir_in, novel_dir_out, out_suffix = (
+            _resolve_new_tests_output_paths(cov, reuse_dir)
+        )
+        if out_suffix is not None:
+            stage_line(
+                "new-tests",
+                f"Prior outputs under {display_path_for_log(cov)}; writing "
+                f"llc_test_report{out_suffix}.csv and novel-line dirs with suffix {out_suffix} "
+                "to avoid overwriting.",
+            )
+
         report_fields = [
             "test",
             "llc_exit_code",
@@ -218,9 +394,6 @@ class CoverageSession:
                 ]
             )
 
-        novel_dir = cov / LLC_TEST_NOVEL_SOURCE_LINES_DIR
-        novel_dir_in = cov / LLC_TEST_NOVEL_SOURCE_LINES_IN_PREFIX_DIR
-        novel_dir_out = cov / LLC_TEST_NOVEL_SOURCE_LINES_OUTSIDE_PREFIX_DIR
         any_failed = False
         sum_llc_s = 0.0
         sum_novel_line_s = 0.0
@@ -236,23 +409,42 @@ class CoverageSession:
             for i, test_path in enumerate(to_run, start=1):
                 rel = test_path.relative_to(d)
                 test_key = rel.as_posix()
-                stage_line(
-                    "new-tests",
-                    f"running [{i}/{y}] of {z} in {display_path_for_log(d)}\n"
-                    f"Test name: {test_key}",
-                )
-                before = raw_llc_sancov_names()
-                argv = [str(llc), "-o", "/dev/null", str(rel)]
-                t_llc = time.perf_counter()
-                rc = self._runner.run_argv(argv, d, cov, log_per_test=True)
-                llc_s = time.perf_counter() - t_llc
-                sum_llc_s += llc_s
-                after = raw_llc_sancov_names()
-                new_names = sorted(after - before)
+                if sancov_by_test is not None:
+                    assert reuse_dir is not None
+                    new_names = list(sancov_by_test[test_key])
+                    rc = rc_by_test.get(test_key, 0)
+                    llc_s = 0.0
+                    sancov_root = reuse_dir
+                    stage_line(
+                        "new-tests",
+                        f"processing [{i}/{y}] of {z} in {display_path_for_log(d)}\n"
+                        f"Test name: {test_key}",
+                    )
+                    stage_line(
+                        "new-tests",
+                        f"reusing {len(new_names)} raw .sancov file(s) from "
+                        f"{display_path_for_log(sancov_root)}",
+                    )
+                else:
+                    stage_line(
+                        "new-tests",
+                        f"running [{i}/{y}] of {z} in {display_path_for_log(d)}\n"
+                        f"Test name: {test_key}",
+                    )
+                    assert llc_path is not None
+                    before = raw_llc_sancov_names()
+                    argv = [str(llc_path), "-o", "/dev/null", str(rel)]
+                    t_llc = time.perf_counter()
+                    rc = self._runner.run_argv(argv, d, cov, log_per_test=True)
+                    llc_s = time.perf_counter() - t_llc
+                    sum_llc_s += llc_s
+                    after = raw_llc_sancov_names()
+                    new_names = sorted(after - before)
+                    sancov_root = cov
 
                 addr_strings: set[str] = set()
                 for basename in new_names:
-                    sp = cov / basename
+                    sp = sancov_root / basename
                     if sp.is_file():
                         addr_strings |= self.san_cov.unique_addresses_from_print(sp)
                 test_norm = {
@@ -529,11 +721,6 @@ class CoverageSession:
         self.config.coverage_dir.mkdir(parents=True, exist_ok=True)
         run_returncode = self.run_tests()
         if self.config.new_tests_dir is not None:
-            raw = self.san_cov.collect_raw(self.config.coverage_dir, "llc")
-            stage_line(
-                "new-tests",
-                f"{len(raw)} raw llc.*.sancov in {display_path_for_log(self.config.coverage_dir)}; "
-            )
             return run_returncode if run_returncode is not None else 1
 
         results = self.process_binaries()

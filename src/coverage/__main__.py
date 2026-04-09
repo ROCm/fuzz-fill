@@ -173,6 +173,29 @@ def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
         "Writes per-test CSVs under llc_test_novel_source_lines_in_prefix/ and "
         "llc_test_novel_source_lines_outside_prefix/ instead of a single combined file.",
     )
+    p.add_argument(
+        "--existing-sancov-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="Do not run llc. Read raw llc.<pid>.sancov files from this directory and run the same "
+        "baseline / novel-line analysis, writing reports under --coverage-dir. "
+        "If that directory already has llc_test_report.csv or per-test novel-line outputs, new "
+        "files are written as llc_test_report_v2.csv (then _v3, …) and matching *_vN directories "
+        "instead of overwriting. "
+        "Either pass --reuse-report pointing at a prior llc_test_report.csv from the same test set, "
+        "or supply exactly one raw llc.*.sancov per selected test (see docs: same order as sorted "
+        "tests under --tests-dir, PIDs increasing).",
+    )
+    p.add_argument(
+        "--reuse-report",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="With --existing-sancov-dir: prior llc_test_report.csv whose ``test`` and "
+        "``raw_sancov_files`` columns list which basenames belong to each input (and ``llc_exit_code`` "
+        "for the report). Required when multiple raw files exist per test or ordering is ambiguous.",
+    )
 
 
 def _add_symcov_line_map_arguments(p: argparse.ArgumentParser) -> None:
@@ -327,6 +350,8 @@ def _config_from_run_args(args: argparse.Namespace, base: Path) -> CoverageConfi
         new_tests_line_address_map=None,
         new_tests_source_path_prefix=None,
         new_tests_sense_check=False,
+        new_tests_existing_sancov_dir=None,
+        new_tests_reuse_report=None,
     )
 
 
@@ -369,6 +394,20 @@ def _config_from_new_tests_args(args: argparse.Namespace, base: Path) -> Coverag
         if source_prefix is None:
             raise ValueError("--sense-check requires --source-path-prefix")
 
+    existing_sancov: Path | None = None
+    if args.existing_sancov_dir is not None:
+        existing_sancov = Path(args.existing_sancov_dir).resolve()
+        if not existing_sancov.is_dir():
+            raise ValueError(f"--existing-sancov-dir is not a directory: {existing_sancov}")
+
+    reuse_report: Path | None = None
+    if args.reuse_report is not None:
+        if existing_sancov is None:
+            raise ValueError("--reuse-report requires --existing-sancov-dir")
+        reuse_report = Path(args.reuse_report).resolve()
+        if not reuse_report.is_file():
+            raise ValueError(f"--reuse-report is not a file: {reuse_report}")
+
     build_bin_dir = _resolve_build_bin_dir(args, base)
 
     if args.coverage_dir is not None:
@@ -397,6 +436,8 @@ def _config_from_new_tests_args(args: argparse.Namespace, base: Path) -> Coverag
         new_tests_line_address_map=line_map,
         new_tests_source_path_prefix=source_prefix,
         new_tests_sense_check=args.sense_check,
+        new_tests_existing_sancov_dir=existing_sancov,
+        new_tests_reuse_report=reuse_report,
     )
 
 
@@ -405,11 +446,12 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="coverage",
-        description="LLVM SanitizerCoverage tools (run, new-tests, map, symcov-line-map, analyse).",
+        description="LLVM SanitizerCoverage tools (run, new-tests, map, symcov-line-map, analyse, "
+        "check-uncovered).",
     )
     sub = parser.add_subparsers(
         dest="subcmd",
-        metavar="{run,new-tests,map,symcov-line-map,analyse}",
+        metavar="{run,new-tests,map,symcov-line-map,analyse,check-uncovered}",
         required=True,
     )
     run_p = sub.add_parser(
@@ -420,7 +462,8 @@ def main(argv: list[str] | None = None) -> int:
 
     new_p = sub.add_parser(
         "new-tests",
-        help="Run llc on .ll/.bc under --tests-dir; per-test raw sancov addresses only (no merge/symbolize).",
+        help="Run llc on .ll/.bc under --tests-dir (or reuse raw .sancov via --existing-sancov-dir); "
+        "per-test addresses via sancov --print only (no merge/symbolize).",
     )
     _add_new_tests_arguments(new_p)
 
@@ -448,12 +491,35 @@ def main(argv: list[str] | None = None) -> int:
         "per-test novel source line CSVs).",
     )
 
+    check_uncovered_p = sub.add_parser(
+        "check-uncovered",
+        help="Check coverage against original/replacement line snippets (stub).",
+    )
+    check_uncovered_p.add_argument(
+        "csv",
+        type=Path,
+        metavar="CSV",
+        help="CSV with columns from ``coverage analyse`` output (per_test_csv, file, function, line) "
+        "plus line_original and line_replacement.",
+    )
+    check_uncovered_p.add_argument(
+        "llvm_build",
+        type=Path,
+        metavar="LLVM-BUILD",
+        help="LLVM build directory (e.g. llvm-project/build); instrumented tools live under bin/.",
+    )
+
     args = parser.parse_args(argv)
 
     if args.subcmd == "analyse":
         from coverage.analyse import analyse_main
 
         return analyse_main(args)
+
+    if args.subcmd == "check-uncovered":
+        from coverage.check_uncovered import check_uncovered_main
+
+        return check_uncovered_main(args)
 
     if args.subcmd == "map":
         from coverage.map import map_main
