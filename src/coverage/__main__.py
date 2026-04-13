@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import secrets
 import sys
 import time
 from pathlib import Path
@@ -21,6 +22,8 @@ _COVERAGE_DIR_PREFIX_RUN = "test_suite"
 _COVERAGE_DIR_PREFIX_NEW_TESTS = "new_tests"
 _COVERAGE_DEFAULT_FOLDER_RUN = f"{_COVERAGE_DIR_PREFIX_RUN}_<timestamp>"
 _COVERAGE_DEFAULT_FOLDER_NEW_TESTS = f"{_COVERAGE_DIR_PREFIX_NEW_TESTS}_<timestamp>"
+# Subdirectory under --existing-sancov-dir for report CSVs (unique id avoids collisions).
+_NEW_TESTS_OUTPUT_IN_SANCOV_PREFIX = "new_tests_output"
 
 _LLVM_PROJECT_HELP = "Path to llvm-project root (default: <repo>/llvm-project)."
 _BUILD_DIR_HELP = (
@@ -39,7 +42,10 @@ def _coverage_dir_help(default_folder: str) -> str:
 
 
 def _add_shared_llvm_coverage_args(
-    p: argparse.ArgumentParser, *, coverage_default_folder: str
+    p: argparse.ArgumentParser,
+    *,
+    coverage_default_folder: str,
+    coverage_dir_help_extra: str = "",
 ) -> None:
     """``run`` and ``new-tests`` share ``--llvm-project``, ``--build-dir``, ``--coverage-dir``."""
     g = p.add_argument_group("LLVM tree and coverage output")
@@ -55,11 +61,14 @@ def _add_shared_llvm_coverage_args(
         default=None,
         help=_BUILD_DIR_HELP,
     )
+    cov_help = _coverage_dir_help(coverage_default_folder)
+    if coverage_dir_help_extra:
+        cov_help = cov_help.rstrip(".") + ". " + coverage_dir_help_extra
     g.add_argument(
         "--coverage-dir",
         type=Path,
         default=None,
-        help=_coverage_dir_help(coverage_default_folder),
+        help=cov_help,
     )
 
 
@@ -126,7 +135,13 @@ def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
         "(cwd is this directory) with UBSAN SanitizerCoverage.",
     )
     _add_shared_llvm_coverage_args(
-        p, coverage_default_folder=_COVERAGE_DEFAULT_FOLDER_NEW_TESTS
+        p,
+        coverage_default_folder=_COVERAGE_DEFAULT_FOLDER_NEW_TESTS,
+        coverage_dir_help_extra=(
+            "With --existing-sancov-dir, if this option is omitted, llc_test_report.csv and "
+            "novel-line directories are written under that directory in "
+            f"{_NEW_TESTS_OUTPUT_IN_SANCOV_PREFIX}_<unix_time>_<8-hex>/ (unique per run)."
+        ),
     )
     p.add_argument(
         "--limit",
@@ -179,10 +194,11 @@ def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="DIR",
         help="Do not run llc. Read raw llc.<pid>.sancov files from this directory and run the same "
-        "baseline / novel-line analysis, writing reports under --coverage-dir. "
-        "If that directory already has llc_test_report.csv or per-test novel-line outputs, new "
-        "files are written as llc_test_report_v2.csv (then _v3, …) and matching *_vN directories "
-        "instead of overwriting. "
+        "baseline / novel-line analysis. If --coverage-dir is omitted, reports are written under "
+        "this directory in new_tests_output_<time>_<id>/ (see --coverage-dir). "
+        "If --coverage-dir points at a directory that already has llc_test_report.csv or "
+        "per-test novel-line outputs, new files use llc_test_report_v2.csv (then _v3, …) and "
+        "matching *_vN directories instead of overwriting. "
         "Either pass --reuse-report pointing at a prior llc_test_report.csv from the same test set, "
         "or supply exactly one raw llc.*.sancov per selected test (see docs: same order as sorted "
         "tests under --tests-dir, PIDs increasing).",
@@ -423,6 +439,11 @@ def _config_from_new_tests_args(args: argparse.Namespace, base: Path) -> Coverag
 
     if args.coverage_dir is not None:
         coverage_dir = Path(args.coverage_dir).resolve()
+    elif existing_sancov is not None:
+        run_id = f"{int(time.time())}_{secrets.token_hex(4)}"
+        coverage_dir = (
+            existing_sancov / f"{_NEW_TESTS_OUTPUT_IN_SANCOV_PREFIX}_{run_id}"
+        ).resolve()
     else:
         coverage_dir = (
             base
