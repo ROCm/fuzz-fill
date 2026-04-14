@@ -533,13 +533,46 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         metavar="CSV",
         help="CSV with columns from ``coverage analyse`` output (per_test_csv, file, function, line) "
-        "plus line_original and line_replacement.",
+        "plus line_original and line_replacement. Optional column ``skip``: value ``1`` skips that row; "
+        "``0`` or empty runs the row.",
     )
     check_uncovered_p.add_argument(
         "llvm_build",
         type=Path,
+        nargs="?",
+        default=None,
         metavar="LLVM-BUILD",
-        help="LLVM build directory (e.g. llvm-project/build); instrumented tools live under bin/.",
+        help="LLVM build directory (e.g. llvm-project/build). Required unless "
+        "``--verify-originals-only``.",
+    )
+    check_uncovered_p.add_argument(
+        "--verify-originals-only",
+        action="store_true",
+        help="Only check that each CSV ``original_line`` matches the source file at ``line``; "
+        "no edits and no ninja. ``LLVM-BUILD`` may be omitted.",
+    )
+    check_uncovered_p.add_argument(
+        "--lit-summary-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="Directory for lit failure summary excerpts when ``ninja check-all`` fails. "
+        "Defaults to the CSV file's directory.",
+    )
+    check_uncovered_p.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip CSV rows when ``{csv_stem}_row{N}_lit_summary.txt`` (failed check-all) or "
+        "``{csv_stem}_row{N}.done`` (completed check-all) already exists under "
+        "``--lit-summary-dir``.",
+    )
+    check_uncovered_p.add_argument(
+        "--start-csv-row",
+        type=int,
+        default=2,
+        metavar="N",
+        help="Only process CSV rows at line N or later (line 1 is the header; first data row is 2). "
+        "Default is 2.",
     )
 
     args = parser.parse_args(argv)
