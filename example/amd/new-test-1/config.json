@@ -1,0 +1,14 @@
+{
+    "input": "09000aa94ff4108fa17a0950adbd5bd7d0c8b4e495fb713b6c00c69fa6cdeab1.bc",
+    "file": "llvm/lib/Target/AMDGPU/SIInstrInfo.cpp",
+    "line": 11001,
+    "replacement": "",
+    "pipeline": [
+        {
+            "id": "llvm_reduce_ir",
+            "parameters": {
+                "interesting": "interesting_ir.sh"
+            }
+        }
+    ]
+}

@@ -34,12 +34,24 @@ To get the single `sancov` file, run:
 
 This will output a `csv` file in the coverage directory that contains all lines covered by either `opt` or `llc` and the list of addresses in the `llc` `sancov` binary that those lines correspond to. This is the set of addresses that new coverage output should be checked against. If the `sancov` file of a test run with `llc` contains an address that does *not* appear in the output `csv` file, then the test has achieved new coverage and should be a candidate test for addition to the test suite.
 
+And to get a mapping from llc lines to addresses, run:
+```
+./scripts/run_get_llc_line_addr_map.sh
+```
+
 Next, run:
 ```
 ./scripts/run_get_new_test_coverage.sh
 ```
 
 This will run a set of new tests (that must be pre-existing in a directory), get the line coverage of these tests, and record whether any additional lines have been covered. Information on each test will be saved in `data/coverage_output/new_tests_$ID`.
+
+Next, run:
+```
+run_analyse_new_coverage.sh
+```
+
+This will analyse the incremental coverage of the new tests and produce a list of non-duplicate new coverage. It will save details of the tests of interest and the new lines they cover in `analyse_stacked_novel_lines/all_novel_source_lines.csv` within the new test output folder.
 
 ### Summary
 
