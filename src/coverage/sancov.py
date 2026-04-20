@@ -9,7 +9,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from coverage.constants import MERGED_SANCOV_SUFFIX_ID
+from coverage.constants import MERGED_SANCOV_SUFFIX_ID, RAW_SANCOV_DIRNAME
 
 _STATS_RE = re.compile(
     r"^(all-edges|cov-edges|all-functions|cov-functions):\s*(\d+)\s*$", re.MULTILINE
@@ -57,12 +57,18 @@ class SanCov:
         return self.build_bin_dir / name
 
     def collect_raw(self, coverage_dir: Path, binary_name: str) -> list[Path]:
-        """Raw ``<binary>.<digits>.sancov`` only; skips the reserved merged filename."""
+        """
+        Raw ``<binary>.<digits>.sancov`` under ``<coverage_dir>/raw_sancov/`` only;
+        skips the reserved merged filename if present there.
+        """
         pat = re.compile(rf"^{re.escape(binary_name)}\.\d+\.sancov$")
         merged_name = f"{binary_name}.{self.merged_suffix_id}.sancov"
+        base = coverage_dir / RAW_SANCOV_DIRNAME
+        if not base.is_dir():
+            return []
         return sorted(
             p
-            for p in coverage_dir.iterdir()
+            for p in base.iterdir()
             if p.is_file() and pat.match(p.name) and p.name != merged_name
         )
 

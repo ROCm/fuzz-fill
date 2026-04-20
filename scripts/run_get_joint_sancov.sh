@@ -1,14 +1,22 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Joint llc/opt CSV from merged symcov/sancov under the coverage output root.
+#
+# Optional $1 = coverage output directory (parent of llc.0.symcov, etc.). Default:
+#   <repo>/data/coverage_output/test_suite_full_coverage
+#
+# Override: LLVM (for --joint-file-prefix), BUILD_DIR unused here.
 
 set -euo pipefail
 
-HOME=/work/agorzyns/local/dev
-LLVM=$HOME/llvm-project
-BUILD_DIR=$LLVM/build-amdgpu
-COV_DIR=$HOME/fuzz-fill/data/coverage_output/test_suite_full_edge_coverage_1776417510
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+WORK_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
+export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 
-# Tests: ./bin/llvm-lit ../llvm/test/ --filter=CodeGen/AMDGPU (default in script).
-# Logic lives in src/coverage/; UBSAN_OPTIONS is set in coverage.runner.TestCommandRunner.
+LLVM="${LLVM:-$WORK_ROOT/llvm-project}"
+DEFAULT_COV_DIR="$REPO_ROOT/data/coverage_output/test_suite_full_coverage"
+COV_DIR="${1:-$DEFAULT_COV_DIR}"
+
 python -m coverage map \
       "$COV_DIR/llc.0.symcov" \
       "$COV_DIR/llc.0.sancov" \

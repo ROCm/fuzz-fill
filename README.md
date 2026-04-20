@@ -23,7 +23,9 @@ To get coverage of the LLVM test-suite tests under `llvm-project/llvm/test/CodeG
 ./scripts/run_get_llvm_test_suite_coverage.sh
 ```
 
-This will output coverage files and process them into two summaries, one for `llc` and one for `opt`. These will be (by default) saved as `llc.0.sancov`, `llc.0.symcov` and `opt.0.sancov`, `opt.0.symcov` under `data/coverage_output/$OUTPUT_ID` where `OUTPUT_ID` is a date-time ID.
+To run the same steps in order, edit **`OUT_BASENAME`** and **`BUILD_DIR`** (and **`WORK_ROOT`** if needed) in **`scripts/full_coverage_run.sh`**, then run `./scripts/full_coverage_run.sh` with no arguments. Each step script still accepts its own optional coverage-directory argument when run alone; see comments at the top of each file under `scripts/`.
+
+This will output coverage files and process them into two summaries, one for `llc` and one for `opt`. Raw per-process `.sancov` files land under `data/coverage_output/$OUTPUT_ID/raw_sancov/`; merged outputs are (by default) `llc.0.sancov`, `llc.0.symcov`, `opt.0.sancov`, and `opt.0.symcov` in the output directory root, where `OUTPUT_ID` is either the `OUT_BASENAME` set in `full_coverage_run.sh` or a date-time ID when `--coverage-dir` is omitted.
 
 The next step is to generate a single `.sancov` file that contains the full *joint* coverage of both `llc` and `opt` tests. This is so that we can quickly check new tests' coverage against a single sancov file correctly encoded for `llc`. The binary mapping for `opt` is different than `llc`, so we need to map the line coverage in `opt.0.symcov` back to the `llc` `sancov`.
 
@@ -44,7 +46,7 @@ Next, run:
 ./scripts/run_get_new_test_coverage.sh
 ```
 
-This will run a set of new tests (that must be pre-existing in a directory), get the line coverage of these tests, and record whether any additional lines have been covered. Information on each test will be saved in `data/coverage_output/new_tests_$ID`.
+This will run a set of new tests (that must be pre-existing in a directory), get the line coverage of these tests, and record whether any additional lines have been covered. Pass **`--coverage-dir`** as the parent directory from a prior **`coverage run`** (the same folder that contains `covered_either.csv` and merged `llc.0.*` artifacts). The tool writes only under **`new-tests/`** there: `llc_test_report.csv`, novel-line subdirectories, and raw `llc.<pid>.sancov` files under **`new-tests/raw_sancov/`** when llc runs. **`--baseline-csv`** and **`--line-address-map`** default to **`covered_either.csv`** and **`llc.0.point_symbol_info.json`** next to **`--coverage-dir`** when those files exist and the flags are omitted.
 
 Next, run:
 ```
@@ -55,16 +57,16 @@ This will analyse the incremental coverage of the new tests and produce a list o
 
 ### Summary
 
-The `coverage` package (under `src/coverage/`) drives **LLVM SanitizerCoverage** from **llvm-lit** (or a custom command): it sets `UBSAN_OPTIONS` so runs emit raw `*.sancov` files, **merges** them per instrumented binary with `llvm-sancov -union`, **symbolizes** with `sancov -symbolize`, prints **coverage stats**, and writes **`coverage_outline.txt`** in the chosen output directory (and optional **`--outline-json`**).
+The `coverage` package (under `src/coverage/`) drives **LLVM SanitizerCoverage** from **llvm-lit** (or a custom command): it sets `UBSAN_OPTIONS` so runs emit raw `*.sancov` files under **`raw_sancov/`** inside the output directory, **merges** them per instrumented binary with `llvm-sancov -union`, **symbolizes** with `sancov -symbolize`, prints **coverage stats**, and writes **`coverage_outline.txt`** in the chosen output directory (and optional **`--outline-json`**).
 
-Use an LLVM **build** that matches the tests (same `llc`, `opt`, etc., built with SanitizerCoverage as you already use for lit). Raw files follow `<binary>.<digits>.sancov`; merged outputs are `<binary>.0.sancov` / `.symcov` (the basename prefix must match the binary—required by LLVM’s `sancov`).
+Use an LLVM **build** that matches the tests (same `llc`, `opt`, etc., built with SanitizerCoverage as you already use for lit). Raw files are `raw_sancov/<binary>.<digits>.sancov`; merged outputs in the directory root are `<binary>.0.sancov` / `.symcov` (the basename prefix must match the binary—required by LLVM’s `sancov`).
 
 ### Layout
 
 | Piece | Role |
 |-------|------|
 | `SanCov` | Merge raw `.sancov`, symbolize, stats for one `build/.../bin` tree |
-| `TestCommandRunner` | Runs the test command with `coverage_dir` wired into `UBSAN_OPTIONS` |
+| `TestCommandRunner` | Runs the test command with `coverage_dir` (typically `…/raw_sancov`) wired into `UBSAN_OPTIONS` |
 | `CoverageSession` | Runs tests (unless `--skip-run`), then each `--binary`, then outline output |
 | `CoverageConfig` | Resolved paths and options for a run |
 
@@ -89,12 +91,21 @@ If the PyPI **`coverage`** package is installed in the same environment, ensure 
 - **`--cwd`** — LLVM **build directory** (e.g. `build-amdgpu/`); default test command runs `./bin/llvm-lit` relative to it.
 - **`--build-dir`** — Same tree (or its `bin`); used to locate `sancov`, `llc`, `opt`, etc. Defaults to `<llvm-project>/build` when `--llvm-project` is unset.
 - **`--filter`** — Passed to the default lit invocation as `--filter=…` (default `CodeGen/AMDGPU`). Ignored if you pass **`--command` / `-c`**.
-- **`--binary`** — Repeat per tool; default is **`llc`** and **`opt`**. Skip a binary if there are no raw `.sancov` files for it.
-- **`--coverage-dir`** — Where raw and merged artifacts go (default under `data/coverage_output/test_suite_<timestamp>`).
-- **`--skip-run`** — Only merge/symbolize; use with **`--coverage-dir`** pointing at a previous run’s directory.
+- **`--binary`** — Repeat per tool; default is **`llc`** and **`opt`**. Skip a binary if there are no raw `.sancov` files for it under **`raw_sancov/`**.
+- **`--coverage-dir`** — Output root: **`raw_sancov/`** for raw per-run files, merged **`.sancov` / `.symcov`** and reports in the root (default under `data/coverage_output/test_suite_<timestamp>`).
+- **`--skip-run`** — Only merge/symbolize; **`--coverage-dir`** must already contain raw inputs under **`raw_sancov/`** from a prior run.
 - **`--outline-json`** — Extra machine-readable summary (`binaries` + `run_summary`).
 
 Use `llvm-test-suite-coverage run --help` for the full list.
+
+### `new-tests` flags
+
+- **`--coverage-dir`** — **Required.** Parent output directory from **`coverage run`** (defaults for baseline and line map resolve here).
+- **`--tests-dir`** — **Required.** Directory tree searched for `*.ll` / `*.bc`.
+- **`--baseline-csv`** — Optional; defaults to **`covered_either.csv`** next to **`--coverage-dir`** if present.
+- **`--line-address-map`** — Optional; defaults to **`llc.0.point_symbol_info.json`** next to **`--coverage-dir`** if present (requires a baseline when used).
+
+Use `llvm-test-suite-coverage new-tests --help` for the full list.
 
 ### `map`
 
