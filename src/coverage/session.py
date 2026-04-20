@@ -25,7 +25,6 @@ from coverage.baseline_csv import (
     test_hit_addresses_normalized_df,
 )
 from coverage.config import CoverageConfig
-from coverage.constants import RAW_SANCOV_DIRNAME
 from coverage.runner import TestCommandRunner, display_path_for_log
 from coverage.sancov import BinaryCoverageResult, SanCov
 from coverage.stage_log import stage_line
@@ -73,9 +72,8 @@ def _resolve_new_tests_output_paths(
     cov: Path, reuse_dir: Path | None
 ) -> tuple[Path, Path, Path, Path, str | None]:
     """
-    If ``llc_test_report.csv`` or novel-line dirs already exist under ``cov`` (the
-    ``new-tests/`` output directory), write ``llc_test_report_v2.csv`` (then ``_v3``, …) and
-    matching ``*_vN`` dirs instead of overwriting.
+    With ``--existing-sancov-dir``, if ``llc_test_report.csv`` or novel-line dirs already exist
+    under ``cov``, write to ``llc_test_report_v2.csv`` (then ``_v3``, ...) and matching ``*_vN`` dirs.
     """
     if reuse_dir is None or not _new_tests_prior_outputs_present(cov):
         return (
@@ -239,12 +237,10 @@ class CoverageSession:
         if self.config.new_tests_dir is not None:
             return self._run_new_tests()
         assert self.config.command is not None
-        raw_dir = self.config.coverage_dir / RAW_SANCOV_DIRNAME
-        raw_dir.mkdir(parents=True, exist_ok=True)
         return self._runner.run(
             self.config.command,
             self.config.cwd,
-            raw_dir,
+            self.config.coverage_dir,
         )
 
     def _run_new_tests(self) -> int:
@@ -277,9 +273,6 @@ class CoverageSession:
         to_run = tests[:y]
 
         cov = self.config.coverage_dir
-        raw_sancov_out = cov / RAW_SANCOV_DIRNAME
-        if reuse_dir is None:
-            raw_sancov_out.mkdir(parents=True, exist_ok=True)
         sancov_by_test: dict[str, list[str]] | None = None
         rc_by_test: dict[str, int] = {}
         if reuse_dir is not None:
@@ -456,14 +449,12 @@ class CoverageSession:
                     before = raw_llc_sancov_names()
                     argv = [str(llc_path), "-o", "/dev/null", str(rel)]
                     t_llc = time.perf_counter()
-                    rc = self._runner.run_argv(
-                        argv, d, raw_sancov_out, log_per_test=True
-                    )
+                    rc = self._runner.run_argv(argv, d, cov, log_per_test=True)
                     llc_s = time.perf_counter() - t_llc
                     sum_llc_s += llc_s
                     after = raw_llc_sancov_names()
                     new_names = sorted(after - before)
-                    sancov_root = raw_sancov_out
+                    sancov_root = cov
 
                 addr_strings: set[str] = set()
                 for basename in new_names:
@@ -694,7 +685,7 @@ class CoverageSession:
                     "merge",
                     f"WARNING: skipping {binary_name}: no raw "
                     f"<{binary_name}>.<digits>.sancov in "
-                    f"{display_path_for_log(self.config.coverage_dir / RAW_SANCOV_DIRNAME)}",
+                    f"{display_path_for_log(self.config.coverage_dir)}",
                 )
                 continue
 

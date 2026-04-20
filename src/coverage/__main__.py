@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import secrets
 import sys
 import time
 from pathlib import Path
@@ -11,10 +12,6 @@ from coverage.config import CoverageConfig
 from coverage.constants import (
     DEFAULT_LIT_FILTER,
     MERGED_SANCOV_SUFFIX_ID,
-    NEW_TESTS_DEFAULT_BASELINE_CSV,
-    NEW_TESTS_DEFAULT_LINE_ADDRESS_MAP_JSON,
-    NEW_TESTS_SUBDIR,
-    RAW_SANCOV_DIRNAME,
     default_lit_command,
 )
 from coverage.session import CoverageSession
@@ -22,7 +19,11 @@ from coverage.stage_log import stage_line
 
 # Default coverage output folder names under <repo>/data/coverage_output/ (see _config_from_*_args).
 _COVERAGE_DIR_PREFIX_RUN = "test_suite"
+_COVERAGE_DIR_PREFIX_NEW_TESTS = "new_tests"
 _COVERAGE_DEFAULT_FOLDER_RUN = f"{_COVERAGE_DIR_PREFIX_RUN}_<timestamp>"
+_COVERAGE_DEFAULT_FOLDER_NEW_TESTS = f"{_COVERAGE_DIR_PREFIX_NEW_TESTS}_<timestamp>"
+# Subdirectory under --existing-sancov-dir for report CSVs (unique id avoids collisions).
+_NEW_TESTS_OUTPUT_IN_SANCOV_PREFIX = "new_tests_output"
 
 _LLVM_PROJECT_HELP = "Path to llvm-project root (default: <repo>/llvm-project)."
 _BUILD_DIR_HELP = (
@@ -35,8 +36,7 @@ _BUILD_DIR_HELP = (
 
 def _coverage_dir_help(default_folder: str) -> str:
     return (
-        "SanitizerCoverage output directory (raw .sancov under raw_sancov/ where applicable; "
-        "merges, symbolized JSON, CSV reports). "
+        "SanitizerCoverage output directory (raw .sancov, merges, symbolized JSON, CSV reports). "
         f"Default: <repo>/data/coverage_output/{default_folder}."
     )
 
@@ -46,7 +46,6 @@ def _add_shared_llvm_coverage_args(
     *,
     coverage_default_folder: str,
     coverage_dir_help_extra: str = "",
-    coverage_dir_required: bool = False,
 ) -> None:
     """``run`` and ``new-tests`` share ``--llvm-project``, ``--build-dir``, ``--coverage-dir``."""
     g = p.add_argument_group("LLVM tree and coverage output")
@@ -62,21 +61,13 @@ def _add_shared_llvm_coverage_args(
         default=None,
         help=_BUILD_DIR_HELP,
     )
-    if coverage_dir_required:
-        cov_help = (
-            "Required. Parent directory from a prior ``coverage run`` (or same layout): "
-            "default --baseline-csv / --line-address-map paths resolve here; "
-            f"``new-tests`` writes only under {NEW_TESTS_SUBDIR}/ here."
-        )
-    else:
-        cov_help = _coverage_dir_help(coverage_default_folder)
+    cov_help = _coverage_dir_help(coverage_default_folder)
     if coverage_dir_help_extra:
-        cov_help = cov_help.rstrip() + " " + coverage_dir_help_extra
+        cov_help = cov_help.rstrip(".") + ". " + coverage_dir_help_extra
     g.add_argument(
         "--coverage-dir",
         type=Path,
         default=None,
-        required=coverage_dir_required,
         help=cov_help,
     )
 
@@ -97,15 +88,7 @@ def _add_run_arguments(p: argparse.ArgumentParser) -> None:
         help="Value for lit --filter= when using the default command (default: %(default)s). "
         "Ignored when --command (-c) is set.",
     )
-    _add_shared_llvm_coverage_args(
-        p,
-        coverage_default_folder=_COVERAGE_DEFAULT_FOLDER_RUN,
-        coverage_dir_help_extra=(
-            f"With run, raw <binary>.<pid>.sancov files are under {RAW_SANCOV_DIRNAME}/; merged "
-            f"<binary>.{MERGED_SANCOV_SUFFIX_ID}.sancov and .symcov stay in the directory root. "
-            f"With --skip-run, raw inputs must be under {RAW_SANCOV_DIRNAME}/."
-        ),
-    )
+    _add_shared_llvm_coverage_args(p, coverage_default_folder=_COVERAGE_DEFAULT_FOLDER_RUN)
     p.add_argument(
         "--cwd",
         type=Path,
@@ -119,15 +102,13 @@ def _add_run_arguments(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="NAME",
         help="Instrumented tool basename under build-dir/bin (repeat for multiple). "
-        "Default when omitted: llc opt. Raw files: "
-        f"{RAW_SANCOV_DIRNAME}/<name>.<digits>.sancov; merged (coverage-dir root): "
+        "Default when omitted: llc opt. Raw files: <name>.<digits>.sancov; merged: "
         f"<name>.{MERGED_SANCOV_SUFFIX_ID}.sancov.",
     )
     p.add_argument(
         "--skip-run",
         action="store_true",
-        help="Only merge/symbolize; raw <binary>.<pid>.sancov files must already be under "
-        f"{RAW_SANCOV_DIRNAME}/ inside --coverage-dir (no test run).",
+        help="Only merge/symbolize existing .sancov files in --coverage-dir (no new runs).",
     )
     p.add_argument(
         "--union-batch",
@@ -155,13 +136,11 @@ def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
     )
     _add_shared_llvm_coverage_args(
         p,
-        coverage_default_folder=_COVERAGE_DEFAULT_FOLDER_RUN,
-        coverage_dir_required=True,
+        coverage_default_folder=_COVERAGE_DEFAULT_FOLDER_NEW_TESTS,
         coverage_dir_help_extra=(
-            f"Artifacts are written under {NEW_TESTS_SUBDIR}/ here "
-            f"({NEW_TESTS_SUBDIR}/{RAW_SANCOV_DIRNAME}/ for raw llc.<pid>.sancov when llc runs). "
-            "If that folder already has llc_test_report.csv or per-test novel-line outputs, "
-            "new files use llc_test_report_v2.csv (then _v3, …) and matching *_vN directories."
+            "With --existing-sancov-dir, if this option is omitted, llc_test_report.csv and "
+            "novel-line directories are written under that directory in "
+            f"{_NEW_TESTS_OUTPUT_IN_SANCOV_PREFIX}_<unix_time>_<8-hex>/ (unique per run)."
         ),
     )
     p.add_argument(
@@ -177,9 +156,7 @@ def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="PATH",
         help="Joint coverage CSV (file,function,line,llc_addresses as JSON array per row). "
-        "Adds baseline vs test address counts and novel_vs_baseline_addresses on llc_test_report.csv. "
-        f"Default when omitted: if {NEW_TESTS_DEFAULT_BASELINE_CSV!r} exists next to --coverage-dir, "
-        "use it; otherwise baseline comparison is skipped.",
+        "Adds baseline vs test address counts and novel_vs_baseline_addresses on llc_test_report.csv.",
     )
     p.add_argument(
         "--line-address-map",
@@ -187,13 +164,11 @@ def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="PATH",
         help="point_symbol_info.json (symcov point-symbol-info extract from a LIT merge/symbolize run). "
-        "Requires a baseline CSV. Writes one CSV per test under llc_test_novel_source_lines/, or "
+        "Requires --baseline-csv. Writes one CSV per test under llc_test_novel_source_lines/, or "
         "with --sense-check under llc_test_novel_source_lines_in_prefix/ and "
         "llc_test_novel_source_lines_outside_prefix/. "
         "When the map is loaded in full (no --source-path-prefix, or with --sense-check), aborts "
-        "with an error if any llc address from a test is missing from the map. "
-        f"Default when omitted: if {NEW_TESTS_DEFAULT_LINE_ADDRESS_MAP_JSON!r} exists next to "
-        "--coverage-dir, use it; otherwise novel-line outputs are skipped.",
+        "with an error if any llc address from a test is missing from the map.",
     )
     p.add_argument(
         "--source-path-prefix",
@@ -201,14 +176,13 @@ def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="PREFIX",
         help="Keep only baseline CSV rows and line-map JSON file keys whose source path is this "
-        "POSIX path or under it (expanduser; compared after strip). Requires a baseline CSV "
-        "(default file next to --coverage-dir, or --baseline-csv). "
+        "POSIX path or under it (expanduser; compared after strip). Requires --baseline-csv. "
         "Skips non-matching rows before json.loads / line indexing to shrink memory and work.",
     )
     p.add_argument(
         "--sense-check",
         action="store_true",
-        help="With a baseline CSV, --line-address-map, and --source-path-prefix: load baseline and "
+        help="With --baseline-csv, --line-address-map, and --source-path-prefix: load baseline and "
         "line map without path filtering, compare tests against the full baseline, then report "
         "novel addresses and source lines in two buckets—under the prefix vs outside it. "
         "Writes per-test CSVs under llc_test_novel_source_lines_in_prefix/ and "
@@ -220,9 +194,11 @@ def _add_new_tests_arguments(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="DIR",
         help="Do not run llc. Read raw llc.<pid>.sancov files from this directory and run the same "
-        "baseline / novel-line analysis. Reports still go under --coverage-dir/new-tests/. "
-        "If that folder already has llc_test_report.csv or per-test novel-line outputs, "
-        "new files use llc_test_report_v2.csv (then _v3, …) and matching *_vN directories. "
+        "baseline / novel-line analysis. If --coverage-dir is omitted, reports are written under "
+        "this directory in new_tests_output_<time>_<id>/ (see --coverage-dir). "
+        "If --coverage-dir points at a directory that already has llc_test_report.csv or "
+        "per-test novel-line outputs, new files use llc_test_report_v2.csv (then _v3, …) and "
+        "matching *_vN directories instead of overwriting. "
         "Either pass --reuse-report pointing at a prior llc_test_report.csv from the same test set, "
         "or supply exactly one raw llc.*.sancov per selected test (see docs: same order as sorted "
         "tests under --tests-dir, PIDs increasing).",
@@ -341,25 +317,6 @@ def _add_map_arguments(p: argparse.ArgumentParser) -> None:
     )
 
 
-def _new_tests_resolve_optional_file(
-    flag: Path | None,
-    default_path: Path,
-    *,
-    flag_label: str,
-) -> Path | None:
-    """
-    Explicit path: must exist. Omitted: use ``default_path`` if that file exists, else ``None``.
-    """
-    if flag is not None:
-        p = Path(flag).resolve()
-        if not p.is_file():
-            raise ValueError(f"{flag_label} is not a file: {p}")
-        return p
-    if default_path.is_file():
-        return default_path.resolve()
-    return None
-
-
 def _resolve_build_bin_dir(args: argparse.Namespace, base: Path) -> Path:
     llvm_project = args.llvm_project or base / "llvm-project"
     build_dir = args.build_dir if args.build_dir is not None else llvm_project / "build"
@@ -434,54 +391,33 @@ def _config_from_new_tests_args(args: argparse.Namespace, base: Path) -> Coverag
     if limit < 1:
         raise ValueError("--limit must be >= 1")
 
-    assert args.coverage_dir is not None
-    parent_coverage_dir = Path(args.coverage_dir).resolve()
-    if not parent_coverage_dir.is_dir():
-        raise ValueError(f"--coverage-dir is not a directory: {parent_coverage_dir}")
+    baseline_csv: Path | None = None
+    if args.baseline_csv is not None:
+        baseline_csv = Path(args.baseline_csv).resolve()
+        if not baseline_csv.is_file():
+            raise ValueError(f"--baseline-csv is not a file: {baseline_csv}")
 
-    coverage_dir = (parent_coverage_dir / NEW_TESTS_SUBDIR).resolve()
-
-    baseline_csv = _new_tests_resolve_optional_file(
-        args.baseline_csv,
-        parent_coverage_dir / NEW_TESTS_DEFAULT_BASELINE_CSV,
-        flag_label="--baseline-csv",
-    )
-    line_map = _new_tests_resolve_optional_file(
-        args.line_address_map,
-        parent_coverage_dir / NEW_TESTS_DEFAULT_LINE_ADDRESS_MAP_JSON,
-        flag_label="--line-address-map",
-    )
-
-    if line_map is not None and baseline_csv is None:
-        raise ValueError(
-            "A baseline CSV is required when using a line-address map. "
-            "Pass --baseline-csv or place "
-            f"{NEW_TESTS_DEFAULT_BASELINE_CSV!r} in the directory given by --coverage-dir."
-        )
+    line_map: Path | None = None
+    if args.line_address_map is not None:
+        if baseline_csv is None:
+            raise ValueError("--line-address-map requires --baseline-csv")
+        line_map = Path(args.line_address_map).resolve()
+        if not line_map.is_file():
+            raise ValueError(f"--line-address-map is not a file: {line_map}")
 
     source_prefix: str | None = None
     if args.source_path_prefix is not None:
         if baseline_csv is None:
-            raise ValueError(
-                "--source-path-prefix requires a baseline CSV "
-                f"({NEW_TESTS_DEFAULT_BASELINE_CSV!r} next to --coverage-dir, or --baseline-csv)"
-            )
+            raise ValueError("--source-path-prefix requires --baseline-csv")
         source_prefix = args.source_path_prefix.strip()
         if not source_prefix:
             raise ValueError("--source-path-prefix must be non-empty")
 
     if args.sense_check:
         if baseline_csv is None:
-            raise ValueError(
-                "--sense-check requires a baseline CSV "
-                f"({NEW_TESTS_DEFAULT_BASELINE_CSV!r} next to --coverage-dir, or --baseline-csv)"
-            )
+            raise ValueError("--sense-check requires --baseline-csv")
         if line_map is None:
-            raise ValueError(
-                "--sense-check requires a line-address map "
-                f"({NEW_TESTS_DEFAULT_LINE_ADDRESS_MAP_JSON!r} next to --coverage-dir, or "
-                "--line-address-map)"
-            )
+            raise ValueError("--sense-check requires --line-address-map")
         if source_prefix is None:
             raise ValueError("--sense-check requires --source-path-prefix")
 
@@ -500,6 +436,21 @@ def _config_from_new_tests_args(args: argparse.Namespace, base: Path) -> Coverag
             raise ValueError(f"--reuse-report is not a file: {reuse_report}")
 
     build_bin_dir = _resolve_build_bin_dir(args, base)
+
+    if args.coverage_dir is not None:
+        coverage_dir = Path(args.coverage_dir).resolve()
+    elif existing_sancov is not None:
+        run_id = f"{int(time.time())}_{secrets.token_hex(4)}"
+        coverage_dir = (
+            existing_sancov / f"{_NEW_TESTS_OUTPUT_IN_SANCOV_PREFIX}_{run_id}"
+        ).resolve()
+    else:
+        coverage_dir = (
+            base
+            / "data"
+            / "coverage_output"
+            / f"{_COVERAGE_DIR_PREFIX_NEW_TESTS}_{int(time.time())}"
+        ).resolve()
 
     return CoverageConfig(
         build_bin_dir=build_bin_dir,
@@ -544,9 +495,8 @@ def main(argv: list[str] | None = None) -> int:
 
     new_p = sub.add_parser(
         "new-tests",
-        help="Run llc on .ll/.bc under --tests-dir (or reuse raw .sancov via --existing-sancov-dir). "
-        "Requires --coverage-dir (parent ``coverage run`` output); writes under new-tests/ there. "
-        "Per-test addresses via sancov --print only (no merge/symbolize).",
+        help="Run llc on .ll/.bc under --tests-dir (or reuse raw .sancov via --existing-sancov-dir); "
+        "per-test addresses via sancov --print only (no merge/symbolize).",
     )
     _add_new_tests_arguments(new_p)
 
@@ -570,8 +520,8 @@ def main(argv: list[str] | None = None) -> int:
         "output_dir",
         type=Path,
         metavar="DIR",
-        help="Typically ``<coverage-dir from run>/new-tests/llc_test_novel_source_lines`` (or the "
-        "whole ``…/new-tests`` directory); contains per-test novel-line CSVs for stacking.",
+        help="Directory produced by ``coverage new-tests`` (contains llc_test_report.csv and/or "
+        "per-test novel source line CSVs).",
     )
 
     check_uncovered_p = sub.add_parser(
