@@ -14,9 +14,9 @@ from reduce.reducer import ReduceContext
 from reduce.test import Test
 
 
-def tmp_pass_path(tmp_dir: Path, step: int, slug: str) -> Path:
+def tmp_pass_path(tmp_dir: Path, step: int, slug: str, ext: str = "ll") -> Path:
     """``tmp_dir / "00_snapshot.ll"``-style names, ordered by pipeline index."""
-    return tmp_dir / f"{step:02d}_{slug}.ll"
+    return tmp_dir / f"{step:02d}_{slug}.{ext}"
 
 
 def tmp_pass_path_mir(tmp_dir: Path, step: int, slug: str) -> Path:
@@ -285,7 +285,7 @@ class LlvmReduceIrPass(ReducePass):
     def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
         interesting = _interesting_script_for_llvm_reduce_ir(ctx)
         exe = _require_tool(ctx.llvm_bin, "llvm-reduce")
-        out = tmp_pass_path(ctx.tmp_dir, step, "llvmreduce")
+        out = tmp_pass_path(ctx.tmp_dir, step, "llvmreduce", test.test_path.suffix)
         cmd = [
             str(exe),
             f"--test={interesting.resolve()}",
@@ -303,6 +303,26 @@ class LlvmReduceIrPass(ReducePass):
             raise SystemExit(f"llvm-reduce failed ({r.returncode}):\n{msg}")
         if not out.is_file():
             raise SystemExit(f"llvm-reduce did not write expected output: {out}")
+
+        if test.test_path.suffix == ".bc":
+            cmd = [
+                str(ctx.llvm_bin / "llvm-dis"),
+                "-o",
+                str(out.with_suffix(".ll").resolve()),
+                str(out.resolve()),
+            ]
+            r = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=ctx.tmp_dir,
+            )
+            if r.returncode != 0:
+                msg = (r.stderr or r.stdout or "").strip() or "(no output)"
+                raise SystemExit(f"llvm-dis failed ({r.returncode}):\n{msg}")
+            if not out.is_file():
+                raise SystemExit(f"llvm-dis did not write expected output: {out}")
+            out = out.with_suffix(".ll")
         return Test(out, interesting, test.file, test.line)
 
 
