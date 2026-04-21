@@ -1,11 +1,11 @@
 #!/bin/bash
 
-LLVM_BIN=/home/agorzyns/local/dev/llvm-project/build-amdgpu/bin
+LLVM_BIN=/home/agorzyns/local/dev/llvm-project/build-amdgpu-bb/bin
 
 LLC=$LLVM_BIN/llc
 SANCOV=$LLVM_BIN/sancov
 
-COVERED="0x61afb4b"
+COVERED="0x61d4b9a"
 
 covdir=/tmp/coverage
 mkdir -p "$covdir"
