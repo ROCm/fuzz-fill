@@ -3,9 +3,9 @@ set -euo pipefail
 
 BASE=/work/agorzyns/local/dev
 LLVM=$BASE/llvm-project
-BUILD_DIR=$LLVM/build-amdgpu
+BUILD_DIR=$LLVM/build-amdgpu-bb
 TESTS_DIR=$BASE/irtests/bitcode/amdgpu/all
-COV_DIR=$BASE/fuzz-fill/data/coverage_output/test_suite_full_edge_coverage_170426
+COV_DIR=$BASE/fuzz-fill/data/coverage_output/test_suite_full_bb_coverage_200426
 PREFIX=$LLVM/llvm/lib/Target/AMDGPU
 
 # Runs new llc inputs; per-test addresses via sancov --print (no merge/symbolize)

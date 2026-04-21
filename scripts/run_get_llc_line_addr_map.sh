@@ -2,7 +2,7 @@
 set -euo pipefail
 BASE=/work/agorzyns/local/dev
 LLVM=$BASE/llvm-project
-COV_DIR=$BASE/fuzz-fill/data/coverage_output/test_suite_full_edge_coverage_170426
+COV_DIR=$BASE/fuzz-fill/data/coverage_output/test_suite_full_bb_coverage_200426
 PREFIX=$LLVM/llvm/lib/Target/AMDGPU
 
 # Gets the line-to-address map for the llc binary from the symcov file.
