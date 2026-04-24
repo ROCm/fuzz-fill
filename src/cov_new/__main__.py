@@ -44,8 +44,6 @@ def main():
 
     args = parser.parse_args()
 
-    validate_arguments(args, parser)
-
     filepaths = get_filepaths(args)
 
     if args.debug:
@@ -77,15 +75,6 @@ def main():
     else:
         print(f"Unknown subcommand: {args.subcmd}")
         return 1
-
-def validate_arguments(args: argparse.Namespace, parser: argparse.ArgumentParser):
-    if args.subcmd == "new-tests":
-        tests_root = args.new_tests_dir.resolve()
-        if not TestRunner.collect_llc_input_files(tests_root):
-            parser.error(f"no .ll or .bc files under {tests_root}")
-        
-        if args.n < 1:
-            parser.error("n must be >= 1")
 
 def add_shared_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)

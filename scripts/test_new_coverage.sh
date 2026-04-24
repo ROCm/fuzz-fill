@@ -13,13 +13,17 @@ TESTS_DIR=$HOME/irtests/bitcode/amdgpu/all
 
 FILTER="CodeGen/AMDGPU/spill"
 
+# Clear old output directories
+rm -rf $TEST_SUITE_OUTPUT_DIR
+rm -rf $NEW_TESTS_OUTPUT_DIR
+rm -rf $DIFF_OUTPUT_DIR
+
 python -m cov_new test-suite \
     --output-dir $TEST_SUITE_OUTPUT_DIR \
     --llvm-bin $LLVM_BIN \
     --instrumented-bin $INSTRUMENTED_BIN_DIR \
-    --filter $FILTER
-
-exit 0
+    --filter $FILTER \
+    --debug
 
 python -m cov_new new-tests \
     --output-dir $NEW_TESTS_OUTPUT_DIR \

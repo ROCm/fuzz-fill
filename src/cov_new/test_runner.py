@@ -31,7 +31,7 @@ class TestRunner:
 
         elif self.mode == "standalone":
             self._new_tests_limit = new_tests_limit
-            self.instrumented_llc = filepaths.build_dir / "llc"
+            self.instrumented_llc = filepaths.instrumented_bin / "llc"
 
         self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
         self.raw_sancov_output_dir.mkdir(parents=True, exist_ok=True)
