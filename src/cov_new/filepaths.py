@@ -9,7 +9,6 @@ class Filepaths:
     output_diff_dir: Path | None
     llvm_bin: Path | None
     instrumented_bin: Path | None
-    build_dir: Path | None
     new_tests_dir: Path | None
 
     def __init__(self, output_dir: Path,

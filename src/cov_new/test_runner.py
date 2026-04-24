@@ -85,4 +85,11 @@ class TestRunner:
         for test_path in to_run:
             rel = test_path.relative_to(self.filepaths.new_tests_dir)
             argv = [str(self.instrumented_llc), "-o", "/dev/null", str(rel)]
-            subprocess.run(argv, cwd=self.filepaths.new_tests_dir, env=env, check=True)
+
+            if self.debug:
+                print(f"\tRunning: {argv}")
+                print(f"\tUBSAN_OPTIONS: {env['UBSAN_OPTIONS']}")
+                print(f"\tCWD: {self.filepaths.new_tests_dir}")
+                print(f"\tCoverage directory: {self.raw_sancov_output_dir}")
+            else:
+                subprocess.run(argv, cwd=self.filepaths.new_tests_dir, env=env, check=True)

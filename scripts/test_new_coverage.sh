@@ -31,7 +31,8 @@ python -m cov_new new-tests \
     --instrumented-bin $INSTRUMENTED_BIN_DIR \
     --filter $FILTER \
     --new-tests-dir $TESTS_DIR \
-    --n 1
+    --n 1 \
+    --debug
 
 python -m cov_new diff \
     --output-dir $DIFF_OUTPUT_DIR \

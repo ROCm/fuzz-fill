@@ -39,8 +39,10 @@ def main():
         help="Number of new tests to process (.ll/.bc, sorted path order).",
     )
 
-    p_diff.add_argument("--baseline-csv", type=Path, default=CSV_FILE_NAME_COVERED,
-        help="Baseline CSV file (file,function,line,llc_addresses as JSON array per row).")
+    p_diff.add_argument("--test-suite-output-dir", type=Path, required=True,
+        help="Directory containing the test suite coverage output")
+    p_diff.add_argument("--new-tests-output-dir", type=Path, required=True,
+        help="Directory containing the new tests coverage output")
 
     args = parser.parse_args()
 
