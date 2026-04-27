@@ -7,8 +7,8 @@ import subprocess
 import tempfile
 import json
 import pandas as pd
+import numpy as np
 from pathlib import Path
-from collections import defaultdict
 
 from cov_new.constants import DEFAULT_PATH_FILTER
 from typing import Literal
@@ -65,6 +65,22 @@ class Sancov:
 
         return df
 
+    @staticmethod
+    def get_coverage_summary_df(df: pd.DataFrame) -> pd.DataFrame:
+        """Get the coverage summary dataframe."""
+        agg = (
+            df.groupby(["file", "line"], as_index=False)
+            .agg(n_covered=("covered_either", "sum"), n_points=("covered_either", "count"))
+        )
+
+        agg["coverage"] = np.where(
+            agg["n_covered"] == 0,
+            "none",
+            np.where(agg["n_covered"] == agg["n_points"], "full", "partial"),
+        )
+
+        return agg[["file", "line", "coverage"]]
+    
     def get_merged_sancov_path(self) -> Path:
         return self.output_dir / f"{self.suffix}.0.sancov"
 
@@ -140,15 +156,18 @@ class Sancov:
         with other.get_merged_symcov_path().open(encoding="utf-8") as f:
             other_symcov = json.load(f)
 
-        this_covered_lines = Sancov.get_covered_lines(this_symcov, path_filter)
-        other_covered_lines = Sancov.get_covered_lines(other_symcov, path_filter)
-        union_covered_lines = this_covered_lines.union(other_covered_lines)
+        this_df = self.get_coverage_df(this_symcov, path_filter)
+        other_df = self.get_coverage_df(other_symcov, path_filter)
 
-        # Map all covered source lines to *this* symcov's point-symbol-info hex ids
-        all_covered_lines_with_hex_ids = self.map_covered_lines_to_hex_ids(union_covered_lines)
+        # Get joint coverage dataframe
+        joint_df = this_df.merge(other_df, on=["file", "line", "col"], how="inner", suffixes=("_this", "_other"))
 
-        # Return the dataframe with the covered source lines and the hex ids
-        return all_covered_lines_with_hex_ids
+        joint_df["covered_either"] = joint_df["covered_this"] | joint_df["covered_other"]
 
-    def map_covered_lines_to_hex_ids(self, covered_lines: set[tuple[str, str, int]]) -> pd.DataFrame:
-        pass
+        if self.coverage_mode == "full":
+            joint_df =joint_df.drop(columns=["col", "covered_other", "covered_this", "point_other"])
+            cov_summary_df = self.get_coverage_summary_df(joint_df)
+            return cov_summary_df
+        
+        elif self.coverage_mode == "partial":
+            raise NotImplementedError(f"Coverage mode {self.coverage_mode} not implemented")
