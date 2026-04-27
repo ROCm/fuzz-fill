@@ -120,7 +120,9 @@ class TestRunner:
         opt_sancov.merge()
         opt_sancov.symbolize(opt_sancov.get_merged_sancov_path(), opt_sancov.get_merged_symcov_path())
 
-        joint_coverage_df: pd.DataFrame =llc_sancov.get_joint_coverage(opt_sancov)
+        llc_address_line_map, joint_coverage_df = llc_sancov.get_joint_coverage(opt_sancov)
 
+        llc_address_line_map.to_csv(self.filepaths.output_dir / "llc_address_line_map.csv", index=False)
         joint_coverage_df.to_csv(self.filepaths.output_dir / "joint_llc_and_opt_coverage.csv", index=False)
+
 

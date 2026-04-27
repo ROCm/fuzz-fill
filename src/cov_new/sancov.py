@@ -161,6 +161,10 @@ class Sancov:
         this_df = self.get_coverage_df(this_symcov, path_filter)
         other_df = self.get_coverage_df(other_symcov, path_filter)
 
+        this_address_line_map = this_df[["file", "line", "point"]].copy()
+        this_address_line_map["point"].astype(str)
+        this_address_line_map.rename(columns={"point": f"point_{self.suffix}"}, inplace=True)
+
         # Get joint coverage dataframe
         joint_df = this_df.merge(other_df, on=["file", "line", "col"], how="inner", suffixes=("_this", "_other"))
 
@@ -171,7 +175,7 @@ class Sancov:
             cov_summary_df = self.get_coverage_summary_df(joint_df)
             fully_covered_df = cov_summary_df[cov_summary_df["coverage"] == "full"].copy()
             fully_covered_df.rename(columns={"point_this": f"point_{self.suffix}"}, inplace=True)
-            return fully_covered_df
+            return (this_address_line_map, fully_covered_df)
         
         elif self.coverage_mode == "partial":
-            raise NotImplementedError(f"Coverage mode {self.coverage_mode} not implemented")
+            raise NotImplementedError(f"Coverage mode {self.coverage_mode} not implemented")  
