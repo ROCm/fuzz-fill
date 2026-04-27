@@ -15,7 +15,7 @@ FILTER="CodeGen/AMDGPU/loop" # Small set of tests featuring both llc and opt for
 #FILTER="CodeGen/AMDGPU" # All tests
 
 # Clear old output directories
-rm -rf $TEST_SUITE_OUTPUT_DIR
+#rm -rf $TEST_SUITE_OUTPUT_DIR
 #rm -rf $NEW_TESTS_OUTPUT_DIR
 #rm -rf $DIFF_OUTPUT_DIR
 

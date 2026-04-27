@@ -81,6 +81,10 @@ class Sancov:
         symcov_path: Path
     ) -> None:
 
+        if symcov_path.exists():
+            print(f"Symcov file already exists at {symcov_path}, skipping symbolization")
+            return
+
         print(f"Symbolizing {sancov_path} with {self.instrumented_bin}")
         
         cmd = [str(self.sancov_bin), "-symbolize", str(sancov_path), str(self.instrumented_bin)]
