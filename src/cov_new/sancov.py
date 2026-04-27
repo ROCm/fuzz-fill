@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from calendar import c
 import shutil
 import subprocess
 import tempfile
+import json
 import pandas as pd
 from pathlib import Path
+from collections import defaultdict
+
+from cov_new.constants import DEFAULT_PATH_FILTER
+from typing import Literal
 
 class Sancov:
-    """Drive llvm ``sancov`` for one build tree (``build/.../bin``)."""
 
     def __init__(
         self,
@@ -18,6 +21,7 @@ class Sancov:
         instrumented_bin: Path,
         raw_sancov_dir: Path,
         suffix: str,
+        coverage_mode: Literal["partial", "full"] = "full",
         union_batch: int = 200,
     ) -> None:
         self.sancov_bin = Path(bin_dir, "sancov")
@@ -25,10 +29,41 @@ class Sancov:
         self.union_batch = union_batch
         self.raw_sancov_dir = raw_sancov_dir
         self.suffix = suffix
-
+        self.coverage_mode = coverage_mode
         self.output_dir = self.raw_sancov_dir.parent / f"processed_sancov"
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def get_coverage_df(symcov: dict[str, object], path_filter: str) -> pd.DataFrame:
+        """Get the coverage information in a dataframe.
+            The symcov file is a dictionary with the following keys:
+            - point-symbol-info: a dictionary of point-symbol-info
+            - covered-points: a list of covered points
+            The point-symbol-info is a dictionary of point-symbol-info with the following structure:
+            - keys: filepaths of the source code
+            - values: a dictionary of structure:
+                - keys: function names
+                - values: a dictionary of structure:
+                    - keys: point-ids in hex format
+                    - values: the line numbers and column numbers of the source code
+            The covered-points is a list of covered point-ids in hex format
+        """
+        point_symbol_info = symcov.get("point-symbol-info")
+        point_symbol_info = {k: v for k, v in point_symbol_info.items() if path_filter in k}
+
+        covered_points = symcov.get("covered-points")
+
+        # Flatten point_symbol_info           
+        flattened_point_symbol_info = {f"{file}": addr_to_line for file, func_info in point_symbol_info.items() for func, addr_to_line in func_info.items()}
+        point_to_line = [(file, line, point) for file, inner in flattened_point_symbol_info.items() for point, line in inner.items()]
+
+        # Create coverage dataframe
+        df = pd.DataFrame(point_to_line, columns=["file", "line", "point"])
+        df[["line", "col"]] = df["line"].str.split(":", n=1, expand=True)
+        df["covered"] = df["point"].isin(covered_points).astype(int)
+
+        return df
 
     def get_merged_sancov_path(self) -> Path:
         return self.output_dir / f"{self.suffix}.0.sancov"
@@ -92,44 +127,28 @@ class Sancov:
         with symcov_path.open("w") as f:
             subprocess.run(cmd, check=True, stdout=f, stderr=subprocess.STDOUT)
 
-    def get_joint_coverage(self, other: Sancov, path_filter: str | None = None) -> pd.DataFrame:
+    def get_joint_coverage(self, other: Sancov, path_filter: str = DEFAULT_PATH_FILTER) -> pd.DataFrame:
         """
-            Get the joint coverage for this Sancov instance and the other Sancov instance.
-            The joint coverage is based on *this* instance's mapping from addresses to source locations.
+        Joint coverage: rows from *this* symcov's ``point-symbol-info`` (hex ``address`` per point)
+        restricted to ``(file, function, line)`` that also appear in ``other``'s covered locations.
+
+        Returns a long table with columns ``file``, ``function``, ``line``, ``address``.
         """
+        with self.get_merged_symcov_path().open(encoding="utf-8") as f:
+            this_symcov = json.load(f)
 
-        # Load symcov data, filtered for the source code paths of interest.
-        this_df = pd.read_csv(self.get_merged_symcov_path())
+        with other.get_merged_symcov_path().open(encoding="utf-8") as f:
+            other_symcov = json.load(f)
 
-        if path_filter is not None:
-            this_df = this_df[this_df["file"].str.contains(path_filter)]
+        this_covered_lines = Sancov.get_covered_lines(this_symcov, path_filter)
+        other_covered_lines = Sancov.get_covered_lines(other_symcov, path_filter)
+        union_covered_lines = this_covered_lines.union(other_covered_lines)
 
-        other_df = pd.read_csv(other.get_merged_symcov_path())
-        if path_filter is not None:
-            other_df = other_df[other_df["file"].str.contains(path_filter)]
+        # Map all covered source lines to *this* symcov's point-symbol-info hex ids
+        all_covered_lines_with_hex_ids = self.map_covered_lines_to_hex_ids(union_covered_lines)
 
-        # Map other instance's covered source locations to this instance's addresses.
+        # Return the dataframe with the covered source lines and the hex ids
+        return all_covered_lines_with_hex_ids
 
-
-        print(this_df.head())
-        print(other_df.head())
-        exit()
-        address_map = self.get_address_map()
-        other_df["address"] = other_df["point_id"].map(address_map)
-        other_df["address"] = other_df["address"].astype(int)
-        other_df["address"] = other_df["address"].apply(lambda x: f"{x:x}")
-        other_df["address"] = other_df["address"].apply(lambda x: f"0x{x}")
-        other_df["address"] = other_df["address"].apply(lambda x: f"0x{x}")
-
-        # Merge the two dataframes on the address column.
-        joint_df = this_df.merge(other_df, on="address", how="left")
-        return joint_df
-
-    def get_address_map(self) -> dict[str, int]:
-        """
-            Get the address map for this Sancov instance.
-            The address map is a dictionary of addresses to source locations.
-        """
-        df = pd.read_csv(self.get_merged_symcov_path())
-        address_map = df["point_id"].to_dict()
-        return address_map
+    def map_covered_lines_to_hex_ids(self, covered_lines: set[tuple[str, str, int]]) -> pd.DataFrame:
+        pass
