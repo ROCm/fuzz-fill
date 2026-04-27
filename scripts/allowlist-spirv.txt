@@ -1,0 +1,4 @@
+# Enable instrumentation for a specific source file
+src:*/lib/Target/SPIRV/*
+# Enable instrumentation for all functions in those files
+fun:*

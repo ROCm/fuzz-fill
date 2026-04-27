@@ -243,8 +243,42 @@ Your script must match **`llvm-reduce`’s contract**: it receives the path to a
 
 ## Running tests
 
-Run the tests using `./integration-tests/test.sh`. The `--venv` path must point to the virtualenv where this project is installed (as in the setup steps above), and `--llvm-build` must point to the LLVM build `bin` directory. These two values are consumed by `test.sh`; any remaining arguments are forwarded to LIT (for example, test paths, filters, or other lit options):
+Integration tests expect **two** different LLVM **`bin`** directories:
+
+- **Uninstrumented** — a normal LLVM from source (not the entire project, just a few tools); build with **`./scripts/build-llvm.sh`** (see below).
+- **With SanitizerCoverage** — you must build LLVM from source (see below).
+
+**Use the same LLVM version** for both (e.g. two **22.1.0** builds, not 22.1.0 and **main**).
+
+### Uninstrumented LLVM (from source)
 
 ```bash
-./integration-tests/test.sh --venv ./venv/ --llvm-build ./llvm-build/bin/ integration-tests/
+git clone https://github.com/llvm/llvm-project.git
+cd llvm-project
+git checkout llvmorg-22.1.0
+# /path/to/llvm/bin contains clang and clang++ for building 
+/fuzz-fill/scripts/build-llvm.sh --compiler-path /path/to/llvm/bin . ./build-uninstrumented
+```
+
+### LLVM with SanitizerCoverage (from source)
+
+Use the **same** `llvm-project` tree as the uninstrumented build; only the build directory differs
+
+```bash
+cd llvm-project/
+# /path/to/llvm/bin contains clang and clang++ for building
+/fuzz-fill/scripts/build-llvm-sancov.sh --compiler-path /path/to/llvm/bin \
+  /fuzz-fill/scripts/allowlist-amdgpu.txt . ./build-sancov
+```
+
+### Running `test.sh`
+
+**`./integration-tests/test.sh`**: **`--llvm-build`** = uninstrumented build, **`--llvm-sancov-build`** instrumented build. **`--venv`** is this fuzz-fill's virtualenv. Remaining args go to lit. 
+
+```bash
+./integration-tests/test.sh \
+  --venv ./venv/ \
+  --llvm-build llvm-project/build-uninstrumented/bin/ \
+  --llvm-sancov-build llvm-project/build-sancov/bin/ \
+  integration-tests/
 ```

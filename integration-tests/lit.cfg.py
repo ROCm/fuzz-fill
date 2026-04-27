@@ -7,28 +7,39 @@ import sys
 
 import lit.formats
 
-_llvm_bin_dir = os.environ.get("FUZZ_FILL_LLVM_BIN_DIR")
+def _require_bin_dir(env_var: str, human_label: str) -> str:
+    raw = os.environ.get(env_var)
+    if not raw:
+        print(
+            f"error: {env_var} must be set ({human_label})",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    path = os.path.abspath(os.path.expanduser(raw))
+    if not os.path.exists(path):
+        print(
+            f"error: {env_var} does not exist: {path!r}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if not os.path.isdir(path):
+        print(
+            f"error: {env_var} must be a directory, not a file: {path!r}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    return path
+
+
+_llvm_bin_dir = _require_bin_dir(
+    "FUZZ_FILL_LLVM_BIN_DIR",
+    "uninstrumented LLVM build bin directory (FileCheck, sancov)",
+)
+_llvm_sancov_bin_dir = _require_bin_dir(
+    "FUZZ_FILL_LLVM_SANCOV_BIN_DIR",
+    "SanitizerCoverage-instrumented LLVM build bin directory (llc, opt)",
+)
 _venv_dir = os.environ.get("FUZZ_FILL_VENV_DIR")
-if not _llvm_bin_dir:
-    print(
-        "error: FUZZ_FILL_LLVM_BIN_DIR must be set to the LLVM build bin directory",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
-_llvm_bin_dir = os.path.abspath(os.path.expanduser(_llvm_bin_dir))
-if not os.path.exists(_llvm_bin_dir):
-    print(
-        f"error: FUZZ_FILL_LLVM_BIN_DIR does not exist: {_llvm_bin_dir!r}",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
-if not os.path.isdir(_llvm_bin_dir):
-    print(
-        f"error: FUZZ_FILL_LLVM_BIN_DIR must be a directory, not a file: "
-        f"{_llvm_bin_dir!r}",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
 if not _venv_dir:
     print(
         "error: FUZZ_FILL_VENV_DIR must be set to a Python virtualenv directory",
@@ -57,8 +68,8 @@ if not os.path.exists(_venv_activate):
     )
     raise SystemExit(1)
 
-def _tool(name: str) -> str:
-    return shlex.quote(os.path.join(_llvm_bin_dir, name))
+def _tool(bin_dir: str, name: str) -> str:
+    return shlex.quote(os.path.join(bin_dir, name))
 
 
 _llvm_build_dir = os.path.dirname(_llvm_bin_dir)
@@ -70,9 +81,10 @@ config.test_format = lit.formats.ShTest(execute_external=True)
 config.environment["VIRTUAL_ENV"] = _venv_dir
 config.substitutions.extend(
     [
-        ("%llc", _tool("llc")),
-        ("%opt", _tool("opt")),
-        ("%clang", _tool("clang")),
+        ("%sancov-llc", _tool(_llvm_sancov_bin_dir, "llc")),
+        ("%sancov-opt", _tool(_llvm_sancov_bin_dir, "opt")),
+        ("%sancov", _tool(_llvm_bin_dir, "sancov")),
+        ("%FileCheck", _tool(_llvm_bin_dir, "FileCheck")),
         ("%llvm-build-dir", shlex.quote(_llvm_build_dir)),
         ("%venv", _venv_cmd),
         ("%coverage", f"{_venv_cmd} && python -m coverage"),

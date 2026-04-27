@@ -6,3 +6,4 @@ coverage_output/*
 **/__pycache__/*
 integration-tests/Output/*
 *.lit_test_times.txt
+*.sancov
