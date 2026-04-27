@@ -79,7 +79,9 @@ class Sancov:
             np.where(agg["n_covered"] == agg["n_points"], "full", "partial"),
         )
 
-        return agg[["file", "line", "coverage"]]
+        agg = agg.drop(columns=["n_covered", "n_points"])
+        cov_df = agg.merge(df, on=["file", "line"], how="left")
+        return cov_df[["file", "line", "coverage", "point_this"]]
     
     def get_merged_sancov_path(self) -> Path:
         return self.output_dir / f"{self.suffix}.0.sancov"
@@ -167,6 +169,7 @@ class Sancov:
         if self.coverage_mode == "full":
             joint_df =joint_df.drop(columns=["col", "covered_other", "covered_this", "point_other"])
             cov_summary_df = self.get_coverage_summary_df(joint_df)
+            fully_covered_df = cov_summary_df[cov_summary_df["coverage"] == "full"]
             return cov_summary_df
         
         elif self.coverage_mode == "partial":
