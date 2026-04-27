@@ -1,0 +1,5 @@
+# RUN: %sancov-llc --version
+# RUN: %sancov-opt --version
+# RUN: %clang --version
+# RUN: %coverage --help
+# RUN: %reduce --help

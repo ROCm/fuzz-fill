@@ -240,3 +240,11 @@ The script passes `--config` and `--llvm-bin`; adjust paths inside the script fo
 ### Interesting script
 
 Your script must match **`llvm-reduce`’s contract**: it receives the path to a candidate IR file and must exit `0` only when that candidate still reproduces whatever you care about (crash, wrong output, etc.). See `example/interesting.sh` for a pattern using `llc` and filtering stderr.
+
+## Running tests
+
+Run the tests using `./integration-tests/test.sh`. The `--venv` path must point to the virtualenv where this project is installed (as in the setup steps above), and `--sancov-build` must point to the LLVM build `bin` directory. These two values are consumed by `test.sh`; any remaining arguments are forwarded to LIT (for example, test paths, filters, or other lit options):
+
+```bash
+./integration-tests/test.sh --venv ./venv/ --sancov-build ./llvm-build/bin/ integration-tests/
+```
