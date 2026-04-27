@@ -4,3 +4,4 @@ data/*
 logs/*
 coverage_output/*
 **/__pycache__/*
+*.egg-info/
