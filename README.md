@@ -243,8 +243,8 @@ Your script must match **`llvm-reduce`’s contract**: it receives the path to a
 
 ## Running tests
 
-Run the tests using `./integration-tests/test.sh`. The `--venv` path must point to the virtualenv where this project is installed (as in the setup steps above), and `--sancov-build` must point to the LLVM build `bin` directory. These two values are consumed by `test.sh`; any remaining arguments are forwarded to LIT (for example, test paths, filters, or other lit options):
+Run the tests using `./integration-tests/test.sh`. The `--venv` path must point to the virtualenv where this project is installed (as in the setup steps above), and `--llvm-build` must point to the LLVM build `bin` directory. These two values are consumed by `test.sh`; any remaining arguments are forwarded to LIT (for example, test paths, filters, or other lit options):
 
 ```bash
-./integration-tests/test.sh --venv ./venv/ --sancov-build ./llvm-build/bin/ integration-tests/
+./integration-tests/test.sh --venv ./venv/ --llvm-build ./llvm-build/bin/ integration-tests/
 ```

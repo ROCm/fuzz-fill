@@ -3,11 +3,11 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: test.sh --venv <venv-dir> --sancov-build <llvm-build-bin-dir> [lit args...]
+Usage: test.sh --venv <venv-dir> --llvm-build <llvm-build-bin-dir> [lit args...]
 
 Required:
   --venv          Path to Python virtualenv directory.
-  --sancov-build  Path to LLVM build bin directory (contains llc/opt/clang).
+  --llvm-build    Path to LLVM build bin directory (contains llc/opt/clang).
 
 Any additional arguments are forwarded to lit unchanged.
 If no extra arguments are provided, lit runs on ".".
@@ -15,7 +15,7 @@ EOF
 }
 
 venv_dir=""
-sancov_build=""
+llvm_build=""
 lit_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -29,13 +29,13 @@ while [[ $# -gt 0 ]]; do
             venv_dir="$2"
             shift 2
             ;;
-        --sancov-build)
+        --llvm-build)
             if [[ $# -lt 2 ]]; then
-                echo "error: --sancov-build requires a value" >&2
+                echo "error: --llvm-build requires a value" >&2
                 usage
                 exit 2
             fi
-            sancov_build="$2"
+            llvm_build="$2"
             shift 2
             ;;
         --help|-h)
@@ -55,8 +55,8 @@ if [[ -z "$venv_dir" ]]; then
     exit 2
 fi
 
-if [[ -z "$sancov_build" ]]; then
-    echo "error: --sancov-build is required" >&2
+if [[ -z "$llvm_build" ]]; then
+    echo "error: --llvm-build is required" >&2
     usage
     exit 2
 fi
@@ -66,13 +66,13 @@ if [[ ! -d "$venv_dir" ]]; then
     exit 2
 fi
 
-if [[ ! -d "$sancov_build" ]]; then
-    echo "error: sancov build directory does not exist: $sancov_build" >&2
+if [[ ! -d "$llvm_build" ]]; then
+    echo "error: LLVM bin directory does not exist: $llvm_build" >&2
     exit 2
 fi
 
 export FUZZ_FILL_VENV_DIR="$venv_dir"
-export FUZZ_FILL_SANCOV_LLVM_BIN_DIR="$sancov_build"
+export FUZZ_FILL_LLVM_BIN_DIR="$llvm_build"
 
 if [[ ${#lit_args[@]} -eq 0 ]]; then
     lit_args=(.)

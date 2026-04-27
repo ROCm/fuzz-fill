@@ -7,25 +7,25 @@ import sys
 
 import lit.formats
 
-_sancov_bin = os.environ.get("FUZZ_FILL_SANCOV_LLVM_BIN_DIR")
+_llvm_bin_dir = os.environ.get("FUZZ_FILL_LLVM_BIN_DIR")
 _venv_dir = os.environ.get("FUZZ_FILL_VENV_DIR")
-if not _sancov_bin:
+if not _llvm_bin_dir:
     print(
-        "error: FUZZ_FILL_SANCOV_LLVM_BIN_DIR must be set to the LLVM build bin directory",
+        "error: FUZZ_FILL_LLVM_BIN_DIR must be set to the LLVM build bin directory",
         file=sys.stderr,
     )
     raise SystemExit(1)
-_sancov_bin = os.path.abspath(os.path.expanduser(_sancov_bin))
-if not os.path.exists(_sancov_bin):
+_llvm_bin_dir = os.path.abspath(os.path.expanduser(_llvm_bin_dir))
+if not os.path.exists(_llvm_bin_dir):
     print(
-        f"error: FUZZ_FILL_SANCOV_LLVM_BIN_DIR does not exist: {_sancov_bin!r}",
+        f"error: FUZZ_FILL_LLVM_BIN_DIR does not exist: {_llvm_bin_dir!r}",
         file=sys.stderr,
     )
     raise SystemExit(1)
-if not os.path.isdir(_sancov_bin):
+if not os.path.isdir(_llvm_bin_dir):
     print(
-        f"error: FUZZ_FILL_SANCOV_LLVM_BIN_DIR must be a directory, not a file: "
-        f"{_sancov_bin!r}",
+        f"error: FUZZ_FILL_LLVM_BIN_DIR must be a directory, not a file: "
+        f"{_llvm_bin_dir!r}",
         file=sys.stderr,
     )
     raise SystemExit(1)
@@ -58,10 +58,10 @@ if not os.path.exists(_venv_activate):
     raise SystemExit(1)
 
 def _tool(name: str) -> str:
-    return shlex.quote(os.path.join(_sancov_bin, name))
+    return shlex.quote(os.path.join(_llvm_bin_dir, name))
 
 
-_llvm_build_dir = os.path.dirname(_sancov_bin)
+_llvm_build_dir = os.path.dirname(_llvm_bin_dir)
 _venv_cmd = f". {shlex.quote(_venv_activate)}"
 
 config.name = "fuzz-fill-integration-tests"
@@ -70,8 +70,8 @@ config.test_format = lit.formats.ShTest(execute_external=True)
 config.environment["VIRTUAL_ENV"] = _venv_dir
 config.substitutions.extend(
     [
-        ("%sancov-llc", _tool("llc")),
-        ("%sancov-opt", _tool("opt")),
+        ("%llc", _tool("llc")),
+        ("%opt", _tool("opt")),
         ("%clang", _tool("clang")),
         ("%llvm-build-dir", shlex.quote(_llvm_build_dir)),
         ("%venv", _venv_cmd),
