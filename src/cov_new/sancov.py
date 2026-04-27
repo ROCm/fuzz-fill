@@ -169,8 +169,9 @@ class Sancov:
         if self.coverage_mode == "full":
             joint_df =joint_df.drop(columns=["col", "covered_other", "covered_this", "point_other"])
             cov_summary_df = self.get_coverage_summary_df(joint_df)
-            fully_covered_df = cov_summary_df[cov_summary_df["coverage"] == "full"]
-            return cov_summary_df
+            fully_covered_df = cov_summary_df[cov_summary_df["coverage"] == "full"].copy()
+            fully_covered_df.rename(columns={"point_this": f"point_{self.suffix}"}, inplace=True)
+            return fully_covered_df
         
         elif self.coverage_mode == "partial":
             raise NotImplementedError(f"Coverage mode {self.coverage_mode} not implemented")
