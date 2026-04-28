@@ -1,18 +1,18 @@
-"""Defaults for llvm-lit + SanitizerCoverage runs."""
+from pathlib import Path
 
-from __future__ import annotations
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-import shlex
-
+# Default for llvm-lit ``--filter=`` when none is passed.
 DEFAULT_LIT_FILTER = "CodeGen/AMDGPU"
+DEFAULT_PATH_FILTER = "llvm/lib/Target/AMDGPU"
 
-# Raw and merged files use <binary>.<digits>.sancov. Merged output uses this suffix; that exact
-# file is excluded when collecting raw inputs. Prefix must match the binary basename for
-# sancov -symbolize (llvm/tools/sancov/sancov.cpp SancovFileRegex).
-MERGED_SANCOV_SUFFIX_ID = "0"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "coverage_output" / f"cov_<timestamp>"
 
+# CSV file names
+CSV_FILE_NAME_COVERED = "covered_by_opt_or_llc.csv"
+DEFAULT_LLC_ADDRESS_LINE_MAP_FILE = "llc_address_line_map.csv"
+DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE = "joint_llc_and_opt_coverage.csv"
+DEFAULT_NEW_COVERAGE_CSV = "new_coverage.csv"
 
-def default_lit_command(lit_filter: str) -> str:
-    return shlex.join(
-        ["./bin/llvm-lit", "../llvm/test/", f"--filter={lit_filter}"]
-    )
+# Sancov constants
+UNION_BATCH_SIZE = 200
