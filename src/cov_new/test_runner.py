@@ -38,9 +38,16 @@ class TestRunner:
         self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
         self.raw_sancov_output_dir.mkdir(parents=True, exist_ok=True)
 
-    def ubsan_environ_with_coverage(self) -> dict[str, str]:
+    def ubsan_environ_with_coverage(self, out_dir_name: str | None = None) -> dict[str, str]:
         env = os.environ.copy()
-        cov_opts = f"coverage=1:coverage_dir={self.raw_sancov_output_dir}"
+
+        if out_dir_name is None:
+            cov_opts = f"coverage=1:coverage_dir={self.raw_sancov_output_dir}"
+        else:
+            out_dir = self.raw_sancov_output_dir / out_dir_name
+            out_dir.mkdir(parents=True, exist_ok=True)
+            cov_opts = f"coverage=1:coverage_dir={out_dir}"
+        
         prev = env.get("UBSAN_OPTIONS", "").strip()
         env["UBSAN_OPTIONS"] = f"{cov_opts}:{prev}" if prev else cov_opts
         return env
@@ -88,19 +95,23 @@ class TestRunner:
 
         paths = self.collect_llc_input_files()
         to_run = paths[: self._new_tests_limit]
-        env = self.ubsan_environ_with_coverage()
 
         for test_path in to_run:
-            rel = test_path.relative_to(self.filepaths.new_tests_dir)
-            argv = [str(self.instrumented_llc), "-o", "/dev/null", str(rel)]
 
-            if self.debug:
-                print(f"\tRunning: {argv}")
-                print(f"\tUBSAN_OPTIONS: {env['UBSAN_OPTIONS']}")
-                print(f"\tCWD: {self.filepaths.new_tests_dir}")
-                print(f"\tCoverage directory: {self.raw_sancov_output_dir}")
-            else:
-                subprocess.run(argv, cwd=self.filepaths.new_tests_dir, env=env, check=True)
+            self.run_standalone_test(test_path)
+
+    def run_standalone_test(self, test_path: Path) -> None:
+        rel = test_path.relative_to(self.filepaths.new_tests_dir)
+        env = self.ubsan_environ_with_coverage(out_dir_name = test_path.name)
+        argv = [str(self.instrumented_llc), "-o", "/dev/null", str(rel)]
+
+        if self.debug:
+            print(f"\tRunning: {argv}")
+            print(f"\tUBSAN_OPTIONS: {env['UBSAN_OPTIONS']}")
+            print(f"\tCWD: {self.filepaths.new_tests_dir}")
+            print(f"\tCoverage directory: {self.raw_sancov_output_dir}")
+        else:
+            subprocess.run(argv, cwd=self.filepaths.new_tests_dir, env=env, check=True)
 
     def get_aggregate_coverage(self) -> None:
         """Get the aggregate coverage for the test suite."""
