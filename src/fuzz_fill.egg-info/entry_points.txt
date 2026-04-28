@@ -1,3 +1,0 @@
-[console_scripts]
-llvm-test-suite-coverage = coverage.__main__:main
-reduce = reduce.__main__:main
