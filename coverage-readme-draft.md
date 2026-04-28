@@ -22,10 +22,13 @@ Coverage module has 3 subcommands:
     - get symcovs
     - get the union of llc and opt coverage using the llc address-line mapping
     - output:
-        - individual sancov file for each test
-        - merged sancov and symcov for each of llc and opt
+        - raw_sancov:
+            - individual sancov file for each test
+        - processed_sancov:
+            - merged sancov and symcov for llc
+            - merged sancov and symcov for opt
         - .csv list of all addresses covered by either llc or opt using the llc address-line mapping
-        - .json mapping of all llc addresses to lines (point-symbol-info from the llc symcov) 
+        - .csv mapping of all llc addresses to lines (point-symbol-info from the llc symcov) 
 
 - new-tests
     - run tests
