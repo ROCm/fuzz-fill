@@ -4,8 +4,8 @@ import pandas as pd
 from pathlib import Path
 from typing import Literal
 
-from cov_new.filepaths import Filepaths
-from cov_new.sancov import Sancov
+from coverage.filepaths import Filepaths
+from coverage.sancov import Sancov
 
 class CoverageAnalyzer:
     def __init__(self, filepaths: Filepaths, mode: Literal["partial", "full"]):
@@ -29,14 +29,13 @@ class CoverageAnalyzer:
         baseline_coverage = pd.read_csv(self.baseline_coverage_file)
         llc_address_line_map = pd.read_csv(self.llc_address_line_map_file)
         
+        llc_address_line_map["point_llc"] = llc_address_line_map["point_llc"].map(lambda x: f"0x{x}" if pd.notna(x) else x)        
         llc_address_line_map["n_addresses_in_line"] = llc_address_line_map.groupby(["file", "line"], sort=False)["file"].transform("count")
         llc_address_line_map["file_line"] = llc_address_line_map["file"] + ":" + llc_address_line_map["line"].astype(str)
 
         # Check whether the baseline coverage is full
         if not (baseline_coverage['coverage'] == 'full').all():
             raise ValueError(f"Baseline coverage is not full")
-
-        baseline_covered_addresses = set(baseline_coverage['point_llc'])
 
         self.new_coverage_csv.parent.mkdir(parents=True, exist_ok=True)
         with self.new_coverage_csv.open("w", newline="", encoding="utf-8") as new_coverage_csv_f:
@@ -51,11 +50,11 @@ class CoverageAnalyzer:
 
             sancov_file = get_sancov_file(new_test_dir)
 
-            new_test_covered_addresses = sancov.get_covered_addresses(sancov_file)
+            new_test_covered_addresses: set[str] = sancov.get_covered_addresses(sancov_file)
 
             # Match newly covered addresses to llc line-address mapping to check
             # whether they are in files that we are interested in
-            new_coverage_df = llc_address_line_map[llc_address_line_map['point_llc'].isin(new_test_covered_addresses)]
+            new_coverage_df = llc_address_line_map[llc_address_line_map['point_llc'].isin(new_test_covered_addresses)].copy()
 
             if len(new_coverage_df) == 0:
                 print(f"New test {test_name} has no covered addresses in files that we are interested in")

@@ -5,9 +5,9 @@ import subprocess
 import pandas as pd
 from pathlib import Path
 
-from cov_new.constants import DEFAULT_LIT_FILTER
-from cov_new.filepaths import Filepaths
-from cov_new.sancov import Sancov
+from coverage.constants import DEFAULT_LIT_FILTER
+from coverage.filepaths import Filepaths
+from coverage.sancov import Sancov
 
 class TestRunner:
     """
