@@ -35,7 +35,7 @@ def main():
     p_test_suite.add_argument("--filter", type=str, default=None, 
         help="Filter prefix for the test suite")
 
-    p_test_suite.add_argument("--instrumented-bin", type=Path, required=True, 
+    p_new_tests.add_argument("--instrumented-bin", type=Path, required=True, 
         help="Path to the coverage-instrumented LLVM bin directory")
     p_new_tests.add_argument("--new-tests-dir", type=Path, required=True,
         help="Directory containing the new tests (.ll/.bc).")

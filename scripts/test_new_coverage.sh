@@ -16,8 +16,8 @@ FILTER="CodeGen/AMDGPU/loop" # Small set of tests featuring both llc and opt for
 
 # Clear old output directories
 #rm -rf $TEST_SUITE_OUTPUT_DIR
-#rm -rf $NEW_TESTS_OUTPUT_DIR
-#rm -rf $DIFF_OUTPUT_DIR
+rm -rf $NEW_TESTS_OUTPUT_DIR
+rm -rf $DIFF_OUTPUT_DIR
 
 python -m cov_new test-suite \
     --output-dir $TEST_SUITE_OUTPUT_DIR \
@@ -25,16 +25,11 @@ python -m cov_new test-suite \
     --instrumented-bin $INSTRUMENTED_BIN_DIR \
     --filter $FILTER 
 
-exit 0
-
 python -m cov_new new-tests \
     --output-dir $NEW_TESTS_OUTPUT_DIR \
-    --llvm-bin $LLVM_BIN \
     --instrumented-bin $INSTRUMENTED_BIN_DIR \
-    --filter $FILTER \
     --new-tests-dir $TESTS_DIR \
-    --n 1 \
-    --debug
+    --n 3
 
 python -m cov_new diff \
     --output-dir $DIFF_OUTPUT_DIR \

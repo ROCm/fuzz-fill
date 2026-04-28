@@ -101,7 +101,7 @@ All paths are under **`--output-dir`** unless noted.
 
 | Output | Description |
 |--------|-------------|
-| **`raw_sancov/`** | Raw SanitizerCoverage **`*.sancov`** from each new test. |
+| **`raw_sancov/`** | Raw SanitizerCoverage **`*.sancov`** from each new test, saved in a subdirectory that has the name of the test so that tests can be mapped easily to their sancov. |
 
 Note: unlike `test-suite`, `new-tests` does **not** merge or symbolize sancov files.
 
