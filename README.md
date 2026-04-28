@@ -24,7 +24,7 @@ The inputs are:
 - Configuration options (shown in `scripts/test_coverage.sh`) to control parameters such as the target file of interest, the number of new tests to run, and the type of coverage (full line vs partial line)
 
 The output is:
-- A `.csv` file with format `cols=['test','file','line]` that lists new tests that cover lines of code in the target files that are not covered by the LLVM test suite. This can be used as an input to the reducer. 
+- A `.csv` file with format `cols=['test','file','line','covered_addresses']` that lists new tests that cover lines of code in the target files that are not covered by the LLVM test suite. This can be used as an input to the reducer. 
 - Intermediate data files containing more details on new coverage.
 
 ### Prerequisites 

@@ -41,7 +41,9 @@ class CoverageAnalyzer:
 
         self.new_coverage_csv.parent.mkdir(parents=True, exist_ok=True)
         with self.new_coverage_csv.open("w", newline="", encoding="utf-8") as new_coverage_csv_f:
-            csv.writer(new_coverage_csv_f).writerow(["test_name", "file", "line"])
+            csv.writer(new_coverage_csv_f).writerow(
+                ["test_name", "file", "line", "covered_addresses"]
+            )
 
         sancov = Sancov(self.filepaths.llvm_bin)
 
@@ -96,12 +98,24 @@ class CoverageAnalyzer:
                 print(f"{sum(is_new_vs_baseline)} lines are new vs baseline out of {len(keys)}")
                 print(f"{sum(is_new_vs_other_new_tests)} lines are new vs other new tests out of {len(keys)}")
 
-                newly_covered_lines.update(keys)
+                if unique_locations.empty:
+                    continue
+
+                newly_covered_lines.update(
+                    zip(unique_locations["file"], unique_locations["line"])
+                )
+
+                keys_df = unique_locations[["file", "line"]]
+                sub = new_test_covered_lines.merge(keys_df, on=["file", "line"], how="inner")
+                addr_by_line = sub.groupby(["file", "line"], sort=False)["point_llc"].agg(
+                    lambda s: ";".join(sorted(s.dropna().astype(str).unique()))
+                )
 
                 with self.new_coverage_csv.open("a", newline="", encoding="utf-8") as new_coverage_csv_f:
                     writer = csv.writer(new_coverage_csv_f)
                     for _, row in unique_locations.iterrows():
-                        writer.writerow([per_test_csv, row["file"], row["line"]])
+                        addrs = addr_by_line.loc[row["file"], row["line"]]
+                        writer.writerow([per_test_csv, row["file"], row["line"], addrs])
 
 def get_sancov_file(new_test_dir: Path) -> Path:
     """Get the llc sancov file for a new test. Checks that there is only one sancov file and throws an error if there are multiple."""
