@@ -24,7 +24,7 @@ python -m cov_new test-suite \
     --llvm-bin $LLVM_BIN \
     --instrumented-bin $INSTRUMENTED_BIN_DIR \
     --filter $FILTER 
-
+exit 0
 python -m cov_new new-tests \
     --output-dir $NEW_TESTS_OUTPUT_DIR \
     --instrumented-bin $INSTRUMENTED_BIN_DIR \
@@ -33,5 +33,7 @@ python -m cov_new new-tests \
 
 python -m cov_new diff \
     --output-dir $DIFF_OUTPUT_DIR \
+    --llvm-bin $LLVM_BIN \
     --test-suite-output-dir $TEST_SUITE_OUTPUT_DIR \
     --new-tests-output-dir $NEW_TESTS_OUTPUT_DIR
+

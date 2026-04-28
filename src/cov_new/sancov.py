@@ -18,9 +18,9 @@ class Sancov:
     def __init__(
         self,
         bin_dir: Path,
-        instrumented_bin: Path,
-        raw_sancov_dir: Path,
-        suffix: str,
+        instrumented_bin: Path | None = None,
+        raw_sancov_dir: Path | None = None,
+        suffix: str | None = None,
         coverage_mode: Literal["partial", "full"] = "full",
         union_batch: int = 200,
     ) -> None:
@@ -30,9 +30,29 @@ class Sancov:
         self.raw_sancov_dir = raw_sancov_dir
         self.suffix = suffix
         self.coverage_mode = coverage_mode
-        self.output_dir = self.raw_sancov_dir.parent / f"processed_sancov"
 
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        if self.raw_sancov_dir is not None:
+            self.output_dir = self.raw_sancov_dir.parent / f"processed_sancov"
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def flatten_point_symbol_info(point_symbol_info: dict[str, object]) -> pd.DataFrame:
+        """Flatten the point-symbol-info dictionary into a dataframe."""
+        rows = ((file, addr_to_line) for file, d1 in point_symbol_info.items() for fun, addr_to_line in d1.items())
+        df = pd.DataFrame.from_records(rows, columns=["file", "addr_to_line"])
+
+        files, addrs, lines = [], [], []
+        for t in df.itertuples(index=False):
+            f = t.file
+            for a, ln in t.addr_to_line.items():
+                files.append(f)
+                addrs.append(a)
+                lines.append(ln)
+
+        out = pd.DataFrame({"file": files, "point": addrs, "line": lines})
+        out[["line", "col"]] = out["line"].str.split(":", n=1, expand=True)
+
+        return out
 
     @staticmethod
     def get_coverage_df(symcov: dict[str, object], path_filter: str) -> pd.DataFrame:
@@ -50,17 +70,14 @@ class Sancov:
             The covered-points is a list of covered point-ids in hex format
         """
         point_symbol_info = symcov.get("point-symbol-info")
+
         point_symbol_info = {k: v for k, v in point_symbol_info.items() if path_filter in k}
+
+        df = Sancov.flatten_point_symbol_info(point_symbol_info)
 
         covered_points = symcov.get("covered-points")
 
-        # Flatten point_symbol_info           
-        flattened_point_symbol_info = {f"{file}": addr_to_line for file, func_info in point_symbol_info.items() for func, addr_to_line in func_info.items()}
-        point_to_line = [(file, line, point) for file, inner in flattened_point_symbol_info.items() for point, line in inner.items()]
-
         # Create coverage dataframe
-        df = pd.DataFrame(point_to_line, columns=["file", "line", "point"])
-        df[["line", "col"]] = df["line"].str.split(":", n=1, expand=True)
         df["covered"] = df["point"].isin(covered_points).astype(int)
 
         return df
@@ -88,6 +105,22 @@ class Sancov:
 
     def get_merged_symcov_path(self) -> Path:
         return self.output_dir / f"{self.suffix}.0.symcov"
+
+    def get_covered_addresses(self, sancov_file: Path) -> set[str]:
+        """Get the covered addresses from a sancov file."""
+        try:
+            proc = subprocess.run(
+                [str(self.sancov_bin), "--print", str(sancov_file)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            err = (e.stderr or e.stdout or "").strip()
+            raise RuntimeError(
+                f"sancov --print failed for {sancov_file}: {err or e}"
+            ) from e
+        return {line.strip() for line in proc.stdout.splitlines() if line.strip()}
 
     def merge(self) -> None:
         """Merge the sancov files for the given suffix."""

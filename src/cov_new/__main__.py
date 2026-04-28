@@ -9,7 +9,10 @@ from cov_new.constants import (
     DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
     DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE,
     DEFAULT_OUTPUT_DIR,
+    DEFAULT_NEW_COVERAGE_CSV,
 )
+
+from cov_new.analyser import CoverageAnalyzer
 
 def main():
 
@@ -46,6 +49,8 @@ def main():
         help="Number of new tests to process (.ll/.bc, sorted path order).",
     )
 
+    p_diff.add_argument("--llvm-bin", type=Path, required=True,
+        help="Path to the uninstrumented LLVM bin directory")
     p_diff.add_argument("--test-suite-output-dir", type=Path, required=True,
         help="Directory containing the test suite coverage output")
     p_diff.add_argument("--new-tests-output-dir", type=Path, required=True,
@@ -79,7 +84,10 @@ def main():
         print("Getting incremental coverage for new tests relative to the baseline test suite")
         filepaths.output_test_suite_dir = args.test_suite_output_dir
         filepaths.output_new_tests_dir = args.new_tests_output_dir
-        print(filepaths)
+
+        coverage_analyzer = CoverageAnalyzer(filepaths, mode="full")
+
+        coverage_analyzer.get_incremental_coverage()
     
     else:
         print(f"Unknown subcommand: {args.subcmd}")
@@ -92,13 +100,14 @@ def add_shared_arguments(parser: argparse.ArgumentParser):
 def get_filepaths(args: argparse.Namespace) -> Filepaths:
     return Filepaths(
         output_dir=args.output_dir,
-        llvm_bin=getattr(args, "llvm_bin", None),
+        llvm_bin=args.llvm_bin,
         instrumented_bin=getattr(args, "instrumented_bin", None),
         new_tests_dir=getattr(args, "new_tests_dir", None),
         output_test_suite_dir=getattr(args, "output_test_suite_dir", None),
         output_new_tests_dir=getattr(args, "output_new_tests_dir", None),
         llc_address_line_map_file=DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
         joint_llc_and_opt_coverage_file=DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE,
+        new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,
     )
 if __name__ == "__main__":
     main()

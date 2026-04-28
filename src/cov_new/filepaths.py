@@ -12,6 +12,7 @@ class Filepaths:
     new_tests_dir: Path | None
     llc_address_line_map_file: Path | None
     joint_llc_and_opt_coverage_file: Path | None
+    new_coverage_csv: Path | None
 
     def __init__(self, output_dir: Path,
      output_test_suite_dir: Path | None = None,
@@ -21,7 +22,8 @@ class Filepaths:
      instrumented_bin: Path | None = None,
      new_tests_dir: Path | None = None,
      llc_address_line_map_file: Path | None = None,
-     joint_llc_and_opt_coverage_file: Path | None = None):
+     joint_llc_and_opt_coverage_file: Path | None = None,
+     new_coverage_csv: Path | None = None):
         self.output_dir = output_dir
         self.output_test_suite_dir = output_test_suite_dir
         self.output_new_tests_dir = output_new_tests_dir
@@ -31,3 +33,4 @@ class Filepaths:
         self.new_tests_dir = new_tests_dir
         self.llc_address_line_map_file = llc_address_line_map_file
         self.joint_llc_and_opt_coverage_file = joint_llc_and_opt_coverage_file
+        self.new_coverage_csv = new_coverage_csv
