@@ -24,7 +24,7 @@ python -m cov_new test-suite \
     --llvm-bin $LLVM_BIN \
     --instrumented-bin $INSTRUMENTED_BIN_DIR \
     --filter $FILTER 
-exit 0
+
 python -m cov_new new-tests \
     --output-dir $NEW_TESTS_OUTPUT_DIR \
     --instrumented-bin $INSTRUMENTED_BIN_DIR \

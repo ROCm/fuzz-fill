@@ -100,7 +100,7 @@ def add_shared_arguments(parser: argparse.ArgumentParser):
 def get_filepaths(args: argparse.Namespace) -> Filepaths:
     return Filepaths(
         output_dir=args.output_dir,
-        llvm_bin=args.llvm_bin,
+        llvm_bin=getattr(args, "llvm_bin", None),
         instrumented_bin=getattr(args, "instrumented_bin", None),
         new_tests_dir=getattr(args, "new_tests_dir", None),
         output_test_suite_dir=getattr(args, "output_test_suite_dir", None),
