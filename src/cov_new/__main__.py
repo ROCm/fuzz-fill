@@ -6,7 +6,8 @@ from pathlib import Path
 from cov_new.filepaths import Filepaths
 from cov_new.test_runner import TestRunner
 from cov_new.constants import (
-    CSV_FILE_NAME_COVERED,
+    DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
+    DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE,
     DEFAULT_OUTPUT_DIR,
 )
 
@@ -98,6 +99,8 @@ def get_filepaths(args: argparse.Namespace) -> Filepaths:
         new_tests_dir=getattr(args, "new_tests_dir", None),
         output_test_suite_dir=getattr(args, "output_test_suite_dir", None),
         output_new_tests_dir=getattr(args, "output_new_tests_dir", None),
+        llc_address_line_map_file=DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
+        joint_llc_and_opt_coverage_file=DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE,
     )
 if __name__ == "__main__":
     main()

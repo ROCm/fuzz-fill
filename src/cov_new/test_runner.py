@@ -122,7 +122,7 @@ class TestRunner:
 
         llc_address_line_map, joint_coverage_df = llc_sancov.get_joint_coverage(opt_sancov)
 
-        llc_address_line_map.to_csv(self.filepaths.output_dir / "llc_address_line_map.csv", index=False)
-        joint_coverage_df.to_csv(self.filepaths.output_dir / "joint_llc_and_opt_coverage.csv", index=False)
+        llc_address_line_map.to_csv(self.filepaths.output_dir / self.filepaths.llc_address_line_map_file, index=False)
+        joint_coverage_df.to_csv(self.filepaths.output_dir / self.filepaths.joint_llc_and_opt_coverage_file, index=False)
 
 
