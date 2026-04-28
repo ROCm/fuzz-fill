@@ -77,6 +77,48 @@ PYTHONPATH=src python -m new_cov test-suite \
 
 Use `python -m new_cov test-suite --help` for the authoritative flag list.
 
+### `new-tests` — inputs
+
+Run from the repo root:
+
+```text
+python -m new_cov new-tests --llvm-bin DIR --instrumented-bin DIR --new-tests-dir DIR [--n N] [--output-dir DIR] [--debug] [--filter PREFIX]
+```
+
+| Input | Required | Meaning |
+|--------|----------|---------|
+| **`--instrumented-bin`** | Yes | Directory containing the **instrumented** `llc` binary used to execute each new test and emit sancov data. |
+| **`--new-tests-dir`** | Yes | Root directory scanned recursively for input files matching **`*.ll`** and **`*.bc`**. |
+| **`--n`** | No | Maximum number of discovered tests to run, after sorting by path. Default is **`1`**. |
+| **`--output-dir`** | No | Root directory for artifacts from this run. Parent directories are created as needed. If omitted, uses the package default output root from `src/cov_new/constants.py`. |
+| **`--debug`** | No | Parsed by the CLI, but currently not wired into the `new-tests` execution path. |
+
+### `new-tests` — outputs
+
+All paths are under **`--output-dir`** unless noted.
+
+#### Main outputs
+
+| Output | Description |
+|--------|-------------|
+| **`raw_sancov/`** | Raw SanitizerCoverage **`*.sancov`** from each new test. |
+
+Note: unlike `test-suite`, `new-tests` does **not** merge or symbolize sancov files.
+
+### `new-tests` — example
+
+```bash
+source venv/bin/activate   # optional
+PYTHONPATH=src python -m new_cov new-tests \
+  --output-dir "$HOME/fuzz-fill/data/coverage_output/new_tests_run" \
+  --llvm-bin "$LLVM/build/bin" \
+  --instrumented-bin "$LLVM/build-amdgpu-bb/bin" \
+  --new-tests-dir "$HOME/fuzz-fill/data/new_tests" \
+  --n 25
+```
+
+Use `python -m new_cov new-tests --help` for the authoritative flag list.
+
 ## Reduce module
 
 The `reduce` package drives **LLVM testcase reduction**: it reads a small JSON config, runs a **pass pipeline**, and writes artifacts under an output directory.
