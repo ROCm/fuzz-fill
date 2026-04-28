@@ -28,9 +28,15 @@ def main():
     add_shared_arguments(p_new_tests)
     add_shared_arguments(p_diff)
 
-    add_llvm_arguments(p_test_suite)
-    add_llvm_arguments(p_new_tests)
+    p_test_suite.add_argument("--llvm-bin", type=Path, required=True,
+        help="Path to the uninstrumented LLVM bin directory")
+    p_test_suite.add_argument("--instrumented-bin", type=Path, required=True, 
+        help="Path to the coverage-instrumented LLVM bin directory")
+    p_test_suite.add_argument("--filter", type=str, default=None, 
+        help="Filter prefix for the test suite")
 
+    p_test_suite.add_argument("--instrumented-bin", type=Path, required=True, 
+        help="Path to the coverage-instrumented LLVM bin directory")
     p_new_tests.add_argument("--new-tests-dir", type=Path, required=True,
         help="Directory containing the new tests (.ll/.bc).")
     p_new_tests.add_argument(
@@ -82,14 +88,6 @@ def main():
 def add_shared_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--debug", action="store_true", default=False)
-
-def add_llvm_arguments(parser: argparse.ArgumentParser):
-    parser.add_argument("--llvm-bin", type=Path, required=True,
-        help="Path to the uninstrumented LLVM bin directory")
-    parser.add_argument("--instrumented-bin", type=Path, required=True, 
-        help="Path to the coverage-instrumented LLVM bin directory")
-    parser.add_argument("--filter", type=str, default=None, 
-        help="Filter prefix for the test suite")
 
 def get_filepaths(args: argparse.Namespace) -> Filepaths:
     return Filepaths(
