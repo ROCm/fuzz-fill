@@ -1,10 +1,10 @@
 # fuzz-fill
 
-Fuzzing to fill test suite gaps.
+Fuzzing to fill test suite gaps in LLVM.
 
 ## Python environment
 
-Create a virtual environment, **activate it**, then install the project. With the venv active, `pip` installs into that environment only (not your system Python), including dependencies such as **pandas**:
+Create a virtual environment, **activate it**, then install the project. 
 
 ```bash
 python3 -m venv venv
@@ -12,27 +12,23 @@ source venv/bin/activate
 pip install -e .
 ```
 
-This installs editable packages, console scripts (`reduce`, `llvm-test-suite-coverage`), and **`pandas`** (used by **`coverage map`**). **`coverage run`** does not import **`coverage.map`**, but pandas is still a declared dependency of the package.
-
 ## Coverage module
 
 The coverage CLI lives under **`src/new_cov/`** (Python package **`new_cov`**).
-
-### TL;DR
-
-For **llvm-lit** tests under `llvm-project/llvm/test` (e.g. AMDGPU `CodeGen/AMDGPU`), install **`config/amdgpu-be/lit.local.cfg.py`** into the matching test tree so LIT forwards **`UBSAN_OPTIONS`** to subprocesses. Then run baseline coverage with the **`test-suite`** subcommand (see below) pointing at your **instrumented** and **uninstrumented** LLVM `bin` directories and an **`--output-dir`**. Higher-level shell workflows under `scripts/` may still exist; this section documents the **`new_cov`** CLI.
 
 ### Subcommands
 
 | Subcommand | Status |
 |------------|--------|
-| **`test-suite`** | Documented below: baseline llvm-lit run plus merge, symbolize, and CSV summaries. |
-| **`new-tests`** | Placeholder (standalone `.ll`/`.bc` coverage). |
-| **`diff`** | Placeholder (incremental coverage vs baseline). |
+| **`test-suite`** |  Get baseline coverage of the LIT test suite. |
+| **`new-tests`** | Get coverage of new tests. |
+| **`diff`** | Get incremental coverage of new tests relative to the baseline test suite coverage. |
 
 ### `test-suite` — inputs
 
-Run from the repo root with `PYTHONPATH=src` (or after the package is installed and named `new_cov`):
+For **llvm-lit** tests under `llvm-project/llvm/test` (e.g. AMDGPU `CodeGen/AMDGPU`), install **`config/amdgpu-be/lit.local.cfg.py`** into the matching test tree so LIT forwards **`UBSAN_OPTIONS`** to subprocesses.
+
+Run from the repo root:
 
 ```text
 python -m new_cov test-suite --llvm-bin DIR --instrumented-bin DIR [--output-dir DIR] [--filter PREFIX] [--debug]
@@ -55,7 +51,9 @@ All paths are under **`--output-dir`** unless noted.
 | Output | Description |
 |--------|-------------|
 | **`llc_address_line_map.csv`** | Top-level CSV in **`--output-dir`** (default name from `DEFAULT_LLC_ADDRESS_LINE_MAP_FILE`) mapping **source file**, **line**, and **hex point id** from llc coverage. |
-| **`joint_llc_and_opt_coverage.csv`** | Top-level CSV in **`--output-dir`** (default name from `DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE`) built from shared **`(file, line, col)`** points present in both llc and opt symcovs. In current **`coverage_mode="full"`**, a row is kept when all shared points on that **`(file, line)`** are covered by **either** side (`covered_this OR covered_other`), not necessarily both. |
+| **`joint_llc_and_opt_coverage.csv`** | Top-level CSV in **`--output-dir`** (default name from `DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE`) built from shared **`(file, line, col)`** points present in both llc and opt symcovs. In current **`coverage_mode="full"`**, a row is kept when all shared points on that **`(file, line)`** are covered by **either** llc or opt. |
+
+Note: coverage selection rules are currently limited to **`coverage_mode="full"`** in `cov_new/sancov.py`. Other modes (for example, partial-coverage style rules) may be added in the future but are not implemented yet.
 
 #### Intermediate outputs
 
@@ -65,7 +63,6 @@ All paths are under **`--output-dir`** unless noted.
 | **`processed_sancov/llc.0.sancov`**, **`llc.0.symcov`** | Merged union of all raw **`llc.*.sancov`**, then **JSON symcov** from **`sancov -symbolize`** using the **instrumented** `llc` binary. |
 | **`processed_sancov/opt.0.sancov`**, **`opt.0.symcov`** | Same for **`opt`**. |
 
-Note: coverage selection rules are currently limited to **`coverage_mode="full"`** in `cov_new/sancov.py`. Other modes (for example, partial-coverage style rules) may be added in the future but are not implemented yet.
 
 ### Example
 
