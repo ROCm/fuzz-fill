@@ -24,7 +24,7 @@ The inputs are:
 - Configuration options (shown in `scripts/test_coverage.sh`) to control parameters such as the target file of interest, the number of new tests to run, and the type of coverage (full line vs partial line)
 
 The output is:
-- A `.csv` file with format `cols=['test','file','line]` that lists new tests that cover lines of code in the target files that are not covered by the LLVM test suite. This can be used as an input to the reducer. 
+- A `.csv` file with format `cols=['test','file','line','covered_addresses']` that lists new tests that cover lines of code in the target files that are not covered by the LLVM test suite. This can be used as an input to the reducer. 
 - Intermediate data files containing more details on new coverage.
 
 ### Prerequisites 
@@ -140,26 +140,68 @@ Use `python -m coverage new-tests --help` for the authoritative flag list.
 
 ## Reduce module
 
-The `reduce` package drives **LLVM testcase reduction**: it reads a small JSON config, runs a **pass pipeline**, and writes artifacts under an output directory.
+The `reduce` package drives **testcase reduction** for tests that cover new lines of code as identified by the coverage module. It reads a small JSON config, runs a **pass pipeline**, and writes a reduced test under an output directory.
 
-### Quick start
+The inputs are:
 
-Two examples are given in `example/`:
-- The SPIRV example runs a dummy `snapshot` pass that does nothing to the file (useful for debug purposes) and then runs `llvm-reduce` in `ir` form, which is the simplest reduction.
-- The AMD exmaple runs `llvm-reduce` in `ir` mode, then extracts the `MIR` from just before the LLVM pass under test, then runs `llfm-reduce` in `mir` mode.
+- A **JSON config** that points at the testcase (`input`), LLVM source metadata (`file`, `line`), an ordered **`pipeline`** of reducer passes, and paths to **interestingness scripts** where a pass needs them.
+- **`--llvm-bin`**: directory with `llvm-reduce`, `llc`, and anything your interesting scripts invoke.
 
-Run them as follows:
+The output is:
+
+- A directory (from **`output_dir`** in the config, or a timestamped default under `data/output/<input-basename>/`) containing step artifacts under **`tmp/`** and a final **`reduced.ll`** or **`reduced.mir`** (suffix matches the last pipeline stage).
+
+### From `new_coverage.csv` to a reduce example
+
+The coverage module emits a CSV of incremental new coverage whose columns are `test_name`, `file`, `line`, and `covered_addresses` (see **Coverage module** — same shape as the file described there). Each row maps a **new test artifact** (`test_name`, typically a `.bc` or `.ll` under your new-tests directory) to a **source location** in LLVM (`file`, `line`) and one or more **SanitizerCoverage point ids** for that line (`covered_addresses`, semicolon-separated `0x…` values).
+
+To turn one row into something you can reduce:
+
+1. **Pick a row** you care about (often you filter to a single `test_name` first, then choose the `file`/`line` you want minimized toward).
+2. Set **`input`** in the config to that testcase file. Copy or symlink the file named in `test_name` next to the config (or use an absolute path); the name in the CSV is the basename the coverage run used.
+3. Set **`file`** to the LLVM-relative source path: strip any prefix before `llvm/` so it matches your checkout, e.g. `llvm/lib/Target/AMDGPU/SIInstrInfo.cpp` (the CSV may store an absolute path like `…/llvm-project/llvm/lib/Target/AMDGPU/…`).
+4. Set **`line`** to the integer from the **`line`** column.
+5. **Interestingness** depends on your goal. For “still hits this coverage point after `llc`”, modify the example in `example/amd/new-test-1/interesting_ir.sh` using one hex id from **`covered_addresses`**.
+
+Example row shape (fields only; paths vary by machine):
+
+```text
+<test_name>.bc,…/llvm/lib/Target/AMDGPU/SIInstrInfo.cpp,5112,0x61d2dd3
+```
+
+That row says: this input still exercises `SIInstrInfo.cpp` line **5112** and you can treat **0x61d2dd3** as a coverage guard in your script. The checked-in **`example/amd/new-test-1`** config was built the same way for a different line and address on the same file: it pins **`SIInstrInfo.cpp:6069`** and **`COVERED=0x61d4b9a`** in `interesting_ir.sh`, with **`input`** set to the corresponding `.bc` beside `config.json`.
+
+`example/amd/new-test-1/config.json` runs a single IR reduction step:
+
+```json
+"pipeline": [
+  {
+    "id": "llvm_reduce_ir",
+    "parameters": { "interesting": "interesting_ir.sh" }
+  }
+]
+```
+
+Run it from the repo root (after `pip install -e .` or with `PYTHONPATH=src`):
 
 ```bash
 cd src
-../scripts/reduce_spirv_icmp.sh
+python -m reduce --config ../example/amd/new-test-1/config.json --llvm-bin "$LLVM/build/bin"
 ```
 
-```bash
-cd src
-../scripts/reduce_amd_si_i1.sh
-```
+Adjust `--llvm-bin` and the hard-coded `LLVM_BIN` inside `interesting_ir.sh` for your trees.
 
+### Example pipelines in `example/*/config.json`
+
+Other checked-in configs illustrate longer pipelines (paths are all under `example/`):
+
+| Directory | Pipeline idea |
+|-------------|----------------|
+| **`spirv/icmp`**, **`spirv/emit-intrinsics`** | `snapshot` then `llvm_reduce_ir` with `interesting.sh` (crash/assert style). |
+| **`amd/si-i1-copies`** | `llvm_reduce_ir` → `extract_mir_before_pass` (`pass_under_test` `si-i1-copies`, `mtriple` / `llc_O`) → `llvm_reduce_mir` with `interesting_mir.sh`. |
+| **`amd/si-sgpr-spills`** | `llvm_reduce_ir` → `extract_ir_before_pass` (`amdgpu-remove-incompatible-functions`) → `llvm_reduce_ir` → `extract_mir_before_pass` (`si-lower-sgpr-spills`) → `llvm_reduce_mir` → `creduce`. |
+
+Open each **`config.json`** for full `parameters` (`mtriple`, `llc_O`, script names, etc.).
 
 ### What it does
 
@@ -176,6 +218,7 @@ For **`action: reduce`** (or default), the tool runs the **`pipeline`**: an orde
 | `creduce` | `CreducePass` | Copies the previous artifact to `…/NN_creduce.<ext>` (same extension as input, e.g. `.mir`), copies the configured interesting script to `…/NN_creduce_interesting.sh`, replaces every literal `"$1"` in that copy with the shell-quoted **basename** of the candidate filename (c-reduce runs the test in a temp dir that contains that file), then runs `creduce --n <N> <copy> <candidate>` (in-place reduction). `<N>` defaults to half of the machine’s logical CPUs (`os.cpu_count()`), at least 1; override with `parameters.n`. The original script must use `"$1"` for the candidate path (same as llvm-reduce). |
 | `llvm_reduce_mir` | `LlvmReduceMirPass` | Runs `llvm-reduce -x=mir --test=<interesting_mir>`, writes `…/NN_llvmreduce_mir.mir` (input must be MIR, e.g. after `extract_mir_before_pass`). |
 | `extract_mir_before_pass` | `ExtractMirBeforePass` | Runs `llc -o <tmp> <llc_O tokens> -mtriple=<mtriple> -stop-before=<pass_under_test> -simplify-mir <input.ll>`; output is `tmp/NN_mir_before_pass.mir` or `tmp/NN_<extract_mir_output>` (basename only). |
+| `extract_ir_before_pass` | `ExtractIrBeforePass` | Same idea as above but **without** `-simplify-mir`; output is sliced IR (e.g. `tmp/NN_ir_before_pass.ll` or `tmp/NN_<extract_ir_before_output>`). |
 
 After the last pass, the result is copied to **`output_dir/reduced.ll`** or **`reduced.mir`** (same suffix as the final artifact).
 
@@ -185,23 +228,25 @@ After the last pass, the result is copied to **`output_dir/reduced.ll`** or **`r
 
 One top-level object. **Required:**
 
-- `input` — path to the original `.ll` file.
+- `input` — path to the original `.ll` or `.bc` file.
 - `file`, `line` — LLVM source location metadata (used when constructing the in-memory `Test` object).
-- `pipeline` — non-empty JSON array of pass id strings (order = execution order; repeats allowed), e.g. `["snapshot", "llvm_reduce_ir"]` or `["snapshot", "llvm_reduce_mir"]`.
+- `pipeline` — non-empty JSON array. Either **legacy** pass id strings (`["snapshot", "llvm_reduce_ir"]`, with shared options at the top level), or **structured** objects `{"id": "<pass>", "parameters": { … }}` per step (as in `example/amd/new-test-1/config.json`). Order is execution order; repeats are allowed.
 
 **Optional:**
 
-- `interesting` — path to an executable script **`llvm-reduce` invokes** for IR; candidate path as `$1`; exit `0` if still “interesting”.
-- `interesting` — also used by `creduce`: a copy is written under `tmp/` with `"$1"` replaced by the shell-quoted **basename** of the candidate (e.g. `05_creduce.mir`), and that copy is passed to `creduce`.
+- `interesting` — path to an executable script **`llvm-reduce`** (or **`creduce`**) uses for IR: candidate path as `$1`; exit `0` if still “interesting”. For `creduce`, a copy is written under `tmp/` with `"$1"` replaced by the shell-quoted **basename** of the candidate (e.g. `05_creduce.mir`), and that copy is passed to `creduce`.
 - `n` — (**`creduce` only**) positive integer passed as `creduce --n`; if omitted, uses half of `os.cpu_count()` (minimum 1).
 - `interesting_mir` — same contract for **`llvm_reduce_mir`** (`llvm-reduce -x=mir`); `$1` is the candidate **`.mir`** file.
 - `replacement` — how the line of interest in LLVM should be replaced to trigger the interestingness test; not consumed by reduction today.
 - `output_dir` — where to write `reduced.ll` and `tmp/`.
 - `action` — e.g. `reduce` or `test`.
-- `pass_under_test` — LLVM pass id for `llc --stop-before` when using `extract_mir_before_pass` (e.g. `si-i1-copies`); ignored for other passes.
-- `mtriple` — target triple for `llc` (required with `extract_mir_before_pass`), e.g. `amdgcn-amd-amdhsa`.
-- `llc_O` — string passed through to `llc` before `-mtriple` (required with `extract_mir_before_pass`): e.g. `"-O1"`, `"-Os"`, or `"-O2 -mllvm ..."` (split with shell rules). Use `""` to omit any `-O`/extra flags.
+- `pass_under_test` — LLVM pass id for `llc --stop-before` when using `extract_mir_before_pass` or `extract_ir_before_pass` (e.g. `si-i1-copies`); ignored for other passes.
+- `mtriple` — target triple for `llc` (required with the `extract_*_before_pass` passes), e.g. `amdgcn-amd-amdhsa`.
+- `llc_O` — string passed through to `llc` before `-mtriple` (required with the `extract_*_before_pass` passes): e.g. `"-O1"`, `"-Os"`, or `"-O2 -mllvm ..."` (split with shell rules). Use `""` to omit any `-O`/extra flags.
 - `extract_mir_output` — optional MIR filename (basename only); written under `tmp/` as `NN_<name>`. Defaults to `NN_mir_before_pass.mir`.
+- `extract_ir_before_output` — optional IR filename (basename only) for `extract_ir_before_pass`; defaults to `NN_ir_before_pass.ll`.
+
+Top-level **`interesting`**, **`interesting_mir`**, **`n`**, **`pass_under_test`**, **`mtriple`**, **`llc_O`**, and extract output keys are mainly for **legacy** configs that use a string-only `pipeline`; in **structured** configs, put pass-specific options under that step’s **`parameters`** (see `example/amd/si-i1-copies/config.json`).
 
 LLVM’s `bin` directory is **only** passed on the command line (`--llvm-bin`), not in JSON.
 
@@ -218,18 +263,6 @@ python -m reduce --config <path/to/config.json> --llvm-bin <path/to/llvm-project
 - **`--config` / `-c`** — required path to the JSON config.
 - **`--llvm-bin`** — required; directory containing `llvm-reduce` (and anything your interesting script needs).
 - **`--only-pass`** — run a single pass id for debugging (ignores config `pipeline`).
-
-### Example
-
-With the files under `example/`:
-
-```bash
-source venv/bin/activate
-cd src
-../scripts/reduce_spirv_icmp.sh
-```
-
-The script passes `--config` and `--llvm-bin`; adjust paths inside the script for your machine.
 
 ### Interesting script
 
