@@ -151,7 +151,7 @@ The output is:
 
 - A directory (from **`output_dir`** in the config, or a timestamped default under `data/output/<input-basename>/`) containing step artifacts under **`tmp/`** and a final **`reduced.ll`** or **`reduced.mir`** (suffix matches the last pipeline stage).
 
-### From `new_coverage.csv` to a reduce example
+### From coverage module output to a reduction example
 
 The coverage module emits a CSV of incremental new coverage whose columns are `test_name`, `file`, `line`, and `covered_addresses` (see **Coverage module** — same shape as the file described there). Each row maps a **new test artifact** (`test_name`, typically a `.bc` or `.ll` under your new-tests directory) to a **source location** in LLVM (`file`, `line`) and one or more **SanitizerCoverage point ids** for that line (`covered_addresses`, semicolon-separated `0x…` values).
 
@@ -162,6 +162,8 @@ To turn one row into something you can reduce:
 3. Set **`file`** to the LLVM-relative source path: strip any prefix before `llvm/` so it matches your checkout, e.g. `llvm/lib/Target/AMDGPU/SIInstrInfo.cpp` (the CSV may store an absolute path like `…/llvm-project/llvm/lib/Target/AMDGPU/…`).
 4. Set **`line`** to the integer from the **`line`** column.
 5. **Interestingness** depends on your goal. For “still hits this coverage point after `llc`”, modify the example in `example/amd/new-test-1/interesting_ir.sh` using one hex id from **`covered_addresses`**.
+
+Two examples for the AMDGPU backend are shown in `scripts/reduce_amd_coverage_based.sh` and `scripts/reduce_amd_argument_usage_multi_addr.sh`.
 
 Example row shape (fields only; paths vary by machine):
 
