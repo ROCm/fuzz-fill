@@ -230,23 +230,22 @@ One top-level object. **Required:**
 
 - `input` — path to the original `.ll` or `.bc` file.
 - `file`, `line` — LLVM source location metadata (used when constructing the in-memory `Test` object).
-- `pipeline` — non-empty JSON array. Either **legacy** pass id strings (`["snapshot", "llvm_reduce_ir"]`, with shared options at the top level), or **structured** objects `{"id": "<pass>", "parameters": { … }}` per step (as in `example/amd/new-test-1/config.json`). Order is execution order; repeats are allowed.
+- `pipeline` — non-empty JSON array; each element is an object with **`id`** (the pass id) and optional **`parameters`** (a JSON object of options for that step only). You may also put option keys directly on the step object next to **`id`** instead of nesting them under **`parameters`**. Order is execution order; repeats are allowed. See `example/amd/new-test-1/config.json`.
 
-**Optional:**
+**Optional (top-level):**
 
-- `interesting` — path to an executable script **`llvm-reduce`** (or **`creduce`**) uses for IR: candidate path as `$1`; exit `0` if still “interesting”. For `creduce`, a copy is written under `tmp/` with `"$1"` replaced by the shell-quoted **basename** of the candidate (e.g. `05_creduce.mir`), and that copy is passed to `creduce`.
-- `n` — (**`creduce` only**) positive integer passed as `creduce --n`; if omitted, uses half of `os.cpu_count()` (minimum 1).
-- `interesting_mir` — same contract for **`llvm_reduce_mir`** (`llvm-reduce -x=mir`); `$1` is the candidate **`.mir`** file.
 - `replacement` — how the line of interest in LLVM should be replaced to trigger the interestingness test; not consumed by reduction today.
 - `output_dir` — where to write `reduced.ll` and `tmp/`.
 - `action` — e.g. `reduce` or `test`.
-- `pass_under_test` — LLVM pass id for `llc --stop-before` when using `extract_mir_before_pass` or `extract_ir_before_pass` (e.g. `si-i1-copies`); ignored for other passes.
-- `mtriple` — target triple for `llc` (required with the `extract_*_before_pass` passes), e.g. `amdgcn-amd-amdhsa`.
-- `llc_O` — string passed through to `llc` before `-mtriple` (required with the `extract_*_before_pass` passes): e.g. `"-O1"`, `"-Os"`, or `"-O2 -mllvm ..."` (split with shell rules). Use `""` to omit any `-O`/extra flags.
-- `extract_mir_output` — optional MIR filename (basename only); written under `tmp/` as `NN_<name>`. Defaults to `NN_mir_before_pass.mir`.
-- `extract_ir_before_output` — optional IR filename (basename only) for `extract_ir_before_pass`; defaults to `NN_ir_before_pass.ll`.
 
-Top-level **`interesting`**, **`interesting_mir`**, **`n`**, **`pass_under_test`**, **`mtriple`**, **`llc_O`**, and extract output keys are mainly for **legacy** configs that use a string-only `pipeline`; in **structured** configs, put pass-specific options under that step’s **`parameters`** (see `example/amd/si-i1-copies/config.json`).
+**Per-step `parameters`** (and which passes accept them) — put these on the matching pipeline step, not at the top level:
+
+- **`llvm_reduce_ir`**, **`creduce`**: `interesting` — path to an executable script: candidate path as `$1`; exit `0` if still “interesting”. For `creduce`, a copy is written under `tmp/` with `"$1"` replaced by the shell-quoted **basename** of the candidate (e.g. `05_creduce.mir`), and that copy is passed to `creduce`.
+- **`creduce`**: `n` — positive integer passed as `creduce --n`; if omitted, uses half of `os.cpu_count()` (minimum 1).
+- **`llvm_reduce_mir`**: `interesting_mir` — same contract for `llvm-reduce -x=mir`; `$1` is the candidate **`.mir`** file.
+- **`extract_mir_before_pass`**, **`extract_ir_before_pass`**: `pass_under_test` — LLVM pass id for `llc --stop-before` (e.g. `si-i1-copies`). **`mtriple`** — target triple for `llc` (e.g. `amdgcn-amd-amdhsa`). **`llc_O`** — string passed through to `llc` before `-mtriple` (e.g. `"-O1"`, `"-Os"`, or `"-O2 -mllvm …"` per shell splitting); use `""` to omit extra `-O` flags.
+- **`extract_mir_before_pass`**: `extract_mir_output` — optional MIR filename (basename only); written under `tmp/` as `NN_<name>`. Defaults to `NN_mir_before_pass.mir`.
+- **`extract_ir_before_pass`**: `extract_ir_before_output` — optional IR filename (basename only); defaults to `NN_ir_before_pass.ll`.
 
 LLVM’s `bin` directory is **only** passed on the command line (`--llvm-bin`), not in JSON.
 
