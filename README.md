@@ -45,7 +45,11 @@ Build LLVM twice:
 | **`new-tests`** | Get coverage of new tests. |
 | **`diff`** | Get incremental coverage of new tests relative to the baseline test suite coverage. |
 
-### `test-suite` — inputs
+### `test-suite`
+
+Get baseline coverage of the LIT test suite.
+
+#### Inputs
 
 Run from the repo root:
 
@@ -61,11 +65,11 @@ python -m coverage test-suite --llvm-bin DIR --instrumented-bin DIR [--output-di
 | **`--filter`** | No | Passed to lit as **`--filter=<PREFIX>`**. If you omit it, the code uses the built-in default filter (same idea as restricting to **`CodeGen/AMDGPU`**; see `DEFAULT_LIT_FILTER` in `src/coverage/constants.py`). |
 | **`--debug`** | No | Prints the lit argv, cwd, **`UBSAN_OPTIONS`**, and coverage directory **instead of executing** lit or standalone test subprocesses—use it only to inspect what would run. |
 
-### `test-suite` — outputs
+#### Outputs
 
 All paths are under **`--output-dir`** unless noted.
 
-#### Main outputs
+##### Main outputs
 
 | Output | Description |
 |--------|-------------|
@@ -74,7 +78,7 @@ All paths are under **`--output-dir`** unless noted.
 
 Note: coverage selection rules are currently limited to **`coverage_mode="full"`** in `src/coverage/sancov.py`. Other modes (for example, partial-coverage style rules) may be added in the future but are not implemented yet.
 
-#### Intermediate outputs
+##### Intermediate outputs
 
 | Output | Description |
 |--------|-------------|
@@ -83,7 +87,7 @@ Note: coverage selection rules are currently limited to **`coverage_mode="full"`
 | **`processed_sancov/opt.0.sancov`**, **`opt.0.symcov`** | Same for **`opt`**. |
 
 
-### Example
+#### Example
 
 ```bash
 source venv/bin/activate   # optional
@@ -96,7 +100,11 @@ PYTHONPATH=src python -m coverage test-suite \
 
 Use `python -m coverage test-suite --help` for the authoritative flag list.
 
-### `new-tests` — inputs
+### `new-tests`
+
+Get coverage of new tests.
+
+#### Inputs
 
 Run from the repo root:
 
@@ -112,11 +120,11 @@ python -m coverage new-tests --llvm-bin DIR --instrumented-bin DIR --new-tests-d
 | **`--output-dir`** | No | Root directory for artifacts from this run. Parent directories are created as needed. If omitted, uses the package default output root from `src/coverage/constants.py`. |
 | **`--debug`** | No | Parsed by the CLI, but currently not wired into the `new-tests` execution path. |
 
-### `new-tests` — outputs
+#### Outputs
 
 All paths are under **`--output-dir`** unless noted.
 
-#### Main outputs
+##### Main outputs
 
 | Output | Description |
 |--------|-------------|
@@ -124,7 +132,7 @@ All paths are under **`--output-dir`** unless noted.
 
 Note: unlike `test-suite`, `new-tests` does **not** merge or symbolize sancov files.
 
-### `new-tests` — example
+#### Example
 
 ```bash
 source venv/bin/activate   # optional
