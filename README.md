@@ -24,7 +24,7 @@ The inputs are:
 - Configuration options (shown in `scripts/test_coverage.sh`) to control parameters such as the target file of interest, the number of new tests to run, and the type of coverage (full line vs partial line)
 
 The output is:
-- A `.csv` file with format `cols=['test','file','line','covered_addresses']` that lists new tests that cover lines of code in the target files that are not covered by the LLVM test suite. This can be used as an input to the reducer. 
+- A `.csv` file with format `cols=['test','file','line','covered-points']` that lists new tests that cover lines of code in the target files that are not covered by the LLVM test suite. This can be used as an input to the reducer. 
 - Intermediate data files containing more details on new coverage.
 
 ### Prerequisites 
@@ -161,7 +161,7 @@ The output is:
 
 ### From coverage module output to a reduction example
 
-The coverage module emits a CSV of incremental new coverage whose columns are `test_name`, `file`, `line`, and `covered_addresses` (see **Coverage module** — same shape as the file described there). Each row maps a **new test artifact** (`test_name`, typically a `.bc` or `.ll` under your new-tests directory) to a **source location** in LLVM (`file`, `line`) and one or more **SanitizerCoverage point ids** for that line (`covered_addresses`, semicolon-separated `0x…` values).
+The coverage module emits a CSV of incremental new coverage whose columns are `test_name`, `file`, `line`, and `covered-points` (see **Coverage module** — same shape as the file described there). Each row maps a **new test artifact** (`test_name`, typically a `.bc` or `.ll` under your new-tests directory) to a **source location** in LLVM (`file`, `line`) and one or more **SanitizerCoverage point ids** for that line (`covered-points`, semicolon-separated `0x…` values).
 
 To turn one row into something you can reduce:
 
@@ -169,7 +169,7 @@ To turn one row into something you can reduce:
 2. Set **`input`** in the config to that testcase file. Copy or symlink the file named in `test_name` next to the config (or use an absolute path); the name in the CSV is the basename the coverage run used.
 3. Set **`file`** to the LLVM-relative source path: strip any prefix before `llvm/` so it matches your checkout, e.g. `llvm/lib/Target/AMDGPU/SIInstrInfo.cpp` (the CSV may store an absolute path like `…/llvm-project/llvm/lib/Target/AMDGPU/…`).
 4. Set **`line`** to the integer from the **`line`** column.
-5. **Interestingness** depends on your goal. For “still hits this coverage point after `llc`”, modify the example in `example/amd/new-test-1/interesting_ir.sh` using one hex id from **`covered_addresses`**.
+5. **Interestingness** depends on your goal. For “still hits this coverage point after `llc`”, modify the example in `example/amd/new-test-1/interesting_ir.sh` using one hex id from **`covered-points`**.
 
 Two examples for the AMDGPU backend are shown in `scripts/reduce_amd_coverage_based.sh` and `scripts/reduce_amd_argument_usage_multi_addr.sh`.
 

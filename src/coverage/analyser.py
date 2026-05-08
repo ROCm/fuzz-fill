@@ -42,7 +42,7 @@ class CoverageAnalyzer:
         self.new_coverage_csv.parent.mkdir(parents=True, exist_ok=True)
         with self.new_coverage_csv.open("w", newline="", encoding="utf-8") as new_coverage_csv_f:
             csv.writer(new_coverage_csv_f).writerow(
-                ["test_name", "file", "line", "covered_addresses"]
+                ["test_name", "file", "line", "covered-points"]
             )
 
         sancov = Sancov(self.filepaths.llvm_bin)

@@ -3,8 +3,8 @@
 Create per-line reduce harness directories from a coverage CSV (new_coverage
 shape) and a directory of input tests.
 
-Expected ``--csv`` columns: test_name, file, line, covered_addresses
-(covered_addresses is ``0x...`` values separated by ``;``, as in diff/new_coverage.csv).
+Expected ``--csv`` columns: test_name, file, line, covered-points
+(``covered-points`` is ``0x...`` values separated by ``;``, as in diff/new_coverage.csv).
 
 Each output directory mirrors example/amd/new-test-1 (config.json,
 interesting_ir.sh, and the copied .bc). COVERED in interesting_ir.sh is the
@@ -73,8 +73,8 @@ def llvm_rel_source_path(abs_path: str) -> str:
     raise ValueError(f"Could not derive llvm-relative path from: {abs_path!r}")
 
 
-def parse_covered_addresses_field(value: str) -> list[str]:
-    """Split ``covered_addresses`` cell into hex strings without 0x prefix."""
+def parse_covered_points_field(value: str) -> list[str]:
+    """Split ``covered-points`` cell into hex strings without 0x prefix."""
     if not value or not value.strip():
         return []
     out: list[str] = []
@@ -88,11 +88,11 @@ def parse_covered_addresses_field(value: str) -> list[str]:
     return out
 
 
-def resolve_covered_hexes(covered_addresses_cell: str) -> tuple[str, list[str]]:
+def resolve_covered_hexes(covered_points_cell: str) -> tuple[str, list[str]]:
     """Return (COVERED value with 0x prefix, sorted hex-without-0x list for logging)."""
-    hexes = parse_covered_addresses_field(covered_addresses_cell)
+    hexes = parse_covered_points_field(covered_points_cell)
     if not hexes:
-        raise ValueError("covered_addresses is empty or has no valid hex values")
+        raise ValueError("covered-points is empty or has no valid hex values")
     hexes_sorted = sorted(hexes, key=lambda h: int(h, 16))
     return "0x" + hexes_sorted[0], hexes_sorted
 
@@ -193,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
         "--csv",
         type=Path,
         required=True,
-        help="Coverage CSV: test_name, file, line, covered_addresses (e.g. diff/new_coverage.csv).",
+        help="Coverage CSV: test_name, file, line, covered-points (e.g. diff/new_coverage.csv).",
     )
     p.add_argument(
         "--tests-base",
@@ -234,10 +234,16 @@ def main(argv: list[str] | None = None) -> int:
 
     with args.csv.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        expected = {"test_name", "file", "line", "covered_addresses"}
+        expected = {"test_name", "file", "line"}
         if reader.fieldnames is None or not expected.issubset(set(reader.fieldnames)):
             print(
                 f"CSV must have columns {expected}, got {reader.fieldnames!r}",
+                file=sys.stderr,
+            )
+            return 2
+        if "covered-points" not in reader.fieldnames and "covered_addresses" not in reader.fieldnames:
+            print(
+                "CSV must include either 'covered-points' (preferred) or 'covered_addresses'",
                 file=sys.stderr,
             )
             return 2
@@ -253,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         try:
             covered, hexes_sorted = resolve_covered_hexes(
-                row.get("covered_addresses") or "",
+                row.get("covered-points") or row.get("covered_addresses") or "",
             )
             amb, dest = prepare_test_case(
                 row_index=i,
