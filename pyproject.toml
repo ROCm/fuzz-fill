@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 license = { file = "LICENCE.txt" }
 dependencies = [
     "pandas>=2.0",
+    "lit",
 ]
 
 [project.scripts]

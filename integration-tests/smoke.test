@@ -1,0 +1,8 @@
+# COM: Test aliases and dependencies.
+# RUN: %sancov-llc --version
+# RUN: %sancov-opt --version
+# RUN: %coverage --help
+# RUN: %reduce --help
+# RUN: creduce --version
+# RUN: %sancov --version
+# RUN: %FileCheck --version
