@@ -112,7 +112,7 @@ def _require_interesting_mir_script(ctx: ReduceContext) -> Path:
     if v is None:
         raise SystemExit(
             'llvm_reduce_mir requires "interesting_mir" on this pipeline step '
-            '(path to an executable script), or in legacy top-level config.'
+            "(path to an executable script)."
         )
     if isinstance(v, Path):
         return v
@@ -129,23 +129,21 @@ def _require_extract_mir_context(ctx: ReduceContext) -> _ExtractMirLlcOptions:
     if put is None:
         raise SystemExit(
             f'{_pass} require "pass_under_test" on this pipeline step (LLVM pass id, '
-            'e.g. "si-i1-copies"), or in legacy top-level config.'
+            'e.g. "si-i1-copies").'
         )
     if not isinstance(put, str):
         raise SystemExit(f'{_pass}: "pass_under_test" must be a string.')
     mt = ctx.pass_options.get("mtriple")
     if mt is None:
         raise SystemExit(
-            f'{_pass} require "mtriple" on this pipeline step (e.g. "amdgcn-amd-amdhsa"), '
-            "or in legacy top-level config."
+            f'{_pass} require "mtriple" on this pipeline step (e.g. "amdgcn-amd-amdhsa").'
         )
     if not isinstance(mt, str):
         raise SystemExit(f'{_pass}: "mtriple" must be a string.')
     llc_O = ctx.pass_options.get("llc_O")
     if llc_O is None:
         raise SystemExit(
-            f'{_pass} require "llc_O" on this pipeline step (e.g. "-O1", or "" to omit -O), '
-            "or in legacy top-level config."
+            f'{_pass} require "llc_O" on this pipeline step (e.g. "-O1", or "" to omit -O).'
         )
     if not isinstance(llc_O, str):
         raise SystemExit(f'{_pass}: "llc_O" must be a string.')

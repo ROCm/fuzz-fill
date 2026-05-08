@@ -2,74 +2,112 @@
 
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+import json
+import pandas as pd
+import numpy as np
 from pathlib import Path
 
-from coverage.constants import MERGED_SANCOV_SUFFIX_ID
+from coverage.constants import DEFAULT_PATH_FILTER
+from typing import Literal
 
-_STATS_RE = re.compile(
-    r"^(all-edges|cov-edges|all-functions|cov-functions):\s*(\d+)\s*$", re.MULTILINE
-)
-
-
-def _parse_stats_text(stats_stdout: str) -> dict[str, int]:
-    """Parse sancov ``-print-coverage-stats`` stdout into a small dict."""
-    out: dict[str, int] = {}
-    for m in _STATS_RE.finditer(stats_stdout):
-        key = m.group(1).replace("-", "_")
-        out[key] = int(m.group(2))
-    return out
-
-
-@dataclass(frozen=True)
-class BinaryCoverageResult:
-    binary_name: str
-    merged_sancov: Path
-    merged_symcov: Path
-    raw_sancov_count: int
-    stats_text: str
-    stats: dict[str, int]
-
-
-class SanCov:
-    """Drive llvm ``sancov`` for one build tree (``build/.../bin``)."""
+class Sancov:
 
     def __init__(
         self,
-        build_bin_dir: Path,
-        *,
-        merged_suffix_id: str = MERGED_SANCOV_SUFFIX_ID,
+        bin_dir: Path,
+        instrumented_bin: Path | None = None,
+        raw_sancov_dir: Path | None = None,
+        suffix: str | None = None,
+        coverage_mode: Literal["partial", "full"] = "full",
         union_batch: int = 200,
     ) -> None:
-        self.build_bin_dir = Path(build_bin_dir)
-        self.merged_suffix_id = merged_suffix_id
+        self.sancov_bin = Path(bin_dir, "sancov")
+        self.instrumented_bin = instrumented_bin
         self.union_batch = union_batch
+        self.raw_sancov_dir = raw_sancov_dir
+        self.suffix = suffix
+        self.coverage_mode = coverage_mode
 
-    @property
-    def sancov_bin(self) -> Path:
-        return self.build_bin_dir / "sancov"
+        if self.raw_sancov_dir is not None:
+            self.output_dir = self.raw_sancov_dir.parent / f"processed_sancov"
+            self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def tool_binary(self, name: str) -> Path:
-        return self.build_bin_dir / name
+    @staticmethod
+    def flatten_point_symbol_info(point_symbol_info: dict[str, object]) -> pd.DataFrame:
+        """Flatten the point-symbol-info dictionary into a dataframe."""
+        rows = ((file, addr_to_line) for file, d1 in point_symbol_info.items() for fun, addr_to_line in d1.items())
+        df = pd.DataFrame.from_records(rows, columns=["file", "addr_to_line"])
 
-    def collect_raw(self, coverage_dir: Path, binary_name: str) -> list[Path]:
-        """Raw ``<binary>.<digits>.sancov`` only; skips the reserved merged filename."""
-        pat = re.compile(rf"^{re.escape(binary_name)}\.\d+\.sancov$")
-        merged_name = f"{binary_name}.{self.merged_suffix_id}.sancov"
-        return sorted(
-            p
-            for p in coverage_dir.iterdir()
-            if p.is_file() and pat.match(p.name) and p.name != merged_name
+        files, addrs, lines = [], [], []
+        for t in df.itertuples(index=False):
+            f = t.file
+            for a, ln in t.addr_to_line.items():
+                files.append(f)
+                addrs.append(a)
+                lines.append(ln)
+
+        out = pd.DataFrame({"file": files, "point": addrs, "line": lines})
+        out[["line", "col"]] = out["line"].str.split(":", n=1, expand=True)
+
+        return out
+
+    @staticmethod
+    def get_coverage_df(symcov: dict[str, object], path_filter: str) -> pd.DataFrame:
+        """Get the coverage information in a dataframe.
+            The symcov file is a dictionary with the following keys:
+            - point-symbol-info: a dictionary of point-symbol-info
+            - covered-points: a list of covered points
+            The point-symbol-info is a dictionary of point-symbol-info with the following structure:
+            - keys: filepaths of the source code
+            - values: a dictionary of structure:
+                - keys: function names
+                - values: a dictionary of structure:
+                    - keys: point-ids in hex format
+                    - values: the line numbers and column numbers of the source code
+            The covered-points is a list of covered point-ids in hex format
+        """
+        point_symbol_info = symcov.get("point-symbol-info")
+
+        point_symbol_info = {k: v for k, v in point_symbol_info.items() if path_filter in k}
+
+        df = Sancov.flatten_point_symbol_info(point_symbol_info)
+
+        covered_points = symcov.get("covered-points")
+
+        # Create coverage dataframe
+        df["covered"] = df["point"].isin(covered_points).astype(int)
+
+        return df
+
+    @staticmethod
+    def get_coverage_summary_df(df: pd.DataFrame) -> pd.DataFrame:
+        """Get the coverage summary dataframe."""
+        agg = (
+            df.groupby(["file", "line"], as_index=False)
+            .agg(n_covered=("covered_either", "sum"), n_points=("covered_either", "count"))
         )
 
-    def unique_addresses_from_print(self, sancov_file: Path) -> set[str]:
-        """
-        Run ``sancov --print`` on a ``.sancov`` file and return unique address lines as strings.
-        """
+        agg["coverage"] = np.where(
+            agg["n_covered"] == 0,
+            "none",
+            np.where(agg["n_covered"] == agg["n_points"], "full", "partial"),
+        )
+
+        agg = agg.drop(columns=["n_covered", "n_points"])
+        cov_df = agg.merge(df, on=["file", "line"], how="left")
+        return cov_df[["file", "line", "coverage", "point_this"]]
+    
+    def get_merged_sancov_path(self) -> Path:
+        return self.output_dir / f"{self.suffix}.0.sancov"
+
+    def get_merged_symcov_path(self) -> Path:
+        return self.output_dir / f"{self.suffix}.0.symcov"
+
+    def get_covered_addresses(self, sancov_file: Path) -> set[str]:
+        """Get the covered addresses from a sancov file."""
         try:
             proc = subprocess.run(
                 [str(self.sancov_bin), "--print", str(sancov_file)],
@@ -84,16 +122,16 @@ class SanCov:
             ) from e
         return {line.strip() for line in proc.stdout.splitlines() if line.strip()}
 
-    def merge_to(
-        self,
-        raw_files: list[Path],
-        merged_out: Path,
-    ) -> None:
-        """Merge raw ``.sancov`` files with repeated ``sancov -union`` (batched)."""
+    def merge(self) -> None:
+        """Merge the sancov files for the given suffix."""
+
+        merged_out = self.get_merged_sancov_path()
+
+        raw_files = list(self.raw_sancov_dir.glob(f"{self.suffix}.*.sancov"))
         if not raw_files:
-            raise FileNotFoundError(
-                f"No raw <binary>.<digits>.sancov inputs to merge under {merged_out.parent}"
-            )
+            raise FileNotFoundError(f"No sancov files found for suffix: {self.suffix}")
+
+        """Merge raw ``.sancov`` files with repeated ``sancov -union`` (batched)."""
         if len(raw_files) == 1:
             shutil.copy(raw_files[0], merged_out)
             return
@@ -122,82 +160,55 @@ class SanCov:
                 layer = nxt
                 round_idx += 1
             shutil.copy(layer[0], merged_out)
-
+    
     def symbolize(
         self,
-        merged_sancov: Path,
-        instrumented_binary: Path,
-        symcov_out: Path,
+        sancov_path: Path,
+        symcov_path: Path
     ) -> None:
-        with symcov_out.open("w") as f:
-            subprocess.run(
-                [
-                    str(self.sancov_bin),
-                    "-symbolize",
-                    str(merged_sancov),
-                    str(instrumented_binary),
-                ],
-                check=True,
-                stdout=f,
-            )
 
-    def print_stats(
-        self,
-        merged_sancov: Path,
-        instrumented_binary: Path,
-    ) -> str:
-        proc = subprocess.run(
-            [
-                str(self.sancov_bin),
-                "-print-coverage-stats",
-                str(merged_sancov),
-                str(instrumented_binary),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        return proc.stdout
+        if symcov_path.exists():
+            print(f"Symcov file already exists at {symcov_path}, skipping symbolization")
+            return
 
-    def process_binary_from_raw(
-        self,
-        coverage_dir: Path,
-        binary_name: str,
-        raw_files: list[Path],
-    ) -> BinaryCoverageResult:
-        """Merge given raw files, symbolize, and collect stats."""
-        tool = self.tool_binary(binary_name)
-        merged_sancov = (
-            coverage_dir / f"{binary_name}.{self.merged_suffix_id}.sancov"
-        )
-        self.merge_to(raw_files, merged_sancov)
+        print(f"Symbolizing {sancov_path} with {self.instrumented_bin}")
+        
+        cmd = [str(self.sancov_bin), "-symbolize", str(sancov_path), str(self.instrumented_bin)]
 
-        symcov_path = (
-            coverage_dir / f"{binary_name}.{self.merged_suffix_id}.symcov"
-        )
-        self.symbolize(merged_sancov, tool, symcov_path)
+        with symcov_path.open("w") as f:
+            subprocess.run(cmd, check=True, stdout=f, stderr=subprocess.STDOUT)
 
-        stats_text = self.print_stats(merged_sancov, tool)
-        return BinaryCoverageResult(
-            binary_name=binary_name,
-            merged_sancov=merged_sancov,
-            merged_symcov=symcov_path,
-            raw_sancov_count=len(raw_files),
-            stats_text=stats_text,
-            stats=_parse_stats_text(stats_text),
-        )
-
-    def process_binary(
-        self,
-        coverage_dir: Path,
-        binary_name: str,
-    ) -> BinaryCoverageResult | None:
+    def get_joint_coverage(self, other: Sancov, path_filter: str = DEFAULT_PATH_FILTER) -> pd.DataFrame:
         """
-        Merge raw ``binary_name.<digits>.sancov``, symbolize, and collect stats.
+        Joint coverage: rows from *this* symcov's ``point-symbol-info`` (hex ``address`` per point)
+        restricted to ``(file, function, line)`` that also appear in ``other``'s covered locations.
 
-        Returns None if there are no raw files for this binary.
+        Returns a long table with columns ``file``, ``function``, ``line``, ``address``.
         """
-        raw = self.collect_raw(coverage_dir, binary_name)
-        if not raw:
-            return None
-        return self.process_binary_from_raw(coverage_dir, binary_name, raw)
+        with self.get_merged_symcov_path().open(encoding="utf-8") as f:
+            this_symcov = json.load(f)
+
+        with other.get_merged_symcov_path().open(encoding="utf-8") as f:
+            other_symcov = json.load(f)
+
+        this_df = self.get_coverage_df(this_symcov, path_filter)
+        other_df = self.get_coverage_df(other_symcov, path_filter)
+
+        this_address_line_map = this_df[["file", "line", "point"]].copy()
+        this_address_line_map["point"].astype(str)
+        this_address_line_map.rename(columns={"point": f"point_{self.suffix}"}, inplace=True)
+
+        # Get joint coverage dataframe
+        joint_df = this_df.merge(other_df, on=["file", "line", "col"], how="inner", suffixes=("_this", "_other"))
+
+        joint_df["covered_either"] = joint_df["covered_this"] | joint_df["covered_other"]
+
+        if self.coverage_mode == "full":
+            joint_df =joint_df.drop(columns=["col", "covered_other", "covered_this", "point_other"])
+            cov_summary_df = self.get_coverage_summary_df(joint_df)
+            fully_covered_df = cov_summary_df[cov_summary_df["coverage"] == "full"].copy()
+            fully_covered_df.rename(columns={"point_this": f"point_{self.suffix}"}, inplace=True)
+            return (this_address_line_map, fully_covered_df)
+        
+        elif self.coverage_mode == "partial":
+            raise NotImplementedError(f"Coverage mode {self.coverage_mode} not implemented")  

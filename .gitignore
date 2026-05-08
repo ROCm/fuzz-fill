@@ -7,3 +7,4 @@ coverage_output/*
 integration-tests/Output/*
 *.lit_test_times.txt
 *.sancov
+*.egg-info/

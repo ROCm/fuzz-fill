@@ -1,10 +1,10 @@
 # fuzz-fill
 
-Fuzzing to fill test suite gaps.
+Fuzzing to fill test suite gaps in LLVM.
 
 ## Python environment
 
-Create a virtual environment, **activate it**, then install the project. With the venv active, `pip` installs into that environment only (not your system Python), including dependencies such as **pandas**:
+Create a virtual environment, **activate it**, then install the project. 
 
 ```bash
 python3 -m venv venv
@@ -12,160 +12,206 @@ source venv/bin/activate
 pip install -e .
 ```
 
-This installs editable packages, console scripts (`reduce`, `llvm-test-suite-coverage`), and **`pandas`** (used by **`coverage map`**). **`coverage run`** does not import **`coverage.map`**, but pandas is still a declared dependency of the package.
-
 ## Coverage module
 
-### TL;DR
+The coverage CLI lives under **`src/coverage/`** (Python package **`coverage`**).
 
-To get coverage of the LLVM test-suite tests under `llvm-project/llvm/test/CodeGen/AMDGPU` of the AMDGPU backend, first drop the file `config/amdgpu-be/lit.local.cfg.py` in `llvm-project/llvm/test/CodeGen/AMDGPU`. The LIT test runner will pick this up and know which environment variables it needs to pass on to the local test-running environment. Next, run the coverage module with the options specified in this script:
-```
-./scripts/run_get_llvm_test_suite_coverage.sh
-```
+The script `scripts/test_coverage.sh` shows how to run the coverage gap identification process start to finish. Below are details of each step in the process.
 
-This will output coverage files and process them into two summaries, one for `llc` and one for `opt`. These will be (by default) saved as `llc.0.sancov`, `llc.0.symcov` and `opt.0.sancov`, `opt.0.symcov` under `data/coverage_output/$OUTPUT_ID` where `OUTPUT_ID` is a date-time ID.
+The inputs are:
+- An LLVM build instrumented with `sancov` at the basic block level
+- A directory of new tests
+- Configuration options (shown in `scripts/test_coverage.sh`) to control parameters such as the target file of interest, the number of new tests to run, and the type of coverage (full line vs partial line)
 
-The next step is to generate a single `.sancov` file that contains the full *joint* coverage of both `llc` and `opt` tests. This is so that we can quickly check new tests' coverage against a single sancov file correctly encoded for `llc`. The binary mapping for `opt` is different than `llc`, so we need to map the line coverage in `opt.0.symcov` back to the `llc` `sancov`.
+The output is:
+- A `.csv` file with format `cols=['test','file','line','covered-points']` that lists new tests that cover lines of code in the target files that are not covered by the LLVM test suite. This can be used as an input to the reducer. 
+- Intermediate data files containing more details on new coverage.
 
-To get the single `sancov` file, run:
-```
-./scripts/run_get_joint_sancov.sh
-```
+### Prerequisites 
 
-This will output a `csv` file in the coverage directory that contains all lines covered by either `opt` or `llc` and the list of addresses in the `llc` `sancov` binary that those lines correspond to. This is the set of addresses that new coverage output should be checked against. If the `sancov` file of a test run with `llc` contains an address that does *not* appear in the output `csv` file, then the test has achieved new coverage and should be a candidate test for addition to the test suite.
+For **llvm-lit** tests under `llvm-project/llvm/test` (e.g. AMDGPU `CodeGen/AMDGPU`), copy **`config/amdgpu-be/lit.local.cfg.py`** into the matching test tree so LIT forwards **`UBSAN_OPTIONS`** to subprocesses.
 
-And to get a mapping from llc lines to addresses, run:
-```
-./scripts/run_get_llc_line_addr_map.sh
-```
+Build LLVM twice:
+- Once uninstrumented with the `sancov` tool
+- Once instrumented with coverage
 
-Next, run:
-```
-./scripts/run_get_new_test_coverage.sh
-```
+#TODO: add clearer instructions for the LLVM builds and reference the build scripts
 
-This will run a set of new tests (that must be pre-existing in a directory), get the line coverage of these tests, and record whether any additional lines have been covered. Information on each test will be saved in `data/coverage_output/new_tests_$ID`.
+### Subcommands
 
-Next, run:
-```
-run_analyse_new_coverage.sh
-```
+| Subcommand | Status |
+|------------|--------|
+| **`test-suite`** |  Get baseline coverage of the LIT test suite. |
+| **`new-tests`** | Get coverage of new tests. |
+| **`diff`** | Get incremental coverage of new tests relative to the baseline test suite coverage. |
 
-This will analyse the incremental coverage of the new tests and produce a list of non-duplicate new coverage. It will save details of the tests of interest and the new lines they cover in `analyse_stacked_novel_lines/all_novel_source_lines.csv` within the new test output folder.
+### `test-suite`
 
-### Summary
+Get baseline coverage of the LIT test suite.
 
-The `coverage` package (under `src/coverage/`) drives **LLVM SanitizerCoverage** from **llvm-lit** (or a custom command): it sets `UBSAN_OPTIONS` so runs emit raw `*.sancov` files, **merges** them per instrumented binary with `llvm-sancov -union`, **symbolizes** with `sancov -symbolize`, prints **coverage stats**, and writes **`coverage_outline.txt`** in the chosen output directory (and optional **`--outline-json`**).
+#### Inputs
 
-Use an LLVM **build** that matches the tests (same `llc`, `opt`, etc., built with SanitizerCoverage as you already use for lit). Raw files follow `<binary>.<digits>.sancov`; merged outputs are `<binary>.0.sancov` / `.symcov` (the basename prefix must match the binary—required by LLVM’s `sancov`).
-
-### Layout
-
-| Piece | Role |
-|-------|------|
-| `SanCov` | Merge raw `.sancov`, symbolize, stats for one `build/.../bin` tree |
-| `TestCommandRunner` | Runs the test command with `coverage_dir` wired into `UBSAN_OPTIONS` |
-| `CoverageSession` | Runs tests (unless `--skip-run`), then each `--binary`, then outline output |
-| `CoverageConfig` | Resolved paths and options for a run |
-
-### How to run
-
-The CLI uses **subcommands**:
-
-- **`run`** — llvm-lit (or `-c`) plus merge/symbolize (this is the default if you start with a flag, e.g. `python -m coverage --cwd …` is treated as `run`).
-- **`map`** — four paths (llc/opt symcov and sancov). Use **`--get-summary`** for the JSON summary (loads whole `.symcov` files; can be large), and/or **`--create-joint-sancov`** for a joint llc-oriented `.sancov` (when implemented). At least one of those flags is required.
-
-Examples:
-
-- **Console script** (after `pip install -e .`): `llvm-test-suite-coverage run …`, `llvm-test-suite-coverage map …`
-- **Module**: `PYTHONPATH=src python -m coverage run …` or `… map …` from the repo root (or after install).
-
-Top-level help: `python -m coverage --help` lists `{run,map}`. Per-command: `python -m coverage run --help`, `python -m coverage map --help`.
-
-If the PyPI **`coverage`** package is installed in the same environment, ensure this project’s `coverage` is found first (e.g. `PYTHONPATH=src` when working from a clone) so `python -m coverage` hits `src/coverage`, not the third-party tool.
-
-### `run` flags
-
-- **`--cwd`** — LLVM **build directory** (e.g. `build-amdgpu/`); default test command runs `./bin/llvm-lit` relative to it.
-- **`--build-dir`** — Same tree (or its `bin`); used to locate `sancov`, `llc`, `opt`, etc. Defaults to `<llvm-project>/build` when `--llvm-project` is unset.
-- **`--filter`** — Passed to the default lit invocation as `--filter=…` (default `CodeGen/AMDGPU`). Ignored if you pass **`--command` / `-c`**.
-- **`--binary`** — Repeat per tool; default is **`llc`** and **`opt`**. Skip a binary if there are no raw `.sancov` files for it.
-- **`--coverage-dir`** — Where raw and merged artifacts go (default under `data/coverage_output/test_suite_<timestamp>`).
-- **`--skip-run`** — Only merge/symbolize; use with **`--coverage-dir`** pointing at a previous run’s directory.
-- **`--outline-json`** — Extra machine-readable summary (`binaries` + `run_summary`).
-
-Use `llvm-test-suite-coverage run --help` for the full list.
-
-### `map`
-
-Four positional paths (order fixed). Then choose at least one action:
-
-- **`--get-summary`** — write JSON (stdout, or **`--output` / `-o`** for a file): per-symcov top-level keys, optional `BinaryHash` / list lengths when present, byte size for each `.sancov`.
-- **`--create-joint-sancov`** — union of covered `(file, function, line)` from llc and opt symcov. Prints a one-line count summary to the terminal (llc-only / opt-only / either deduped), not the full location list. With **`--get-summary`**, stdout JSON includes **`joint_coverage_line_counts`** (`llc`, `opt`, `either_deduped`); the full **`joint_covered_locations`** list is written only when **`--output` / `-o`** is set (each entry includes **`llc_addresses`** as for the CSV). Does not emit the symcov summary JSON unless **`--get-summary`** is also set.
-- **`--joint-csv PATH`** — with **`--create-joint-sancov`**, write the **union** of locations covered by llc **or** opt (deduped on `file`, `function`, `line`) to that CSV, plus **`llc_addresses`**: a JSON array of hex coverage point ids from the llc symcov **`point-symbol-info`** for that exact `(file, function, line)` (all instrumented points for the line, not only those hit in `covered-points`). Rows only covered via opt may get `[]` if the llc symcov uses different path or function strings. Creates parent dirs if needed.
-- **`--joint-file-prefix PREFIX`** — with **`--create-joint-sancov`**, only keep source paths under this prefix (after `expanduser`, compared as POSIX paths). Filtering runs on the point table **before** merging with covered ids, so the union/CSV work stays smaller. Mutually exclusive with **`--no-joint-file-filter`**.
-- **`--no-joint-file-filter`** — with **`--create-joint-sancov`**, include all paths from symcov (legacy behavior: no path filter). Mutually exclusive with **`--joint-file-prefix`**. If neither flag is set, the default is to keep only paths that contain a directory component named **`llvm-project`** (typical checkout layout).
+Run from the repo root:
 
 ```text
-coverage map llc-symcov llc-sancov opt-symcov opt-sancov --get-summary [-o OUT.json]
-coverage map … --create-joint-sancov
-coverage map … --create-joint-sancov --joint-csv covered_either.csv
-coverage map … --get-summary --create-joint-sancov
+python -m coverage test-suite --llvm-bin DIR --instrumented-bin DIR [--output-dir DIR] [--filter PREFIX] [--debug]
 ```
 
-### Example
+| Input | Required | Meaning |
+|--------|----------|---------|
+| **`--llvm-bin`** | Yes | Directory containing the **uninstrumented** LLVM tools, in particular **`sancov`**, used to merge (`sancov -union`) and symbolize (`sancov -symbolize`) raw coverage files. |
+| **`--instrumented-bin`** | Yes | Directory containing **`llvm-lit`**, **`llc`**, and **`opt`** from a **SanitizerCoverage-instrumented** build (same revision/layout you use for lit). |
+| **`--output-dir`** | No | Root directory for **all artifacts** from this run. Parent directories are created as needed. If omitted, the default path is whatever the package defines as its default output root (see `src/coverage/constants.py`). |
+| **`--filter`** | No | Passed to lit as **`--filter=<PREFIX>`**. If you omit it, the code uses the built-in default filter (same idea as restricting to **`CodeGen/AMDGPU`**; see `DEFAULT_LIT_FILTER` in `src/coverage/constants.py`). |
+| **`--debug`** | No | Prints the lit argv, cwd, **`UBSAN_OPTIONS`**, and coverage directory **instead of executing** lit or standalone test subprocesses—use it only to inspect what would run. |
 
-Full run (adjust paths). You can use **`run` explicitly** or omit it when the first argument is an option:
+#### Outputs
+
+All paths are under **`--output-dir`** unless noted.
+
+##### Main outputs
+
+| Output | Description |
+|--------|-------------|
+| **`llc_address_line_map.csv`** | Top-level CSV in **`--output-dir`** (default name from `DEFAULT_LLC_ADDRESS_LINE_MAP_FILE`) mapping **source file**, **line**, and **hex point id** from llc coverage. |
+| **`joint_llc_and_opt_coverage.csv`** | Top-level CSV in **`--output-dir`** (default name from `DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE`) built from shared **`(file, line, col)`** points present in both llc and opt symcovs. In current **`coverage_mode="full"`**, a row is kept when all shared points on that **`(file, line)`** are covered by **either** llc or opt. |
+
+Note: coverage selection rules are currently limited to **`coverage_mode="full"`** in `src/coverage/sancov.py`. Other modes (for example, partial-coverage style rules) may be added in the future but are not implemented yet.
+
+##### Intermediate outputs
+
+| Output | Description |
+|--------|-------------|
+| **`raw_sancov/`** | Raw SanitizerCoverage **`*.sancov`** shards from the lit run (names follow LLVM’s **`<binary>.<id>.sancov`** pattern for each instrumented binary). |
+| **`processed_sancov/llc.0.sancov`**, **`llc.0.symcov`** | Merged union of all raw **`llc.*.sancov`**, then **JSON symcov** from **`sancov -symbolize`** using the **instrumented** `llc` binary. |
+| **`processed_sancov/opt.0.sancov`**, **`opt.0.symcov`** | Same for **`opt`**. |
+
+
+#### Example
 
 ```bash
 source venv/bin/activate   # optional
-PYTHONPATH=src python -m coverage run \
-  --cwd "$LLVM_BUILD" \
-  --build-dir "$LLVM_BUILD" \
+PYTHONPATH=src python -m coverage test-suite \
+  --output-dir "$HOME/fuzz-fill/data/coverage_output/my_run" \
+  --llvm-bin "$LLVM/build/bin" \
+  --instrumented-bin "$LLVM/build-amdgpu-bb/bin" \
   --filter "CodeGen/AMDGPU"
 ```
 
-Re-process **opt** only from an existing output dir:
+Use `python -m coverage test-suite --help` for the authoritative flag list.
 
-```bash
-PYTHONPATH=src python -m coverage run \
-  --skip-run \
-  --binary opt \
-  --coverage-dir /path/to/data/coverage_output/test_suite_XXXXX \
-  --build-dir "$LLVM_BUILD" \
-  --cwd "$LLVM_BUILD"
+### `new-tests`
+
+Get coverage of new tests.
+
+#### Inputs
+
+Run from the repo root:
+
+```text
+python -m coverage new-tests --llvm-bin DIR --instrumented-bin DIR --new-tests-dir DIR [--n N] [--output-dir DIR] [--debug] [--filter PREFIX]
 ```
 
-Summarize four merged files:
+| Input | Required | Meaning |
+|--------|----------|---------|
+| **`--instrumented-bin`** | Yes | Directory containing the **instrumented** `llc` binary used to execute each new test and emit sancov data. |
+| **`--new-tests-dir`** | Yes | Root directory scanned recursively for input files matching **`*.ll`** and **`*.bc`**. |
+| **`--n`** | No | Maximum number of discovered tests to run, after sorting by path. Default is **`1`**. |
+| **`--output-dir`** | No | Root directory for artifacts from this run. Parent directories are created as needed. If omitted, uses the package default output root from `src/coverage/constants.py`. |
+| **`--debug`** | No | Parsed by the CLI, but currently not wired into the `new-tests` execution path. |
+
+#### Outputs
+
+All paths are under **`--output-dir`** unless noted.
+
+##### Main outputs
+
+| Output | Description |
+|--------|-------------|
+| **`raw_sancov/`** | Raw SanitizerCoverage **`*.sancov`** from each new test, saved in a subdirectory that has the name of the test so that tests can be mapped easily to their sancov. |
+
+Note: unlike `test-suite`, `new-tests` does **not** merge or symbolize sancov files.
+
+#### Example
 
 ```bash
-PYTHONPATH=src python -m coverage map \
-  llc.0.symcov llc.0.sancov opt.0.symcov opt.0.sancov \
-  --get-summary -o coverage_map_summary.json
+source venv/bin/activate   # optional
+PYTHONPATH=src python -m coverage new-tests \
+  --output-dir "$HOME/fuzz-fill/data/coverage_output/new_tests_run" \
+  --llvm-bin "$LLVM/build/bin" \
+  --instrumented-bin "$LLVM/build-amdgpu-bb/bin" \
+  --new-tests-dir "$HOME/fuzz-fill/data/new_tests" \
+  --n 25
 ```
+
+Use `python -m coverage new-tests --help` for the authoritative flag list.
 
 ## Reduce module
 
-The `reduce` package drives **LLVM testcase reduction**: it reads a small JSON config, runs a **pass pipeline**, and writes artifacts under an output directory.
+The `reduce` package drives **testcase reduction** for tests that cover new lines of code as identified by the coverage module. It reads a small JSON config, runs a **pass pipeline**, and writes a reduced test under an output directory.
 
-### Quick start
+The inputs are:
 
-Two examples are given in `example/`:
-- The SPIRV example runs a dummy `snapshot` pass that does nothing to the file (useful for debug purposes) and then runs `llvm-reduce` in `ir` form, which is the simplest reduction.
-- The AMD exmaple runs `llvm-reduce` in `ir` mode, then extracts the `MIR` from just before the LLVM pass under test, then runs `llfm-reduce` in `mir` mode.
+- A **JSON config** that points at the testcase (`input`), LLVM source metadata (`file`, `line`), an ordered **`pipeline`** of reducer passes, and paths to **interestingness scripts** where a pass needs them.
+- **`--llvm-bin`**: directory with `llvm-reduce`, `llc`, and anything your interesting scripts invoke.
 
-Run them as follows:
+The output is:
+
+- A directory (from **`output_dir`** in the config, or a timestamped default under `data/output/<input-basename>/`) containing step artifacts under **`tmp/`** and a final **`reduced.ll`** or **`reduced.mir`** (suffix matches the last pipeline stage).
+
+### From coverage module output to a reduction example
+
+The coverage module emits a CSV of incremental new coverage whose columns are `test_name`, `file`, `line`, and `covered-points` (see **Coverage module** — same shape as the file described there). Each row maps a **new test artifact** (`test_name`, typically a `.bc` or `.ll` under your new-tests directory) to a **source location** in LLVM (`file`, `line`) and one or more **SanitizerCoverage point ids** for that line (`covered-points`, semicolon-separated `0x…` values).
+
+To turn one row into something you can reduce:
+
+1. **Pick a row** you care about (often you filter to a single `test_name` first, then choose the `file`/`line` you want minimized toward).
+2. Set **`input`** in the config to that testcase file. Copy or symlink the file named in `test_name` next to the config (or use an absolute path); the name in the CSV is the basename the coverage run used.
+3. Set **`file`** to the LLVM-relative source path: strip any prefix before `llvm/` so it matches your checkout, e.g. `llvm/lib/Target/AMDGPU/SIInstrInfo.cpp` (the CSV may store an absolute path like `…/llvm-project/llvm/lib/Target/AMDGPU/…`).
+4. Set **`line`** to the integer from the **`line`** column.
+5. **Interestingness** depends on your goal. For “still hits this coverage point after `llc`”, modify the example in `example/amd/new-test-1/interesting_ir.sh` using one hex id from **`covered-points`**.
+
+Two examples for the AMDGPU backend are shown in `scripts/reduce_amd_coverage_based.sh` and `scripts/reduce_amd_argument_usage_multi_addr.sh`.
+
+Example row shape (fields only; paths vary by machine):
+
+```text
+<test_name>.bc,…/llvm/lib/Target/AMDGPU/SIInstrInfo.cpp,5112,0x61d2dd3
+```
+
+That row says: this input still exercises `SIInstrInfo.cpp` line **5112** and you can treat **0x61d2dd3** as a coverage guard in your script. The checked-in **`example/amd/new-test-1`** config was built the same way for a different line and address on the same file: it pins **`SIInstrInfo.cpp:6069`** and **`COVERED=0x61d4b9a`** in `interesting_ir.sh`, with **`input`** set to the corresponding `.bc` beside `config.json`.
+
+`example/amd/new-test-1/config.json` runs a single IR reduction step:
+
+```json
+"pipeline": [
+  {
+    "id": "llvm_reduce_ir",
+    "parameters": { "interesting": "interesting_ir.sh" }
+  }
+]
+```
+
+Run it from the repo root (after `pip install -e .` or with `PYTHONPATH=src`):
 
 ```bash
 cd src
-../scripts/reduce_spirv_icmp.sh
+python -m reduce --config ../example/amd/new-test-1/config.json --llvm-bin "$LLVM/build/bin"
 ```
 
-```bash
-cd src
-../scripts/reduce_amd_si_i1.sh
-```
+Adjust `--llvm-bin` and the hard-coded `LLVM_BIN` inside `interesting_ir.sh` for your trees.
 
+### Example pipelines in `example/*/config.json`
+
+Other checked-in configs illustrate longer pipelines (paths are all under `example/`):
+
+| Directory | Pipeline idea |
+|-------------|----------------|
+| **`spirv/icmp`**, **`spirv/emit-intrinsics`** | `snapshot` then `llvm_reduce_ir` with `interesting.sh` (crash/assert style). |
+| **`amd/si-i1-copies`** | `llvm_reduce_ir` → `extract_mir_before_pass` (`pass_under_test` `si-i1-copies`, `mtriple` / `llc_O`) → `llvm_reduce_mir` with `interesting_mir.sh`. |
+| **`amd/si-sgpr-spills`** | `llvm_reduce_ir` → `extract_ir_before_pass` (`amdgpu-remove-incompatible-functions`) → `llvm_reduce_ir` → `extract_mir_before_pass` (`si-lower-sgpr-spills`) → `llvm_reduce_mir` → `creduce`. |
+
+Open each **`config.json`** for full `parameters` (`mtriple`, `llc_O`, script names, etc.).
 
 ### What it does
 
@@ -182,6 +228,7 @@ For **`action: reduce`** (or default), the tool runs the **`pipeline`**: an orde
 | `creduce` | `CreducePass` | Copies the previous artifact to `…/NN_creduce.<ext>` (same extension as input, e.g. `.mir`), copies the configured interesting script to `…/NN_creduce_interesting.sh`, replaces every literal `"$1"` in that copy with the shell-quoted **basename** of the candidate filename (c-reduce runs the test in a temp dir that contains that file), then runs `creduce --n <N> <copy> <candidate>` (in-place reduction). `<N>` defaults to half of the machine’s logical CPUs (`os.cpu_count()`), at least 1; override with `parameters.n`. The original script must use `"$1"` for the candidate path (same as llvm-reduce). |
 | `llvm_reduce_mir` | `LlvmReduceMirPass` | Runs `llvm-reduce -x=mir --test=<interesting_mir>`, writes `…/NN_llvmreduce_mir.mir` (input must be MIR, e.g. after `extract_mir_before_pass`). |
 | `extract_mir_before_pass` | `ExtractMirBeforePass` | Runs `llc -o <tmp> <llc_O tokens> -mtriple=<mtriple> -stop-before=<pass_under_test> -simplify-mir <input.ll>`; output is `tmp/NN_mir_before_pass.mir` or `tmp/NN_<extract_mir_output>` (basename only). |
+| `extract_ir_before_pass` | `ExtractIrBeforePass` | Same idea as above but **without** `-simplify-mir`; output is sliced IR (e.g. `tmp/NN_ir_before_pass.ll` or `tmp/NN_<extract_ir_before_output>`). |
 
 After the last pass, the result is copied to **`output_dir/reduced.ll`** or **`reduced.mir`** (same suffix as the final artifact).
 
@@ -191,23 +238,24 @@ After the last pass, the result is copied to **`output_dir/reduced.ll`** or **`r
 
 One top-level object. **Required:**
 
-- `input` — path to the original `.ll` file.
+- `input` — path to the original `.ll` or `.bc` file.
 - `file`, `line` — LLVM source location metadata (used when constructing the in-memory `Test` object).
-- `pipeline` — non-empty JSON array of pass id strings (order = execution order; repeats allowed), e.g. `["snapshot", "llvm_reduce_ir"]` or `["snapshot", "llvm_reduce_mir"]`.
+- `pipeline` — non-empty JSON array; each element is an object with **`id`** (the pass id) and optional **`parameters`** (a JSON object of options for that step only). You may also put option keys directly on the step object next to **`id`** instead of nesting them under **`parameters`**. Order is execution order; repeats are allowed. See `example/amd/new-test-1/config.json`.
 
-**Optional:**
+**Optional (top-level):**
 
-- `interesting` — path to an executable script **`llvm-reduce` invokes** for IR; candidate path as `$1`; exit `0` if still “interesting”.
-- `interesting` — also used by `creduce`: a copy is written under `tmp/` with `"$1"` replaced by the shell-quoted **basename** of the candidate (e.g. `05_creduce.mir`), and that copy is passed to `creduce`.
-- `n` — (**`creduce` only**) positive integer passed as `creduce --n`; if omitted, uses half of `os.cpu_count()` (minimum 1).
-- `interesting_mir` — same contract for **`llvm_reduce_mir`** (`llvm-reduce -x=mir`); `$1` is the candidate **`.mir`** file.
 - `replacement` — how the line of interest in LLVM should be replaced to trigger the interestingness test; not consumed by reduction today.
 - `output_dir` — where to write `reduced.ll` and `tmp/`.
 - `action` — e.g. `reduce` or `test`.
-- `pass_under_test` — LLVM pass id for `llc --stop-before` when using `extract_mir_before_pass` (e.g. `si-i1-copies`); ignored for other passes.
-- `mtriple` — target triple for `llc` (required with `extract_mir_before_pass`), e.g. `amdgcn-amd-amdhsa`.
-- `llc_O` — string passed through to `llc` before `-mtriple` (required with `extract_mir_before_pass`): e.g. `"-O1"`, `"-Os"`, or `"-O2 -mllvm ..."` (split with shell rules). Use `""` to omit any `-O`/extra flags.
-- `extract_mir_output` — optional MIR filename (basename only); written under `tmp/` as `NN_<name>`. Defaults to `NN_mir_before_pass.mir`.
+
+**Per-step `parameters`** (and which passes accept them) — put these on the matching pipeline step, not at the top level:
+
+- **`llvm_reduce_ir`**, **`creduce`**: `interesting` — path to an executable script: candidate path as `$1`; exit `0` if still “interesting”. For `creduce`, a copy is written under `tmp/` with `"$1"` replaced by the shell-quoted **basename** of the candidate (e.g. `05_creduce.mir`), and that copy is passed to `creduce`.
+- **`creduce`**: `n` — positive integer passed as `creduce --n`; if omitted, uses half of `os.cpu_count()` (minimum 1).
+- **`llvm_reduce_mir`**: `interesting_mir` — same contract for `llvm-reduce -x=mir`; `$1` is the candidate **`.mir`** file.
+- **`extract_mir_before_pass`**, **`extract_ir_before_pass`**: `pass_under_test` — LLVM pass id for `llc --stop-before` (e.g. `si-i1-copies`). **`mtriple`** — target triple for `llc` (e.g. `amdgcn-amd-amdhsa`). **`llc_O`** — string passed through to `llc` before `-mtriple` (e.g. `"-O1"`, `"-Os"`, or `"-O2 -mllvm …"` per shell splitting); use `""` to omit extra `-O` flags.
+- **`extract_mir_before_pass`**: `extract_mir_output` — optional MIR filename (basename only); written under `tmp/` as `NN_<name>`. Defaults to `NN_mir_before_pass.mir`.
+- **`extract_ir_before_pass`**: `extract_ir_before_output` — optional IR filename (basename only); defaults to `NN_ir_before_pass.ll`.
 
 LLVM’s `bin` directory is **only** passed on the command line (`--llvm-bin`), not in JSON.
 
@@ -224,18 +272,6 @@ python -m reduce --config <path/to/config.json> --llvm-bin <path/to/llvm-project
 - **`--config` / `-c`** — required path to the JSON config.
 - **`--llvm-bin`** — required; directory containing `llvm-reduce` (and anything your interesting script needs).
 - **`--only-pass`** — run a single pass id for debugging (ignores config `pipeline`).
-
-### Example
-
-With the files under `example/`:
-
-```bash
-source venv/bin/activate
-cd src
-../scripts/reduce_spirv_icmp.sh
-```
-
-The script passes `--config` and `--llvm-bin`; adjust paths inside the script for your machine.
 
 ### Interesting script
 
