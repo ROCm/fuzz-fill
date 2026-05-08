@@ -63,7 +63,6 @@ def main():
         output_dir,
         test,
         pipeline_steps=pipeline_steps,
-        default_pass_options=cfg.default_pass_options,
     )
     reducer.reduce()
 

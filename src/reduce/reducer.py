@@ -20,7 +20,7 @@ class ReduceContext:
     output_dir: Path
     tmp_dir: Path
     pass_options: Mapping[str, Any]
-    """Merged options for the current pipeline step (defaults + step-specific)."""
+    """Options for the current pipeline step (from that step's ``parameters``)."""
 
 
 class Reducer:
@@ -31,13 +31,11 @@ class Reducer:
         test: Test,
         *,
         pipeline_steps: tuple[PipelineStep, ...],
-        default_pass_options: Mapping[str, Any] | None = None,
     ):
         self.llvm_bin: Path = llvm_bin
         self.output_dir: Path = output_dir
         self.test: Test = test
         self._pipeline_steps: tuple[PipelineStep, ...] = pipeline_steps
-        self._default_pass_options: dict[str, Any] = dict(default_pass_options or {})
         self._pass_ids: list[str] = [s.id for s in pipeline_steps]
         self._passes_list = passes_from_ids(self._pass_ids)
 
@@ -51,15 +49,11 @@ class Reducer:
         n = len(self._passes_list)
         for step, (pass_id, p) in enumerate(zip(self._pass_ids, self._passes_list)):
             print(f"[reduce] pass {step + 1}/{n}: {pass_id}", flush=True)
-            merged: dict[str, Any] = {
-                **self._default_pass_options,
-                **dict(self._pipeline_steps[step].options),
-            }
             ctx = ReduceContext(
                 llvm_bin=self.llvm_bin,
                 output_dir=self.output_dir,
                 tmp_dir=tmp_dir,
-                pass_options=MappingProxyType(merged),
+                pass_options=MappingProxyType(dict(self._pipeline_steps[step].options)),
             )
             test = p.run(ctx, test, step=step)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import pandas as pd
 from pathlib import Path
@@ -38,15 +39,16 @@ class TestRunner:
         self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
         self.raw_sancov_output_dir.mkdir(parents=True, exist_ok=True)
 
-    def ubsan_environ_with_coverage(self, out_dir_name: str | None = None) -> dict[str, str]:
+    def ubsan_environ_with_coverage(self, out_dir: str | None = None) -> dict[str, str]:
         env = os.environ.copy()
 
-        if out_dir_name is None:
-            cov_opts = f"coverage=1:coverage_dir={self.raw_sancov_output_dir}"
-        else:
-            out_dir = self.raw_sancov_output_dir / out_dir_name
+        if out_dir is None:
+            out_dir = self.raw_sancov_output_dir
+
+        if not out_dir.exists():
             out_dir.mkdir(parents=True, exist_ok=True)
-            cov_opts = f"coverage=1:coverage_dir={out_dir}"
+
+        cov_opts = f"coverage=1:coverage_dir={out_dir}"
         
         prev = env.get("UBSAN_OPTIONS", "").strip()
         env["UBSAN_OPTIONS"] = f"{cov_opts}:{prev}" if prev else cov_opts
@@ -97,12 +99,18 @@ class TestRunner:
         to_run = paths[: self._new_tests_limit]
 
         for test_path in to_run:
-
             self.run_standalone_test(test_path)
 
     def run_standalone_test(self, test_path: Path) -> None:
         rel = test_path.relative_to(self.filepaths.new_tests_dir)
-        env = self.ubsan_environ_with_coverage(out_dir_name = test_path.name)
+
+        out_dir = self.raw_sancov_output_dir / test_path.name
+
+        if out_dir.exists():
+            print(f"Sancov files already exist in {out_dir}, skipping test {test_path}")
+            return
+
+        env = self.ubsan_environ_with_coverage(out_dir = out_dir)
         argv = [str(self.instrumented_llc), "-o", "/dev/null", str(rel)]
 
         if self.debug:
@@ -111,7 +119,16 @@ class TestRunner:
             print(f"\tCWD: {self.filepaths.new_tests_dir}")
             print(f"\tCoverage directory: {self.raw_sancov_output_dir}")
         else:
-            subprocess.run(argv, cwd=self.filepaths.new_tests_dir, env=env, check=True)
+            try:
+                subprocess.run(argv, cwd=self.filepaths.new_tests_dir, env=env, check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"Error running test {test_path}: {e}")
+                print(f"Output: {e.output}")
+                print(f"Return code: {e.returncode}")
+                print(f"Stderr: {e.stderr}")
+                print(f"Skipping test {test_path}")
+                shutil.rmtree(out_dir)
+                return
 
     def get_aggregate_coverage(self) -> None:
         """Get the aggregate coverage for the test suite."""

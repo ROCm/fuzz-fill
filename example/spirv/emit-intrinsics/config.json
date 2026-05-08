@@ -5,8 +5,7 @@
     "replacement": "    {assert(0 && \"My crash is here\"); IsIncomplete = true;}\n",
     "pipeline": [
         {
-            "id": "snapshot",
-            "parameters": {}
+            "id": "snapshot"
         },
         {
             "id": "llvm_reduce_ir",
