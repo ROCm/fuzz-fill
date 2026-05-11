@@ -9,6 +9,6 @@
 # RUN: %coverage new-tests --output-dir %t/new_tests --instrumented-bin "$INSTR" --new-tests-dir %S/fixtures/coverage-new-tests --n 1 && \
 # RUN: %coverage diff --output-dir %t/diff --llvm-bin "$LLVM_BIN" --test-suite-output-dir %t/test_suite --new-tests-output-dir %t/new_tests
 
-# RUN: test -f %t/test_suite/joint_llc_and_opt_coverage.csv
+# RUN: test -f %t/test_suite/test_coverage.csv
 # RUN: test -f %t/test_suite/llc_address_line_map.csv
 # RUN: test -f %t/diff/new_coverage.csv
