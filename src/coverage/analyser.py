@@ -14,7 +14,6 @@ class CoverageAnalyzer:
         self.baseline_coverage_file = filepaths.output_test_suite_dir / filepaths.joint_llc_and_opt_coverage_file
         self.llc_address_line_map_file = filepaths.output_test_suite_dir / filepaths.llc_address_line_map_file
         self.new_coverage_csv = filepaths.output_dir / filepaths.new_coverage_csv
-        self.new_tests_sancov = filepaths.output_new_tests_dir / "raw_sancov"
 
     def get_incremental_coverage(self) -> None:
         if self.mode == "full":
@@ -33,10 +32,6 @@ class CoverageAnalyzer:
         llc_address_line_map["n_addresses_in_line"] = llc_address_line_map.groupby(["file", "line"], sort=False)["file"].transform("count")
         llc_address_line_map["file_line"] = llc_address_line_map["file"] + ":" + llc_address_line_map["line"].astype(str)
 
-        # Check whether the baseline coverage is full
-        if not (baseline_coverage['coverage'] == 'full').all():
-            raise ValueError(f"Baseline coverage is not full")
-
         baseline_covered_lines = set(zip(baseline_coverage["file"], baseline_coverage["line"]))
 
         self.new_coverage_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -51,7 +46,7 @@ class CoverageAnalyzer:
         # so that we avoid adding them to the new coverage csv multiple times
         newly_covered_lines = set()
 
-        for new_test_dir in self.new_tests_sancov.iterdir():
+        for new_test_dir in self.filepaths.output_new_tests_dir.iterdir():
 
             # Check whether any new addresses are covered
             test_name = new_test_dir.name

@@ -183,7 +183,7 @@ class Sancov:
         Joint coverage: rows from *this* symcov's ``point-symbol-info`` (hex ``address`` per point)
         restricted to ``(file, function, line)`` that also appear in ``other``'s covered locations.
 
-        Returns a long table with columns ``file``, ``function``, ``line``, ``address``.
+        Returns a long table with columns ``file``, ``line``, and ``point_<suffix>`` (no ``coverage`` column; rows are fully covered lines only).
         """
         with self.get_merged_symcov_path().open(encoding="utf-8") as f:
             this_symcov = json.load(f)
@@ -207,6 +207,7 @@ class Sancov:
             joint_df =joint_df.drop(columns=["col", "covered_other", "covered_this", "point_other"])
             cov_summary_df = self.get_coverage_summary_df(joint_df)
             fully_covered_df = cov_summary_df[cov_summary_df["coverage"] == "full"].copy()
+            fully_covered_df = fully_covered_df.drop(columns=["coverage"])
             fully_covered_df.rename(columns={"point_this": f"point_{self.suffix}"}, inplace=True)
             return (this_address_line_map, fully_covered_df)
         

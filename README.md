@@ -41,7 +41,7 @@ Build LLVM twice:
 
 | Subcommand | Status |
 |------------|--------|
-| **`test-suite`** |  Get baseline coverage of the LIT test suite. |
+| **`test-suite`** |  Get baseline coverage of LLVM's regression LIT test suite. |
 | **`new-tests`** | Get coverage of new tests. |
 | **`diff`** | Get incremental coverage of new tests relative to the baseline test suite coverage. |
 
@@ -54,7 +54,7 @@ Get baseline coverage of the LIT test suite.
 Run from the repo root:
 
 ```text
-python -m coverage test-suite --llvm-bin DIR --instrumented-bin DIR [--output-dir DIR] [--filter PREFIX] [--debug]
+python -m coverage test-suite --llvm-bin DIR --instrumented-bin DIR [--output-dir DIR] [--lit-filter PREFIX] [--debug]
 ```
 
 | Input | Required | Meaning |
@@ -62,7 +62,7 @@ python -m coverage test-suite --llvm-bin DIR --instrumented-bin DIR [--output-di
 | **`--llvm-bin`** | Yes | Directory containing the **uninstrumented** LLVM tools, in particular **`sancov`**, used to merge (`sancov -union`) and symbolize (`sancov -symbolize`) raw coverage files. |
 | **`--instrumented-bin`** | Yes | Directory containing **`llvm-lit`**, **`llc`**, and **`opt`** from a **SanitizerCoverage-instrumented** build (same revision/layout you use for lit). |
 | **`--output-dir`** | No | Root directory for **all artifacts** from this run. Parent directories are created as needed. If omitted, the default path is whatever the package defines as its default output root (see `src/coverage/constants.py`). |
-| **`--filter`** | No | Passed to lit as **`--filter=<PREFIX>`**. If you omit it, the code uses the built-in default filter (same idea as restricting to **`CodeGen/AMDGPU`**; see `DEFAULT_LIT_FILTER` in `src/coverage/constants.py`). |
+| **`--lit-filter`** | No | Passed to lit as **`--filter=<PREFIX>`**. If you omit it, the code uses the built-in default filter (same idea as restricting to **`CodeGen/AMDGPU`**; see `DEFAULT_LIT_FILTER` in `src/coverage/constants.py`). |
 | **`--debug`** | No | Prints the lit argv, cwd, **`UBSAN_OPTIONS`**, and coverage directory **instead of executing** lit or standalone test subprocesses—use it only to inspect what would run. |
 
 #### Outputs
@@ -73,8 +73,8 @@ All paths are under **`--output-dir`** unless noted.
 
 | Output | Description |
 |--------|-------------|
-| **`llc_address_line_map.csv`** | Top-level CSV in **`--output-dir`** (default name from `DEFAULT_LLC_ADDRESS_LINE_MAP_FILE`) mapping **source file**, **line**, and **hex point id** from llc coverage. |
-| **`joint_llc_and_opt_coverage.csv`** | Top-level CSV in **`--output-dir`** (default name from `DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE`) built from shared **`(file, line, col)`** points present in both llc and opt symcovs. In current **`coverage_mode="full"`**, a row is kept when all shared points on that **`(file, line)`** are covered by **either** llc or opt. |
+| **`test_coverage.csv`** | Top-level CSV in **`--output-dir`** (default name from `DEFAULT_LLC_ADDRESS_LINE_MAP_FILE`) mapping **source file**, **line**, to the **instrumentation points** of SanitizerCoverage in llc. This is not the actual coverage achieved by the tests, but a static mapping of the SanitizerCoverage instrumentation points to source code lines based on the llc coverage output. |
+| **`test_coverage.csv`** | Top-level CSV in **`--output-dir`** (default name from `DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE`) built from shared **`(file, line, col)`** points present in both llc and opt symcovs. In current **`coverage_mode="full"`**, a row is kept when all shared points on that **`(file, line)`** are covered by **either** llc or opt. |
 
 Note: coverage selection rules are currently limited to **`coverage_mode="full"`** in `src/coverage/sancov.py`. Other modes (for example, partial-coverage style rules) may be added in the future but are not implemented yet.
 
@@ -83,7 +83,7 @@ Note: coverage selection rules are currently limited to **`coverage_mode="full"`
 | Output | Description |
 |--------|-------------|
 | **`raw_sancov/`** | Raw SanitizerCoverage **`*.sancov`** shards from the lit run (names follow LLVM’s **`<binary>.<id>.sancov`** pattern for each instrumented binary). |
-| **`processed_sancov/llc.0.sancov`**, **`llc.0.symcov`** | Merged union of all raw **`llc.*.sancov`**, then **JSON symcov** from **`sancov -symbolize`** using the **instrumented** `llc` binary. |
+| **`processed_sancov/llc.0.sancov`**, **`llc.0.symcov`** | Merged union of all raw **`llc.*.sancov`**, then **JSON symcov** from **`sancov -symbolize`** using the **instrumented** `llc` binary. These files show the merged coverage profiles for all tests that were executed. |
 | **`processed_sancov/opt.0.sancov`**, **`opt.0.symcov`** | Same for **`opt`**. |
 
 
@@ -95,7 +95,7 @@ PYTHONPATH=src python -m coverage test-suite \
   --output-dir "$HOME/fuzz-fill/data/coverage_output/my_run" \
   --llvm-bin "$LLVM/build/bin" \
   --instrumented-bin "$LLVM/build-amdgpu-bb/bin" \
-  --filter "CodeGen/AMDGPU"
+  --lit-filter "CodeGen/AMDGPU"
 ```
 
 Use `python -m coverage test-suite --help` for the authoritative flag list.
@@ -109,7 +109,7 @@ Get coverage of new tests.
 Run from the repo root:
 
 ```text
-python -m coverage new-tests --llvm-bin DIR --instrumented-bin DIR --new-tests-dir DIR [--n N] [--output-dir DIR] [--debug] [--filter PREFIX]
+python -m coverage new-tests --llvm-bin DIR --instrumented-bin DIR --new-tests-dir DIR [--n N] [--output-dir DIR] [--debug]
 ```
 
 | Input | Required | Meaning |

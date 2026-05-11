@@ -6,7 +6,7 @@ import subprocess
 import pandas as pd
 from pathlib import Path
 
-from coverage.constants import DEFAULT_LIT_FILTER
+from coverage.constants import DEFAULT_LIT_FILTER, TEST_FLAGS
 from coverage.filepaths import Filepaths
 from coverage.sancov import Sancov
 
@@ -29,15 +29,19 @@ class TestRunner:
         self.raw_sancov_output_dir = filepaths.output_dir / "raw_sancov"
         self.debug = debug
 
+        self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
+
         if self.mode == "lit":
             self._lit_filter = lit_filter if lit_filter is not None else DEFAULT_LIT_FILTER
+            self.raw_sancov_output_dir.mkdir(parents=True, exist_ok=True)
 
         elif self.mode == "standalone":
             self._new_tests_limit = new_tests_limit
             self.instrumented_llc = filepaths.instrumented_bin / "llc"
-
-        self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
-        self.raw_sancov_output_dir.mkdir(parents=True, exist_ok=True)
+            self.standalone_test_id = 0
+            self.standalone_total_tests = 0
+            self.standalone_tests_complete = 0
+            self.standalone_tests_skipped = 0
 
     def ubsan_environ_with_coverage(self, out_dir: str | None = None) -> dict[str, str]:
         env = os.environ.copy()
@@ -92,43 +96,82 @@ class TestRunner:
         else:
             subprocess.run(argv, cwd=cwd, env=env, check=True)
 
+    def _print_standalone_progress(self, label: str | None = None) -> None:
+        remaining = (
+            self.standalone_total_tests
+            - self.standalone_tests_complete
+            - self.standalone_tests_skipped
+        )
+        msg = (
+            f"complete={self.standalone_tests_complete}  "
+            f"skipped={self.standalone_tests_skipped}  "
+            f"remaining={remaining}"
+        )
+        if label:
+            msg = f"{msg}  |  {label}"
+        print(msg, flush=True)
+
     def run_standalone_tests(self) -> None:
-        """Run ``llc -o /dev/null`` on each ``*.ll`` / ``*.bc`` (subset by ``new_tests_limit``)."""
+        """Generate each standalone test directory and run it before moving to the next."""
 
         paths = self.collect_llc_input_files()
         to_run = paths[: self._new_tests_limit]
+        self.standalone_total_tests = len(to_run) * len(TEST_FLAGS)
+        self.standalone_test_id = 0
+        self.standalone_tests_complete = 0
+        self.standalone_tests_skipped = 0
 
-        for test_path in to_run:
-            self.run_standalone_test(test_path)
-
-    def run_standalone_test(self, test_path: Path) -> None:
-        rel = test_path.relative_to(self.filepaths.new_tests_dir)
-
-        out_dir = self.raw_sancov_output_dir / test_path.name
-
-        if out_dir.exists():
-            print(f"Sancov files already exist in {out_dir}, skipping test {test_path}")
+        if self.standalone_total_tests == 0:
+            self._print_standalone_progress("(no standalone inputs)")
             return
 
-        env = self.ubsan_environ_with_coverage(out_dir = out_dir)
-        argv = [str(self.instrumented_llc), "-o", "/dev/null", str(rel)]
+        for test_path in to_run:
+            for flag in TEST_FLAGS:
+                new_test_dir = self.filepaths.output_dir / f"test_{self.standalone_test_id}_{test_path.name}"
+                self.create_standalone_test_script(new_test_dir, test_path, flag)
+                outcome = self.run_standalone_test(new_test_dir)
+                if outcome == "success":
+                    self.standalone_tests_complete += 1
+                else:
+                    self.standalone_tests_skipped += 1
+                self._print_standalone_progress(f"[{new_test_dir.name}]")
+                self.standalone_test_id += 1
+
+    def create_standalone_test_script(
+        self, test_dir: Path, test_path: Path, flag: str
+    ) -> None:
+        test_dir.mkdir(parents=True, exist_ok=True)
+        script = test_dir / "test.sh"
+        with open(script, "w") as f:
+            f.write("#!/bin/bash\n")
+            f.write("set -euo pipefail\n")
+            f.write(
+                f"export UBSAN_OPTIONS={self.ubsan_environ_with_coverage(out_dir=test_dir)['UBSAN_OPTIONS']}\n"
+            )
+            f.write(f"{self.instrumented_llc} {flag} {test_path} > /dev/null 2>&1\n")
+        script.chmod(0o755)
+
+    def run_standalone_test(self, test_dir: Path) -> str:
+        if any(test_dir.glob("*.sancov")):
+            print(f"Sancov files already exist in {test_dir}, skipping test {test_dir}")
+            return "skipped"
+
+        argv = [str(test_dir / "test.sh")]
+        env = os.environ.copy()
 
         if self.debug:
             print(f"\tRunning: {argv}")
-            print(f"\tUBSAN_OPTIONS: {env['UBSAN_OPTIONS']}")
-            print(f"\tCWD: {self.filepaths.new_tests_dir}")
+            print(f"\tCWD: {test_dir}")
             print(f"\tCoverage directory: {self.raw_sancov_output_dir}")
-        else:
-            try:
-                subprocess.run(argv, cwd=self.filepaths.new_tests_dir, env=env, check=True)
-            except subprocess.CalledProcessError as e:
-                print(f"Error running test {test_path}: {e}")
-                print(f"Output: {e.output}")
-                print(f"Return code: {e.returncode}")
-                print(f"Stderr: {e.stderr}")
-                print(f"Skipping test {test_path}")
-                shutil.rmtree(out_dir)
-                return
+            return "skipped"
+
+        try:
+            subprocess.run(argv, cwd=self.filepaths.new_tests_dir, env=env, check=True)
+        except subprocess.CalledProcessError as e:
+            shutil.rmtree(test_dir)
+            return "skipped"
+
+        return "success"
 
     def get_aggregate_coverage(self) -> None:
         """Get the aggregate coverage for the test suite."""

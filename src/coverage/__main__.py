@@ -35,8 +35,8 @@ def main():
         help="Path to the uninstrumented LLVM bin directory")
     p_test_suite.add_argument("--instrumented-bin", type=Path, required=True, 
         help="Path to the coverage-instrumented LLVM bin directory")
-    p_test_suite.add_argument("--filter", type=str, default=None, 
-        help="Filter prefix for the test suite")
+    p_test_suite.add_argument("--lit-filter", type=str, default=None,
+        help="Prefix passed to llvm-lit as --filter=<PREFIX>")
 
     p_new_tests.add_argument("--instrumented-bin", type=Path, required=True, 
         help="Path to the coverage-instrumented LLVM bin directory")
@@ -67,7 +67,7 @@ def main():
         print("Getting baseline coverage for the test suite")
         test_runner = TestRunner(mode="lit", 
             filepaths=filepaths, 
-            lit_filter=args.filter, 
+            lit_filter=args.lit_filter, 
             debug=args.debug)
         test_runner.run()
 
