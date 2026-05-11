@@ -41,7 +41,7 @@ Build LLVM twice:
 
 | Subcommand | Status |
 |------------|--------|
-| **`test-suite`** |  Get baseline coverage of the LIT test suite. |
+| **`test-suite`** |  Get baseline coverage of LLVM's regression LIT test suite. |
 | **`new-tests`** | Get coverage of new tests. |
 | **`diff`** | Get incremental coverage of new tests relative to the baseline test suite coverage. |
 
@@ -54,7 +54,7 @@ Get baseline coverage of the LIT test suite.
 Run from the repo root:
 
 ```text
-python -m coverage test-suite --llvm-bin DIR --instrumented-bin DIR [--output-dir DIR] [--filter PREFIX] [--debug]
+python -m coverage test-suite --llvm-bin DIR --instrumented-bin DIR [--output-dir DIR] [--lit-filter PREFIX] [--debug]
 ```
 
 | Input | Required | Meaning |
@@ -62,7 +62,7 @@ python -m coverage test-suite --llvm-bin DIR --instrumented-bin DIR [--output-di
 | **`--llvm-bin`** | Yes | Directory containing the **uninstrumented** LLVM tools, in particular **`sancov`**, used to merge (`sancov -union`) and symbolize (`sancov -symbolize`) raw coverage files. |
 | **`--instrumented-bin`** | Yes | Directory containing **`llvm-lit`**, **`llc`**, and **`opt`** from a **SanitizerCoverage-instrumented** build (same revision/layout you use for lit). |
 | **`--output-dir`** | No | Root directory for **all artifacts** from this run. Parent directories are created as needed. If omitted, the default path is whatever the package defines as its default output root (see `src/coverage/constants.py`). |
-| **`--filter`** | No | Passed to lit as **`--filter=<PREFIX>`**. If you omit it, the code uses the built-in default filter (same idea as restricting to **`CodeGen/AMDGPU`**; see `DEFAULT_LIT_FILTER` in `src/coverage/constants.py`). |
+| **`--lit-filter`** | No | Passed to lit as **`--filter=<PREFIX>`**. If you omit it, the code uses the built-in default filter (same idea as restricting to **`CodeGen/AMDGPU`**; see `DEFAULT_LIT_FILTER` in `src/coverage/constants.py`). |
 | **`--debug`** | No | Prints the lit argv, cwd, **`UBSAN_OPTIONS`**, and coverage directory **instead of executing** lit or standalone test subprocesses—use it only to inspect what would run. |
 
 #### Outputs
@@ -95,7 +95,7 @@ PYTHONPATH=src python -m coverage test-suite \
   --output-dir "$HOME/fuzz-fill/data/coverage_output/my_run" \
   --llvm-bin "$LLVM/build/bin" \
   --instrumented-bin "$LLVM/build-amdgpu-bb/bin" \
-  --filter "CodeGen/AMDGPU"
+  --lit-filter "CodeGen/AMDGPU"
 ```
 
 Use `python -m coverage test-suite --help` for the authoritative flag list.
@@ -109,7 +109,7 @@ Get coverage of new tests.
 Run from the repo root:
 
 ```text
-python -m coverage new-tests --llvm-bin DIR --instrumented-bin DIR --new-tests-dir DIR [--n N] [--output-dir DIR] [--debug] [--filter PREFIX]
+python -m coverage new-tests --llvm-bin DIR --instrumented-bin DIR --new-tests-dir DIR [--n N] [--output-dir DIR] [--debug]
 ```
 
 | Input | Required | Meaning |

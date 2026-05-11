@@ -23,7 +23,7 @@ python -m coverage test-suite \
     --output-dir $TEST_SUITE_OUTPUT_DIR \
     --llvm-bin $LLVM_BIN \
     --instrumented-bin $INSTRUMENTED_BIN_DIR \
-    --filter $FILTER 
+    --lit-filter $FILTER 
 
 python -m coverage new-tests \
     --output-dir $NEW_TESTS_OUTPUT_DIR \
