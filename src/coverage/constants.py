@@ -16,3 +16,6 @@ DEFAULT_NEW_COVERAGE_CSV = "new_coverage.csv"
 
 # Sancov constants
 UNION_BATCH_SIZE = 200
+
+# New test flags
+TEST_FLAGS = ["", "-OO", "-O1", "-O2", "-O3"]
