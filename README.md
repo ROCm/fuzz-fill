@@ -73,8 +73,8 @@ All paths are under **`--output-dir`** unless noted.
 
 | Output | Description |
 |--------|-------------|
-| **`llc_address_line_map.csv`** | Top-level CSV in **`--output-dir`** (default name from `DEFAULT_LLC_ADDRESS_LINE_MAP_FILE`) mapping **source file**, **line**, and **hex point id** from llc coverage. |
-| **`joint_llc_and_opt_coverage.csv`** | Top-level CSV in **`--output-dir`** (default name from `DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE`) built from shared **`(file, line, col)`** points present in both llc and opt symcovs. In current **`coverage_mode="full"`**, a row is kept when all shared points on that **`(file, line)`** are covered by **either** llc or opt. |
+| **`test_coverage.csv`** | Top-level CSV in **`--output-dir`** (default name from `DEFAULT_LLC_ADDRESS_LINE_MAP_FILE`) mapping **source file**, **line**, to the **instrumentation points** of SanitizerCoverage in llc. This is not the actual coverage achieved by the tests, but a static mapping of the SanitizerCoverage instrumentation points to source code lines based on the llc coverage output. |
+| **`test_coverage.csv`** | Top-level CSV in **`--output-dir`** (default name from `DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE`) built from shared **`(file, line, col)`** points present in both llc and opt symcovs. In current **`coverage_mode="full"`**, a row is kept when all shared points on that **`(file, line)`** are covered by **either** llc or opt. |
 
 Note: coverage selection rules are currently limited to **`coverage_mode="full"`** in `src/coverage/sancov.py`. Other modes (for example, partial-coverage style rules) may be added in the future but are not implemented yet.
 
@@ -83,7 +83,7 @@ Note: coverage selection rules are currently limited to **`coverage_mode="full"`
 | Output | Description |
 |--------|-------------|
 | **`raw_sancov/`** | Raw SanitizerCoverage **`*.sancov`** shards from the lit run (names follow LLVM’s **`<binary>.<id>.sancov`** pattern for each instrumented binary). |
-| **`processed_sancov/llc.0.sancov`**, **`llc.0.symcov`** | Merged union of all raw **`llc.*.sancov`**, then **JSON symcov** from **`sancov -symbolize`** using the **instrumented** `llc` binary. |
+| **`processed_sancov/llc.0.sancov`**, **`llc.0.symcov`** | Merged union of all raw **`llc.*.sancov`**, then **JSON symcov** from **`sancov -symbolize`** using the **instrumented** `llc` binary. These files show the merged coverage profiles for all tests that were executed. |
 | **`processed_sancov/opt.0.sancov`**, **`opt.0.symcov`** | Same for **`opt`**. |
 
 
