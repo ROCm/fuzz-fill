@@ -32,10 +32,6 @@ class CoverageAnalyzer:
         llc_address_line_map["n_addresses_in_line"] = llc_address_line_map.groupby(["file", "line"], sort=False)["file"].transform("count")
         llc_address_line_map["file_line"] = llc_address_line_map["file"] + ":" + llc_address_line_map["line"].astype(str)
 
-        # Check whether the baseline coverage is full
-        if not (baseline_coverage['coverage'] == 'full').all():
-            raise ValueError(f"Baseline coverage is not full")
-
         baseline_covered_lines = set(zip(baseline_coverage["file"], baseline_coverage["line"]))
 
         self.new_coverage_csv.parent.mkdir(parents=True, exist_ok=True)
