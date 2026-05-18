@@ -53,6 +53,9 @@ class CoverageAnalyzer:
 
             sancov_file = get_sancov_file(new_test_dir)
 
+            if sancov_file is None:
+                continue
+
             new_test_covered_addresses: set[str] = sancov.get_covered_addresses(sancov_file)
 
             # Match newly covered addresses to llc line-address mapping to check
@@ -112,9 +115,10 @@ class CoverageAnalyzer:
                         addrs = addr_by_line.loc[row["file"], row["line"]]
                         writer.writerow([per_test_csv, row["file"], row["line"], addrs])
 
-def get_sancov_file(new_test_dir: Path) -> Path:
+def get_sancov_file(new_test_dir: Path) -> Path | None:
     """Get the llc sancov file for a new test. Checks that there is only one sancov file and throws an error if there are multiple."""
     sancov_files = list(new_test_dir.rglob('llc.*.sancov'))
     if len(sancov_files) != 1:
-        raise ValueError(f"Expected 1 sancov file, got {len(sancov_files)}")
+        print(f"Expected 1 sancov file, got {len(sancov_files)}")
+        return None
     return list(new_test_dir.rglob('*sancov'))[0]
