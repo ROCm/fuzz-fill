@@ -15,6 +15,8 @@ Each config.json sets output_dir to a reduced subdirectory next to it so
 reduction artifacts stay inside the case directory.
 
 With --llvm-bin, runs python -m reduce --config <case>/config.json for each case.
+
+Use --n to process only the first N data rows of the CSV (after the header).
 """
 
 from __future__ import annotations
@@ -316,7 +318,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="If set, run python -m reduce for each prepared case directory.",
     )
+    p.add_argument(
+        "--n",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Process at most the first N CSV data rows (default: all rows).",
+    )
     args = p.parse_args(argv)
+
+    if args.n is not None and args.n < 1:
+        print("--n must be a positive integer.", file=sys.stderr)
+        return 2
 
     new_tests = args.new_tests.resolve()
     llvm_bin = args.llvm_bin.resolve() if args.llvm_bin is not None else None
@@ -336,6 +349,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         rows = list(reader)
+
+    if args.n is not None:
+        rows = rows[: args.n]
 
     ok = 0
     ambiguous_rows = 0
