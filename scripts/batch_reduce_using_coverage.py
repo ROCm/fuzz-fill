@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """
-Create per-line reduce harness directories from a coverage CSV (new_coverage
-shape) and a directory of input tests.
+Create per-line reduce harness directories from diff/new_coverage.csv and
+matching folders under new_tests/.
 
-Expected ``--csv`` columns: test_name, file, line, covered-points
-(``covered-points`` is ``0x...`` values separated by ``;``, as in diff/new_coverage.csv).
+CSV columns: test_name, file, line, covered-points
+(test_name is a directory under --new-tests containing test.sh).
 
+Each test.sh records the instrumented llc invocation (binary, flags, .bc path).
 Each output directory mirrors example/amd/new-test-1 (config.json,
 interesting_ir.sh, and the copied .bc). COVERED in interesting_ir.sh is the
-lowest hex among addresses for that row (same as multiple instrumentation sites
-on one source line).
+lowest hex among addresses for that row.
 
-Each ``config.json`` sets ``output_dir`` to a ``reduced`` subdirectory next to
-it so reduction artifacts stay inside the case directory.
+Each config.json sets output_dir to a reduced subdirectory next to it so
+reduction artifacts stay inside the case directory.
 
-With ``--llvm-bin``, runs ``python -m reduce --config <case>/config.json``
-for each case (same idea as scripts/reduce_amd_coverage_based.sh).
+With --llvm-bin, runs python -m reduce --config <case>/config.json for each case.
 """
 
 from __future__ import annotations
@@ -25,9 +24,11 @@ import csv
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -45,7 +46,7 @@ def _reduce_subprocess_env() -> dict[str, str]:
 
 
 def run_reduce(*, case_dir: Path, llvm_bin: Path) -> None:
-    """Run the same CLI as scripts/reduce_amd_coverage_based.sh for one case directory."""
+    """Run reduce for one prepared case directory."""
     config = case_dir / "config.json"
     subprocess.run(
         [
@@ -97,45 +98,133 @@ def resolve_covered_hexes(covered_points_cell: str) -> tuple[str, list[str]]:
     return "0x" + hexes_sorted[0], hexes_sorted
 
 
-def render_interesting_ir(template_text: str, covered: str) -> str:
-    def repl(m: re.Match[str]) -> str:
-        return f'COVERED="{covered}"'
+@dataclass(frozen=True)
+class TestShInfo:
+    llvm_bin: Path
+    bc_path: Path
+    llc_flags: tuple[str, ...]
+
+
+def parse_test_sh(test_sh: Path) -> TestShInfo:
+    """Parse new_tests/<test_name>/test.sh for llc binary, flags, and .bc path."""
+    if not test_sh.is_file():
+        raise FileNotFoundError(f"test.sh not found: {test_sh}")
+
+    llc_line: str | None = None
+    for raw in test_sh.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            continue
+        if "/llc" in line or line.endswith("llc") or " llc " in f" {line} ":
+            llc_line = line
+            break
+
+    if llc_line is None:
+        raise ValueError(f"No llc invocation found in {test_sh}")
+
+    cmd = re.sub(r"\s*>.*$", "", llc_line).strip()
+    parts = shlex.split(cmd)
+    if len(parts) < 2:
+        raise ValueError(f"Could not parse llc command in {test_sh}: {llc_line!r}")
+
+    llc_exe = Path(parts[0])
+    if llc_exe.name != "llc":
+        raise ValueError(f"Expected llc executable, got {llc_exe!r} in {test_sh}")
+
+    bc_indices = [i for i, p in enumerate(parts) if p.endswith(".bc")]
+    if len(bc_indices) != 1:
+        raise ValueError(
+            f"Expected exactly one .bc argument in {test_sh}, got {bc_indices!r}"
+        )
+    bc_idx = bc_indices[0]
+    bc_path = Path(parts[bc_idx])
+    if not bc_path.is_file():
+        raise FileNotFoundError(f"Bitcode file from test.sh does not exist: {bc_path}")
+
+    flags = tuple(parts[1:bc_idx])
+    return TestShInfo(llvm_bin=llc_exe.parent, bc_path=bc_path, llc_flags=flags)
+
+
+def render_interesting_ir(
+    template_text: str,
+    *,
+    covered: str,
+    llvm_bin: Path,
+    llc_flags: tuple[str, ...],
+) -> str:
+    flags_value = " ".join(llc_flags)
 
     out, n = re.subn(
-        r'^COVERED="[^"]*"',
-        repl,
+        r'^LLVM_BIN=.*$',
+        f'LLVM_BIN={llvm_bin}',
         template_text,
         count=1,
         flags=re.MULTILINE,
     )
     if n != 1:
         raise ValueError(
-            "Template interesting_ir.sh must contain exactly one COVERED=\"...\" line."
+            'Template interesting_ir.sh must contain exactly one LLVM_BIN=... line.'
+        )
+
+    def repl_covered(m: re.Match[str]) -> str:
+        return f'COVERED="{covered}"'
+
+    out, n = re.subn(
+        r'^COVERED="[^"]*"',
+        repl_covered,
+        out,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if n != 1:
+        raise ValueError(
+            'Template interesting_ir.sh must contain exactly one COVERED="..." line.'
+        )
+
+    if re.search(r'^LLC_FLAGS=', out, flags=re.MULTILINE):
+        out, n = re.subn(
+            r'^LLC_FLAGS=.*$',
+            f'LLC_FLAGS="{flags_value}"',
+            out,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if n != 1:
+            raise ValueError("Failed to set LLC_FLAGS in template.")
+    else:
+        out, n = re.subn(
+            r'^(LLC=\$LLVM_BIN/llc)$',
+            rf'\1\nLLC_FLAGS="{flags_value}"',
+            out,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if n != 1:
+            raise ValueError(
+                'Template interesting_ir.sh must contain LLC=$LLVM_BIN/llc '
+                "or an LLC_FLAGS= line."
+            )
+
+    out, n = re.subn(
+        r'(\$LLC)\s+"\$1"',
+        r'\1 $LLC_FLAGS "$1"',
+        out,
+        count=1,
+    )
+    if n != 1:
+        raise ValueError(
+            'Template interesting_ir.sh must invoke llc as $LLC ... "$1".'
         )
     return out
 
 
-def copy_input_bc(tests_base: Path, test_name: str, dest_dir: Path) -> None:
-    """Copy tests_base/<test_name> into dest_dir/<basename(test_name)>."""
-    src = tests_base / test_name
-    if not src.exists():
-        raise FileNotFoundError(f"Input test not found: {src}")
-    dest_name = Path(test_name).name
-    dest = dest_dir / dest_name
-    if src.is_dir():
-        # Prefer explicit child matching test_name, else a single .bc in the dir.
-        child = src / dest_name
-        if child.is_file():
-            shutil.copy2(child, dest)
-            return
-        bcs = list(src.glob("*.bc"))
-        if len(bcs) == 1:
-            shutil.copy2(bcs[0], dest)
-            return
-        raise FileNotFoundError(
-            f"Directory {src} has no {dest_name} and not exactly one *.bc"
-        )
-    shutil.copy2(src, dest)
+def copy_input_bc(test_info: TestShInfo, dest_dir: Path) -> str:
+    """Copy the .bc from test.sh into dest_dir; return config input basename."""
+    dest_name = test_info.bc_path.name
+    shutil.copy2(test_info.bc_path, dest_dir / dest_name)
+    return dest_name
 
 
 def prepare_test_case(
@@ -146,7 +235,7 @@ def prepare_test_case(
     line: int,
     covered: str,
     hexes_sorted: list[str],
-    tests_base: Path,
+    new_tests: Path,
     out_parent: Path,
     template_interesting: str,
 ) -> tuple[bool, Path]:
@@ -161,9 +250,13 @@ def prepare_test_case(
             f"addresses on source line {line}; using {covered}; all: {detail}",
             file=sys.stderr,
         )
+
+    test_info = parse_test_sh(new_tests / test_name / "test.sh")
+    input_name = copy_input_bc(test_info, dest_dir)
+
     reduced_dir = (dest_dir / "reduced").resolve()
     config = {
-        "input": Path(test_name).name,
+        "input": input_name,
         "file": llvm_rel_source_path(file_col),
         "line": line,
         "replacement": "",
@@ -179,10 +272,14 @@ def prepare_test_case(
         json.dumps(config, indent=4) + "\n", encoding="utf-8"
     )
     (dest_dir / "interesting_ir.sh").write_text(
-        render_interesting_ir(template_interesting, covered),
+        render_interesting_ir(
+            template_interesting,
+            covered=covered,
+            llvm_bin=test_info.llvm_bin,
+            llc_flags=test_info.llc_flags,
+        ),
         encoding="utf-8",
     )
-    copy_input_bc(tests_base, test_name, dest_dir)
     (dest_dir / "interesting_ir.sh").chmod(0o755)
     return len(hexes_sorted) > 1, dest_dir
 
@@ -193,13 +290,13 @@ def main(argv: list[str] | None = None) -> int:
         "--csv",
         type=Path,
         required=True,
-        help="Coverage CSV: test_name, file, line, covered-points (e.g. diff/new_coverage.csv).",
+        help="Coverage CSV (test_name, file, line, covered-points).",
     )
     p.add_argument(
-        "--tests-base",
+        "--new-tests",
         type=Path,
         required=True,
-        help="Directory containing each test as <stem-from-csv>.bc (or that path as a dir).",
+        help="new_tests directory; each CSV test_name is a subdirectory with test.sh.",
     )
     p.add_argument(
         "--output",
@@ -211,20 +308,17 @@ def main(argv: list[str] | None = None) -> int:
         "--template-dir",
         type=Path,
         default=_repo_root() / "example" / "amd" / "new-test-1",
-        help="Example layout; interesting_ir.sh is used as a template (default: example/amd/new-test-1).",
+        help="Example layout; interesting_ir.sh is used as a template.",
     )
     p.add_argument(
         "--llvm-bin",
         type=Path,
         default=None,
-        help=(
-            "If set, run `python -m reduce --config <case>/config.json --llvm-bin ...` "
-            "after each prepared directory (same as scripts/reduce_amd_coverage_based.sh)."
-        ),
+        help="If set, run python -m reduce for each prepared case directory.",
     )
     args = p.parse_args(argv)
 
-    tests_base = args.tests_base.resolve()
+    new_tests = args.new_tests.resolve()
     llvm_bin = args.llvm_bin.resolve() if args.llvm_bin is not None else None
     out_parent = args.output.resolve()
     out_parent.mkdir(parents=True, exist_ok=True)
@@ -234,16 +328,10 @@ def main(argv: list[str] | None = None) -> int:
 
     with args.csv.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        expected = {"test_name", "file", "line"}
-        if reader.fieldnames is None or not expected.issubset(set(reader.fieldnames)):
+        expected = {"test_name", "file", "line", "covered-points"}
+        if reader.fieldnames is None or set(reader.fieldnames) != expected:
             print(
-                f"CSV must have columns {expected}, got {reader.fieldnames!r}",
-                file=sys.stderr,
-            )
-            return 2
-        if "covered-points" not in reader.fieldnames and "covered_addresses" not in reader.fieldnames:
-            print(
-                "CSV must include either 'covered-points' (preferred) or 'covered_addresses'",
+                f"CSV must have columns {sorted(expected)}, got {reader.fieldnames!r}",
                 file=sys.stderr,
             )
             return 2
@@ -258,9 +346,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Row {i}: bad line {row['line']!r}", file=sys.stderr)
             continue
         try:
-            covered, hexes_sorted = resolve_covered_hexes(
-                row.get("covered-points") or row.get("covered_addresses") or "",
-            )
+            covered, hexes_sorted = resolve_covered_hexes(row["covered-points"])
             amb, dest = prepare_test_case(
                 row_index=i,
                 test_name=row["test_name"].strip(),
@@ -268,7 +354,7 @@ def main(argv: list[str] | None = None) -> int:
                 line=line,
                 covered=covered,
                 hexes_sorted=hexes_sorted,
-                tests_base=tests_base,
+                new_tests=new_tests,
                 out_parent=out_parent,
                 template_interesting=template_interesting,
             )
@@ -303,8 +389,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             print(
-                f"Summary: each of the {ok} successful row(s) matched to a unique COVERED address "
-                "(one instrumentation site per file/source line).",
+                f"Summary: each of the {ok} successful row(s) matched to a unique COVERED "
+                "address (one instrumentation site per file/source line).",
                 file=sys.stderr,
             )
 
