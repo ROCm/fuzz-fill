@@ -12,15 +12,13 @@ SANCOV=$LLVM_BIN/sancov
 # All of these must appear as substrings in `sancov --print` for the new llc.*.sancov shard.
 COVERED_LIST="0x598701b;0x598703f"
 
-covdir=/tmp/coverage
-mkdir -p "$covdir"
-
+covdir=$(mktemp -d)
 before_tmp=$(mktemp)
 after_tmp=$(mktemp)
-trap 'rm -f "$before_tmp" "$after_tmp"' EXIT
+trap 'rm -f "$before_tmp" "$after_tmp"; rm -rf "$covdir"' EXIT
 find "$covdir" -maxdepth 1 -name 'llc.*.sancov' -type f 2>/dev/null | sort >"$before_tmp"
 
-UBSAN_OPTIONS="coverage=1:coverage_dir=/tmp/coverage" $LLC "$1"
+UBSAN_OPTIONS="coverage=1:coverage_dir=$covdir" $LLC "$1"
 
 find "$covdir" -maxdepth 1 -name 'llc.*.sancov' -type f 2>/dev/null | sort >"$after_tmp"
 

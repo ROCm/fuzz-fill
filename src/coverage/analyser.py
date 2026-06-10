@@ -28,11 +28,15 @@ class CoverageAnalyzer:
         baseline_coverage = pd.read_csv(self.baseline_coverage_file)
         llc_address_line_map = pd.read_csv(self.llc_address_line_map_file)
         
+        llc_address_line_map["line"] = llc_address_line_map["line"].astype(int)
         llc_address_line_map["point_llc"] = llc_address_line_map["point_llc"].map(lambda x: f"0x{x}" if pd.notna(x) else x)        
         llc_address_line_map["n_addresses_in_line"] = llc_address_line_map.groupby(["file", "line"], sort=False)["file"].transform("count")
         llc_address_line_map["file_line"] = llc_address_line_map["file"] + ":" + llc_address_line_map["line"].astype(str)
 
-        baseline_covered_lines = set(zip(baseline_coverage["file"], baseline_coverage["line"]))
+        baseline_covered_lines = {
+            (file, int(line))
+            for file, line in zip(baseline_coverage["file"], baseline_coverage["line"])
+        }
 
         self.new_coverage_csv.parent.mkdir(parents=True, exist_ok=True)
         with self.new_coverage_csv.open("w", newline="", encoding="utf-8") as new_coverage_csv_f:
@@ -79,7 +83,12 @@ class CoverageAnalyzer:
                 unique_locations = new_test_covered_lines[["file", "line"]].drop_duplicates()
                 
                 print(f"New test {test_name} has {len(unique_locations)} covered lines in target files")
-                keys = list(zip(unique_locations["file"], unique_locations["line"]))
+                keys = [
+                    (file, int(line))
+                    for file, line in zip(unique_locations["file"], unique_locations["line"])
+                ]
+                unique_locations = unique_locations.copy()
+                unique_locations["line"] = unique_locations["line"].astype(int)
 
                 # Compare new line coverage to baseline line coverage
                 # It is important to do this at the line level rather than the address level

@@ -83,6 +83,23 @@ class Sancov:
         return df
 
     @staticmethod
+    def full_line_keys(
+        df: pd.DataFrame, *, covered_column: str = "covered"
+    ) -> set[tuple[str, int]]:
+        """``(file, line)`` pairs where every instrumentation point row in *df* is covered."""
+        line_df = df.copy()
+        line_df["line"] = line_df["line"].astype(int)
+        agg = (
+            line_df.groupby(["file", "line"], as_index=False)
+            .agg(
+                n_covered=(covered_column, "sum"),
+                n_points=(covered_column, "count"),
+            )
+        )
+        full = agg[agg["n_covered"] == agg["n_points"]]
+        return set(zip(full["file"], full["line"]))
+
+    @staticmethod
     def get_coverage_summary_df(df: pd.DataFrame) -> pd.DataFrame:
         """Get the coverage summary dataframe."""
         agg = (
@@ -178,12 +195,18 @@ class Sancov:
         with symcov_path.open("w") as f:
             subprocess.run(cmd, check=True, stdout=f, stderr=subprocess.STDOUT)
 
-    def get_joint_coverage(self, other: Sancov, path_filter: str = DEFAULT_PATH_FILTER) -> pd.DataFrame:
+    def get_joint_coverage(self, other: Sancov, path_filter: str = DEFAULT_PATH_FILTER) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Joint coverage: rows from *this* symcov's ``point-symbol-info`` (hex ``address`` per point)
-        restricted to ``(file, function, line)`` that also appear in ``other``'s covered locations.
+        Build the LLC address map and baseline covered lines for *this* (llc) vs *other* (opt).
 
-        Returns a long table with columns ``file``, ``line``, and ``point_<suffix>`` (no ``coverage`` column; rows are fully covered lines only).
+        A baseline line is one where every instrumentation point on that line is covered
+        by llc and/or opt. Points are matched on ``(file, line, col)``; when both tools
+        instrument the same site, either tool hitting it counts. Ll-only and opt-only
+        points on the line are included as well.
+
+        Returns ``(llc_address_line_map, baseline_coverage)`` with columns
+        ``file``, ``line``, ``point_<suffix>`` on the map and ``file``, ``line``,
+        ``point_<suffix>`` on baseline rows (one row per instrumented point).
         """
         with self.get_merged_symcov_path().open(encoding="utf-8") as f:
             this_symcov = json.load(f)
@@ -195,21 +218,52 @@ class Sancov:
         other_df = self.get_coverage_df(other_symcov, path_filter)
 
         this_address_line_map = this_df[["file", "line", "point"]].copy()
-        this_address_line_map["point"].astype(str)
+        this_address_line_map["line"] = this_address_line_map["line"].astype(int)
         this_address_line_map.rename(columns={"point": f"point_{self.suffix}"}, inplace=True)
 
-        # Get joint coverage dataframe
-        joint_df = this_df.merge(other_df, on=["file", "line", "col"], how="inner", suffixes=("_this", "_other"))
-
-        joint_df["covered_either"] = joint_df["covered_this"] | joint_df["covered_other"]
-
         if self.coverage_mode == "full":
-            joint_df =joint_df.drop(columns=["col", "covered_other", "covered_this", "point_other"])
-            cov_summary_df = self.get_coverage_summary_df(joint_df)
-            fully_covered_df = cov_summary_df[cov_summary_df["coverage"] == "full"].copy()
-            fully_covered_df = fully_covered_df.drop(columns=["coverage"])
-            fully_covered_df.rename(columns={"point_this": f"point_{self.suffix}"}, inplace=True)
-            return (this_address_line_map, fully_covered_df)
-        
+            this_df = this_df.copy()
+            this_df["line"] = this_df["line"].astype(int)
+            other_df = other_df.copy()
+            other_df["line"] = other_df["line"].astype(int)
+
+            merged = this_df.merge(
+                other_df,
+                on=["file", "line", "col"],
+                how="outer",
+                suffixes=("_this", "_other"),
+            )
+            merged["covered_either"] = (
+                merged["covered_this"].fillna(0).astype(int)
+                | merged["covered_other"].fillna(0).astype(int)
+            )
+            baseline_lines = self.full_line_keys(
+                merged, covered_column="covered_either"
+            )
+
+            baseline_lines_df = pd.DataFrame(
+                list(baseline_lines), columns=["file", "line"]
+            )
+
+            llc_baseline = this_df.merge(baseline_lines_df, on=["file", "line"], how="inner")
+            llc_instrumented_lines = set(zip(this_df["file"], this_df["line"]))
+            opt_only_lines = baseline_lines - llc_instrumented_lines
+            opt_only_df = pd.DataFrame(list(opt_only_lines), columns=["file", "line"])
+            opt_baseline = other_df.merge(opt_only_df, on=["file", "line"], how="inner")
+
+            point_col = f"point_{self.suffix}"
+            baseline_coverage = pd.concat(
+                [
+                    llc_baseline[["file", "line", "point"]].rename(
+                        columns={"point": point_col}
+                    ),
+                    opt_baseline[["file", "line", "point"]].rename(
+                        columns={"point": point_col}
+                    ),
+                ],
+                ignore_index=True,
+            )
+            return (this_address_line_map, baseline_coverage)
+
         elif self.coverage_mode == "partial":
-            raise NotImplementedError(f"Coverage mode {self.coverage_mode} not implemented")  
+            raise NotImplementedError(f"Coverage mode {self.coverage_mode} not implemented")
