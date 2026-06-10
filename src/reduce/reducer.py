@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -10,6 +11,56 @@ from reduce.pass_registry import known_pass_ids, passes_from_ids
 from reduce.test import Test
 
 from reduce.config import PipelineStep
+
+_INTERESTING_SCRIPT_KEY_BY_PASS: dict[str, str] = {
+    "llvm_reduce_ir": "interesting",
+    "creduce": "interesting",
+    "llvm_reduce_mir": "interesting_mir",
+}
+
+
+def _interesting_script_for_final_check(
+    pipeline_steps: tuple[PipelineStep, ...],
+) -> Path | None:
+    """Return the interesting-ness script for the last reducing pass in the pipeline."""
+    for step in reversed(pipeline_steps):
+        key = _INTERESTING_SCRIPT_KEY_BY_PASS.get(step.id)
+        if key is None:
+            continue
+        script = step.options.get(key)
+        if script is None:
+            continue
+        if isinstance(script, Path):
+            return script
+        if isinstance(script, str):
+            return Path(script)
+        raise SystemExit(
+            f"pipeline step {step.id!r}: {key!r} must be a path string, "
+            f"got {type(script).__name__}."
+        )
+    return None
+
+
+def _verify_final_interesting(script: Path, candidate: Path) -> None:
+    script = script.resolve()
+    candidate = candidate.resolve()
+    if not script.is_file():
+        raise SystemExit(f"interesting-ness script not found: {script}")
+    r = subprocess.run(
+        [str(script), str(candidate)],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode == 0:
+        return
+    msg = (r.stderr or r.stdout or "").strip() or "(no output)"
+    raise SystemExit(
+        "final reduced file failed interesting-ness test "
+        f"({r.returncode}):\n"
+        f"  script: {script}\n"
+        f"  candidate: {candidate}\n"
+        f"{msg}"
+    )
 
 
 @dataclass(frozen=True)
@@ -62,4 +113,14 @@ class Reducer:
         final_path = self.output_dir / final_name
         shutil.copy2(test.test_path, final_path)
         print(f"[reduce] wrote {final_path}", flush=True)
+
+        interesting = _interesting_script_for_final_check(self._pipeline_steps)
+        if interesting is not None:
+            print(
+                f"[reduce] verifying final interesting-ness ({interesting})...",
+                flush=True,
+            )
+            _verify_final_interesting(interesting, final_path)
+            print("[reduce] final interesting-ness check passed", flush=True)
+
         return Test(final_path, test.interesting, test.file, test.line)
