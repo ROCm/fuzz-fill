@@ -100,6 +100,93 @@ class Sancov:
         return set(zip(full["file"], full["line"]))
 
     @staticmethod
+    def merged_llc_opt_coverage_df(
+        this_df: pd.DataFrame, other_df: pd.DataFrame
+    ) -> pd.DataFrame:
+        """Outer-merge llc and opt coverage rows on ``(file, line, col)`` with ``covered_either``."""
+        this_df = this_df.copy()
+        this_df["line"] = this_df["line"].astype(int)
+        other_df = other_df.copy()
+        other_df["line"] = other_df["line"].astype(int)
+        merged = this_df.merge(
+            other_df,
+            on=["file", "line", "col"],
+            how="outer",
+            suffixes=("_this", "_other"),
+        )
+        merged["covered_either"] = (
+            merged["covered_this"].fillna(0).astype(int)
+            | merged["covered_other"].fillna(0).astype(int)
+        )
+        return merged
+
+    @staticmethod
+    def jointly_fully_covered_line_keys_from_merged(
+        merged: pd.DataFrame,
+    ) -> set[tuple[str, int]]:
+        """``(file, line)`` where every merged row has ``covered_either`` set."""
+        return Sancov.full_line_keys(merged, covered_column="covered_either")
+
+    @staticmethod
+    def jointly_all_points_uncovered_line_keys_from_merged(
+        merged: pd.DataFrame,
+    ) -> set[tuple[str, int]]:
+        """``(file, line)`` where no merged row has ``covered_either`` set."""
+        agg = (
+            merged.groupby(["file", "line"], as_index=False)
+            .agg(
+                n_covered=("covered_either", "sum"),
+                n_points=("covered_either", "count"),
+            )
+        )
+        none_hit = agg[(agg["n_covered"] == 0) & (agg["n_points"] > 0)]
+        return set(zip(none_hit["file"], none_hit["line"]))
+
+    @staticmethod
+    def jointly_fully_covered_line_keys_from_llc_opt_dfs(
+        this_df: pd.DataFrame, other_df: pd.DataFrame
+    ) -> set[tuple[str, int]]:
+        merged = Sancov.merged_llc_opt_coverage_df(this_df, other_df)
+        return Sancov.jointly_fully_covered_line_keys_from_merged(merged)
+
+    @staticmethod
+    def jointly_all_points_uncovered_line_keys_from_llc_opt_dfs(
+        this_df: pd.DataFrame, other_df: pd.DataFrame
+    ) -> set[tuple[str, int]]:
+        merged = Sancov.merged_llc_opt_coverage_df(this_df, other_df)
+        return Sancov.jointly_all_points_uncovered_line_keys_from_merged(merged)
+
+    @staticmethod
+    def all_uncovered_line_point_addresses(
+        merged: pd.DataFrame,
+        line_keys: set[tuple[str, int]],
+    ) -> dict[tuple[str, int], list[str]]:
+        """Distinct sanitizer point ids (``point_this`` / ``point_other``) per ``(file, line)``."""
+        if not line_keys:
+            return {}
+        m = merged.copy()
+        m["line"] = m["line"].astype(int)
+        out: dict[tuple[str, int], list[str]] = {}
+        for f, ln in line_keys:
+            sub = m[(m["file"] == f) & (m["line"] == ln)]
+            ordered: list[str] = []
+            seen: set[str] = set()
+            for _, row in sub.iterrows():
+                for col in ("point_this", "point_other"):
+                    if col not in row.index:
+                        continue
+                    v = row[col]
+                    if pd.isna(v):
+                        continue
+                    s = str(v).strip()
+                    if not s or s in seen:
+                        continue
+                    seen.add(s)
+                    ordered.append(s)
+            out[(f, ln)] = ordered
+        return out
+
+    @staticmethod
     def get_coverage_summary_df(df: pd.DataFrame) -> pd.DataFrame:
         """Get the coverage summary dataframe."""
         agg = (
@@ -222,34 +309,29 @@ class Sancov:
         this_address_line_map.rename(columns={"point": f"point_{self.suffix}"}, inplace=True)
 
         if self.coverage_mode == "full":
-            this_df = this_df.copy()
-            this_df["line"] = this_df["line"].astype(int)
-            other_df = other_df.copy()
-            other_df["line"] = other_df["line"].astype(int)
-
-            merged = this_df.merge(
-                other_df,
-                on=["file", "line", "col"],
-                how="outer",
-                suffixes=("_this", "_other"),
-            )
-            merged["covered_either"] = (
-                merged["covered_this"].fillna(0).astype(int)
-                | merged["covered_other"].fillna(0).astype(int)
-            )
-            baseline_lines = self.full_line_keys(
-                merged, covered_column="covered_either"
+            merged_cov = Sancov.merged_llc_opt_coverage_df(this_df, other_df)
+            baseline_lines = Sancov.jointly_fully_covered_line_keys_from_merged(
+                merged_cov
             )
 
             baseline_lines_df = pd.DataFrame(
                 list(baseline_lines), columns=["file", "line"]
             )
 
-            llc_baseline = this_df.merge(baseline_lines_df, on=["file", "line"], how="inner")
-            llc_instrumented_lines = set(zip(this_df["file"], this_df["line"]))
+            this_df_merge = this_df.copy()
+            this_df_merge["line"] = this_df_merge["line"].astype(int)
+            other_df_merge = other_df.copy()
+            other_df_merge["line"] = other_df_merge["line"].astype(int)
+
+            llc_baseline = this_df_merge.merge(
+                baseline_lines_df, on=["file", "line"], how="inner"
+            )
+            llc_instrumented_lines = set(zip(this_df_merge["file"], this_df_merge["line"]))
             opt_only_lines = baseline_lines - llc_instrumented_lines
             opt_only_df = pd.DataFrame(list(opt_only_lines), columns=["file", "line"])
-            opt_baseline = other_df.merge(opt_only_df, on=["file", "line"], how="inner")
+            opt_baseline = other_df_merge.merge(
+                opt_only_df, on=["file", "line"], how="inner"
+            )
 
             point_col = f"point_{self.suffix}"
             baseline_coverage = pd.concat(
