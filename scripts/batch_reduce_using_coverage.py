@@ -7,6 +7,11 @@ CSV columns: test_name, file, line, covered-points
 (test_name is a directory under --new-tests containing test.sh).
 
 Each test.sh records the instrumented llc invocation (binary, flags, .bc path).
+Llvm flags on that command are copied into interesting_ir.sh and extract_*
+pipeline steps (config ``llc_O``). interesting_mir.sh uses the same COVERED
+sancov check as interesting_ir.sh. Use ``--mir-codegen-only`` when the pass
+under test is codegen-only (e.g. amdgpu-isel): resume from extracted MIR with
+``LLC_FLAGS`` instead of ``-run-pass``.
 Each output directory mirrors example/amd/new-test-1 (config.json,
 interesting_ir.sh, and the copied .bc). COVERED in interesting_ir.sh is the
 lowest hex among addresses for that row.
@@ -17,6 +22,13 @@ reduction artifacts stay inside the case directory.
 With --llvm-bin, runs python -m reduce --config <case>/config.json for each case.
 
 Use --n to process only the first N data rows of the CSV (after the header).
+
+Use --pipeline to choose reduction passes (comma-separated ids), e.g.
+``llvm_reduce_ir,extract_mir_before_pass,llvm_reduce_mir`` as in
+example/amd/si-i1-copies. When the pipeline includes extract_* or
+llvm_reduce_mir, pass --pass-under-test and --mtriple; use ``--mir-codegen-only``
+for ISel/codegen-only passes. Templates: ``interesting_mir_codegen.sh`` or
+``interesting_mir.sh`` (machine ``-run-pass``) under ``--template-dir``.
 """
 
 from __future__ import annotations
@@ -36,6 +48,21 @@ from pathlib import Path
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
+
+
+def _known_pass_ids() -> frozenset[str]:
+    src = str(_repo_root() / "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
+    from reduce.pass_registry import known_pass_ids
+
+    return known_pass_ids()
+
+
+_PASSES_NEEDING_EXTRACT_OPTS = frozenset(
+    {"extract_mir_before_pass", "extract_ir_before_pass"}
+)
+_PASSES_NEEDING_INTERESTING_MIR = frozenset({"llvm_reduce_mir"})
 
 
 def _reduce_subprocess_env() -> dict[str, str]:
@@ -222,6 +249,263 @@ def render_interesting_ir(
     return out
 
 
+def _llc_flags_to_llc_O(llc_flags: tuple[str, ...]) -> str:
+    return " ".join(llc_flags)
+
+
+def _mir_template_basename(*, mir_codegen_only: bool) -> str:
+    return "interesting_mir_codegen.sh" if mir_codegen_only else "interesting_mir.sh"
+
+
+def _apply_mir_template_common(
+    template_text: str,
+    *,
+    template_name: str,
+    covered: str,
+    llvm_bin: Path,
+) -> str:
+    out, n = re.subn(
+        r'^LLVM_BIN=.*$',
+        f'LLVM_BIN={llvm_bin}',
+        template_text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if n != 1:
+        raise ValueError(
+            f'Template {template_name} must contain exactly one LLVM_BIN=... line.'
+        )
+
+    def repl_covered(m: re.Match[str]) -> str:
+        return f'COVERED="{covered}"'
+
+    out, n = re.subn(
+        r'^COVERED="[^"]*"',
+        repl_covered,
+        out,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if n != 1:
+        raise ValueError(
+            f'Template {template_name} must contain exactly one COVERED="..." line.'
+        )
+    return out
+
+
+def _apply_mir_template_llc_flags(
+    out: str,
+    *,
+    template_name: str,
+    llc_flags: tuple[str, ...],
+) -> str:
+    flags_value = " ".join(llc_flags)
+    if re.search(r'^LLC_FLAGS=', out, flags=re.MULTILINE):
+        out, n = re.subn(
+            r'^LLC_FLAGS=.*$',
+            f'LLC_FLAGS="{flags_value}"',
+            out,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if n != 1:
+            raise ValueError(f"Failed to set LLC_FLAGS in {template_name}.")
+    else:
+        out, n = re.subn(
+            r'^(LLC=\$LLVM_BIN/llc)$',
+            rf'\1\nLLC_FLAGS="{flags_value}"',
+            out,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if n != 1:
+            raise ValueError(
+                f'Template {template_name} must contain LLC=$LLVM_BIN/llc '
+                "or an LLC_FLAGS= line."
+            )
+    out, n = re.subn(
+        r'(\$LLC)\s+(\$LLC_FLAGS\s+)?',
+        r'\1 $LLC_FLAGS ',
+        out,
+        count=1,
+    )
+    if n != 1:
+        raise ValueError(
+            f'Template {template_name} must invoke llc as $LLC [$LLC_FLAGS] ... "$1".'
+        )
+    return out
+
+
+def _apply_mir_template_mtriple(out: str, *, template_name: str, mtriple: str) -> str:
+    out, n = re.subn(
+        r'-mtriple=[^\s"]+',
+        f'-mtriple={mtriple}',
+        out,
+        count=1,
+    )
+    if n != 1:
+        raise ValueError(
+            f'Template {template_name} must contain -mtriple=<triple> on the llc line.'
+        )
+    return out
+
+
+def render_interesting_mir(
+    template_text: str,
+    *,
+    template_name: str,
+    covered: str,
+    llvm_bin: Path,
+    mtriple: str,
+    mir_codegen_only: bool,
+    llc_flags: tuple[str, ...],
+    pass_under_test: str | None,
+) -> str:
+    out = _apply_mir_template_common(
+        template_text,
+        template_name=template_name,
+        covered=covered,
+        llvm_bin=llvm_bin,
+    )
+    out = _apply_mir_template_mtriple(out, template_name=template_name, mtriple=mtriple)
+
+    if mir_codegen_only:
+        return _apply_mir_template_llc_flags(
+            out, template_name=template_name, llc_flags=llc_flags
+        )
+
+    if pass_under_test is None:
+        raise ValueError("pass_under_test is required for machine-pass interesting_mir.sh.")
+    out, n = re.subn(
+        r'-run-pass=[^\s"]+',
+        f'-run-pass={pass_under_test}',
+        out,
+        count=1,
+    )
+    if n != 1:
+        raise ValueError(
+            f'Template {template_name} must contain -run-pass=<pass> on the llc line.'
+        )
+    return out
+
+
+def parse_pipeline_arg(value: str) -> list[str]:
+    ids = [p.strip() for p in value.split(",") if p.strip()]
+    if not ids:
+        raise ValueError("--pipeline must list at least one pass id.")
+    known = _known_pass_ids()
+    bad = [p for p in ids if p not in known]
+    if bad:
+        raise ValueError(
+            f"Unknown pipeline pass id(s): {', '.join(bad)}. "
+            f"Known ids: {', '.join(sorted(known))}."
+        )
+    return ids
+
+
+def creduce_interesting_script(pass_ids: list[str], creduce_index: int) -> str:
+    """Interesting script for creduce: match the artifact produced by the prior step."""
+    if creduce_index <= 0:
+        return "interesting_ir.sh"
+    prev = pass_ids[creduce_index - 1]
+    if prev == "llvm_reduce_mir":
+        return "interesting_mir.sh"
+    return "interesting_ir.sh"
+
+
+def build_pipeline_steps(
+    pass_ids: list[str],
+    *,
+    pass_under_test: str | None,
+    mtriple: str | None,
+    llc_flags: tuple[str, ...],
+    extract_mir_output: str | None,
+    extract_ir_output: str | None,
+    creduce_n: int | None,
+) -> list[dict]:
+    steps: list[dict] = []
+    llc_O = _llc_flags_to_llc_O(llc_flags)
+    for i, pid in enumerate(pass_ids):
+        if pid == "llvm_reduce_ir":
+            steps.append(
+                {
+                    "id": "llvm_reduce_ir",
+                    "parameters": {"interesting": "interesting_ir.sh"},
+                }
+            )
+        elif pid == "llvm_reduce_mir":
+            steps.append(
+                {
+                    "id": "llvm_reduce_mir",
+                    "parameters": {"interesting_mir": "interesting_mir.sh"},
+                }
+            )
+        elif pid == "extract_mir_before_pass":
+            params: dict[str, str] = {
+                "pass_under_test": pass_under_test or "",
+                "mtriple": mtriple or "",
+                "llc_O": llc_O,
+            }
+            if extract_mir_output:
+                params["extract_mir_output"] = extract_mir_output
+            steps.append({"id": pid, "parameters": params})
+        elif pid == "extract_ir_before_pass":
+            params = {
+                "pass_under_test": pass_under_test or "",
+                "mtriple": mtriple or "",
+                "llc_O": llc_O,
+            }
+            if extract_ir_output:
+                params["extract_ir_before_output"] = extract_ir_output
+            steps.append({"id": pid, "parameters": params})
+        elif pid == "creduce":
+            params: dict[str, str | int] = {
+                "interesting": creduce_interesting_script(pass_ids, i),
+            }
+            if creduce_n is not None:
+                params["n"] = creduce_n
+            steps.append({"id": "creduce", "parameters": params})
+        elif pid == "snapshot":
+            steps.append({"id": "snapshot"})
+        else:
+            raise ValueError(f"Unhandled pass id: {pid}")
+    return steps
+
+
+def validate_pipeline_cli(
+    pass_ids: list[str],
+    *,
+    pass_under_test: str | None,
+    mtriple: str | None,
+    template_dir: Path,
+    mir_codegen_only: bool,
+) -> None:
+    needs_extract = _PASSES_NEEDING_EXTRACT_OPTS & set(pass_ids)
+    if needs_extract:
+        if not pass_under_test:
+            raise ValueError(
+                f"--pass-under-test is required when the pipeline includes "
+                f"{', '.join(sorted(needs_extract))}."
+            )
+        if not mtriple:
+            raise ValueError(
+                f"--mtriple is required when the pipeline includes "
+                f"{', '.join(sorted(needs_extract))}."
+            )
+    if _PASSES_NEEDING_INTERESTING_MIR & set(pass_ids):
+        if not pass_under_test:
+            raise ValueError(
+                "--pass-under-test is required when the pipeline includes llvm_reduce_mir."
+            )
+        mir_name = _mir_template_basename(mir_codegen_only=mir_codegen_only)
+        mir_template = template_dir / mir_name
+        if not mir_template.is_file():
+            raise ValueError(
+                f"Pipeline includes llvm_reduce_mir but {mir_template} is missing. "
+                f"Use --template-dir with {mir_name} (e.g. example/amd/new-test-1)."
+            )
+
+
 def copy_input_bc(test_info: TestShInfo, dest_dir: Path) -> str:
     """Copy the .bc from test.sh into dest_dir; return config input basename."""
     dest_name = test_info.bc_path.name
@@ -240,6 +524,12 @@ def prepare_test_case(
     new_tests: Path,
     out_parent: Path,
     template_interesting: str,
+    pipeline_steps: list[dict],
+    template_interesting_mir: str | None,
+    mir_template_name: str | None,
+    pass_under_test: str | None,
+    mtriple: str | None,
+    mir_codegen_only: bool,
 ) -> tuple[bool, Path]:
     short = Path(test_name).stem[:8] if test_name else f"r{row_index}"
     dest_dir = out_parent / f"t-{row_index:05d}-{short}"
@@ -263,12 +553,7 @@ def prepare_test_case(
         "line": line,
         "replacement": "",
         "output_dir": str(reduced_dir),
-        "pipeline": [
-            {
-                "id": "llvm_reduce_ir",
-                "parameters": {"interesting": "interesting_ir.sh"},
-            }
-        ],
+        "pipeline": pipeline_steps,
     }
     (dest_dir / "config.json").write_text(
         json.dumps(config, indent=4) + "\n", encoding="utf-8"
@@ -283,6 +568,27 @@ def prepare_test_case(
         encoding="utf-8",
     )
     (dest_dir / "interesting_ir.sh").chmod(0o755)
+
+    if template_interesting_mir is not None:
+        if pass_under_test is None or mtriple is None:
+            raise ValueError(
+                "pass_under_test and mtriple are required to generate interesting_mir.sh."
+            )
+        (dest_dir / "interesting_mir.sh").write_text(
+            render_interesting_mir(
+                template_interesting_mir,
+                template_name=mir_template_name or "interesting_mir.sh",
+                covered=covered,
+                llvm_bin=test_info.llvm_bin,
+                mtriple=mtriple,
+                mir_codegen_only=mir_codegen_only,
+                llc_flags=test_info.llc_flags,
+                pass_under_test=pass_under_test,
+            ),
+            encoding="utf-8",
+        )
+        (dest_dir / "interesting_mir.sh").chmod(0o755)
+
     return len(hexes_sorted) > 1, dest_dir
 
 
@@ -310,7 +616,67 @@ def main(argv: list[str] | None = None) -> int:
         "--template-dir",
         type=Path,
         default=_repo_root() / "example" / "amd" / "new-test-1",
-        help="Example layout; interesting_ir.sh is used as a template.",
+        help="Directory containing interesting_ir.sh (coverage-based template).",
+    )
+    p.add_argument(
+        "--pipeline",
+        default="llvm_reduce_ir",
+        metavar="PASS_IDS",
+        help=(
+            "Comma-separated reduce pass ids for config.json pipeline "
+            "(default: llvm_reduce_ir). Examples: llvm_reduce_ir,creduce; "
+            "llvm_reduce_ir,extract_mir_before_pass,llvm_reduce_mir."
+        ),
+    )
+    p.add_argument(
+        "--with-creduce",
+        action="store_true",
+        help=(
+            "Append creduce to --pipeline if not already present (creduce uses "
+            "interesting_ir.sh when it follows llvm_reduce_ir)."
+        ),
+    )
+    p.add_argument(
+        "--creduce-n",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Pass creduce --n (parallelism) for creduce pipeline steps.",
+    )
+    p.add_argument(
+        "--pass-under-test",
+        default=None,
+        metavar="PASS",
+        help=(
+            "LLVM pass id for extract_*_before_pass (required with those passes). "
+            "Also sets -run-pass= in interesting_mir.sh unless --mir-codegen-only."
+        ),
+    )
+    p.add_argument(
+        "--mtriple",
+        default=None,
+        help="Target triple for extract_*_before_pass and interesting_mir.sh.",
+    )
+    p.add_argument(
+        "--mir-codegen-only",
+        action="store_true",
+        help=(
+            "interesting_mir.sh resumes codegen from MIR (LLC_FLAGS, -o /dev/null) "
+            "instead of llc -run-pass= (for ISel/codegen-only passes such as "
+            "amdgpu-isel). Uses interesting_mir_codegen.sh from --template-dir."
+        ),
+    )
+    p.add_argument(
+        "--extract-mir-output",
+        default=None,
+        metavar="BASENAME",
+        help="Optional extract_mir_output basename for extract_mir_before_pass.",
+    )
+    p.add_argument(
+        "--extract-ir-output",
+        default=None,
+        metavar="BASENAME",
+        help="Optional extract_ir_before_output basename for extract_ir_before_pass.",
     )
     p.add_argument(
         "--llvm-bin",
@@ -336,8 +702,44 @@ def main(argv: list[str] | None = None) -> int:
     out_parent = args.output.resolve()
     out_parent.mkdir(parents=True, exist_ok=True)
 
-    template_path = args.template_dir / "interesting_ir.sh"
+    template_dir = args.template_dir.resolve()
+    template_path = template_dir / "interesting_ir.sh"
     template_interesting = template_path.read_text(encoding="utf-8")
+
+    try:
+        pass_ids = parse_pipeline_arg(args.pipeline)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+
+    if args.with_creduce and "creduce" not in pass_ids:
+        pass_ids.append("creduce")
+
+    if args.creduce_n is not None and args.creduce_n < 1:
+        print("--creduce-n must be a positive integer.", file=sys.stderr)
+        return 2
+
+    try:
+        validate_pipeline_cli(
+            pass_ids,
+            pass_under_test=args.pass_under_test,
+            mtriple=args.mtriple,
+            template_dir=template_dir,
+            mir_codegen_only=args.mir_codegen_only,
+        )
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+
+    mir_template_name: str | None = None
+    template_interesting_mir: str | None = None
+    if "llvm_reduce_mir" in pass_ids:
+        mir_template_name = _mir_template_basename(
+            mir_codegen_only=args.mir_codegen_only
+        )
+        template_interesting_mir = (
+            template_dir / mir_template_name
+        ).read_text(encoding="utf-8")
 
     with args.csv.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -363,6 +765,16 @@ def main(argv: list[str] | None = None) -> int:
             continue
         try:
             covered, hexes_sorted = resolve_covered_hexes(row["covered-points"])
+            test_info = parse_test_sh(new_tests / row["test_name"].strip() / "test.sh")
+            row_pipeline = build_pipeline_steps(
+                pass_ids,
+                pass_under_test=args.pass_under_test,
+                mtriple=args.mtriple,
+                llc_flags=test_info.llc_flags,
+                extract_mir_output=args.extract_mir_output,
+                extract_ir_output=args.extract_ir_output,
+                creduce_n=args.creduce_n,
+            )
             amb, dest = prepare_test_case(
                 row_index=i,
                 test_name=row["test_name"].strip(),
@@ -373,6 +785,12 @@ def main(argv: list[str] | None = None) -> int:
                 new_tests=new_tests,
                 out_parent=out_parent,
                 template_interesting=template_interesting,
+                pipeline_steps=row_pipeline,
+                template_interesting_mir=template_interesting_mir,
+                mir_template_name=mir_template_name,
+                pass_under_test=args.pass_under_test,
+                mtriple=args.mtriple,
+                mir_codegen_only=args.mir_codegen_only,
             )
             if llvm_bin is not None:
                 print(
