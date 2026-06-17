@@ -1,8 +1,11 @@
 #!/bin/bash
+# Interesting-ness for llvm-reduce -x=mir when MIR was extracted with -stop-before=<pass>.
+# Resume codegen from the snapshot (do not use -run-pass for codegen-only passes like amdgpu-isel).
 
 LLVM_BIN=/home/agorzyns/local/dev/llvm-project/build-amdgpu-bb/bin
 
 LLC=$LLVM_BIN/llc
+LLC_FLAGS="-O3"
 SANCOV=$LLVM_BIN/sancov
 
 COVERED="0x61d4b9a"
@@ -13,7 +16,7 @@ after_tmp=$(mktemp)
 trap 'rm -f "$before_tmp" "$after_tmp"; rm -rf "$covdir"' EXIT
 find "$covdir" -maxdepth 1 -name 'llc.*.sancov' -type f 2>/dev/null | sort >"$before_tmp"
 
-UBSAN_OPTIONS="coverage=1:coverage_dir=$covdir" $LLC "$1"
+UBSAN_OPTIONS="coverage=1:coverage_dir=$covdir" $LLC $LLC_FLAGS -verify-machineinstrs -mtriple=amdgcn-amd-amdhsa -o /dev/null "$1"
 
 find "$covdir" -maxdepth 1 -name 'llc.*.sancov' -type f 2>/dev/null | sort >"$after_tmp"
 
@@ -34,10 +37,7 @@ else
   echo "COVERED ($COVERED) is NOT present in sancov --print output ($sancov_file)." >&2
 fi
 
-# Interesting: COVERED appears in sancov --print.
 if [[ "$covered_present" -eq 1 ]]; then
   exit 0
 fi
-
-# Not interesting: COVERED missing, or no .sancov / no sancov binary.
 exit 1

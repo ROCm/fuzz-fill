@@ -1,4 +1,6 @@
 #!/bin/bash
+# Interesting-ness for llvm-reduce -x=mir via -run-pass (machine passes only).
+# For codegen-only passes (e.g. amdgpu-isel), use interesting_mir_codegen.sh instead.
 
 LLVM_BIN=/home/agorzyns/local/dev/llvm-project/build-amdgpu-bb/bin
 
@@ -13,7 +15,7 @@ after_tmp=$(mktemp)
 trap 'rm -f "$before_tmp" "$after_tmp"; rm -rf "$covdir"' EXIT
 find "$covdir" -maxdepth 1 -name 'llc.*.sancov' -type f 2>/dev/null | sort >"$before_tmp"
 
-UBSAN_OPTIONS="coverage=1:coverage_dir=$covdir" $LLC "$1"
+UBSAN_OPTIONS="coverage=1:coverage_dir=$covdir" $LLC -verify-machineinstrs -mtriple=amdgcn-amd-amdhsa -run-pass=amdgpu-isel "$1"
 
 find "$covdir" -maxdepth 1 -name 'llc.*.sancov' -type f 2>/dev/null | sort >"$after_tmp"
 

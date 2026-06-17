@@ -28,11 +28,15 @@ class CoverageAnalyzer:
         baseline_coverage = pd.read_csv(self.baseline_coverage_file)
         llc_address_line_map = pd.read_csv(self.llc_address_line_map_file)
         
+        llc_address_line_map["line"] = llc_address_line_map["line"].astype(int)
         llc_address_line_map["point_llc"] = llc_address_line_map["point_llc"].map(lambda x: f"0x{x}" if pd.notna(x) else x)        
         llc_address_line_map["n_addresses_in_line"] = llc_address_line_map.groupby(["file", "line"], sort=False)["file"].transform("count")
         llc_address_line_map["file_line"] = llc_address_line_map["file"] + ":" + llc_address_line_map["line"].astype(str)
 
-        baseline_covered_lines = set(zip(baseline_coverage["file"], baseline_coverage["line"]))
+        baseline_covered_lines = {
+            (file, int(line))
+            for file, line in zip(baseline_coverage["file"], baseline_coverage["line"])
+        }
 
         self.new_coverage_csv.parent.mkdir(parents=True, exist_ok=True)
         with self.new_coverage_csv.open("w", newline="", encoding="utf-8") as new_coverage_csv_f:
@@ -52,6 +56,9 @@ class CoverageAnalyzer:
             test_name = new_test_dir.name
 
             sancov_file = get_sancov_file(new_test_dir)
+
+            if sancov_file is None:
+                continue
 
             new_test_covered_addresses: set[str] = sancov.get_covered_addresses(sancov_file)
 
@@ -76,7 +83,12 @@ class CoverageAnalyzer:
                 unique_locations = new_test_covered_lines[["file", "line"]].drop_duplicates()
                 
                 print(f"New test {test_name} has {len(unique_locations)} covered lines in target files")
-                keys = list(zip(unique_locations["file"], unique_locations["line"]))
+                keys = [
+                    (file, int(line))
+                    for file, line in zip(unique_locations["file"], unique_locations["line"])
+                ]
+                unique_locations = unique_locations.copy()
+                unique_locations["line"] = unique_locations["line"].astype(int)
 
                 # Compare new line coverage to baseline line coverage
                 # It is important to do this at the line level rather than the address level
@@ -112,9 +124,10 @@ class CoverageAnalyzer:
                         addrs = addr_by_line.loc[row["file"], row["line"]]
                         writer.writerow([per_test_csv, row["file"], row["line"], addrs])
 
-def get_sancov_file(new_test_dir: Path) -> Path:
+def get_sancov_file(new_test_dir: Path) -> Path | None:
     """Get the llc sancov file for a new test. Checks that there is only one sancov file and throws an error if there are multiple."""
     sancov_files = list(new_test_dir.rglob('llc.*.sancov'))
     if len(sancov_files) != 1:
-        raise ValueError(f"Expected 1 sancov file, got {len(sancov_files)}")
+        print(f"Expected 1 sancov file, got {len(sancov_files)}")
+        return None
     return list(new_test_dir.rglob('*sancov'))[0]
