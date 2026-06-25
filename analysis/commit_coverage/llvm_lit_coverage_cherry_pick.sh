@@ -3,8 +3,8 @@
 # (UBSAN test env + script/data path updates) on top.
 #
 # Usage:
-#   COMMIT=<sha> ./scripts/llvm_lit_coverage_cherry_pick.sh
-#   ./scripts/llvm_lit_coverage_cherry_pick.sh <sha>
+#   COMMIT=<sha> ./llvm_lit_coverage_cherry_pick.sh
+#   ./llvm_lit_coverage_cherry_pick.sh <sha>
 #
 # Optional environment:
 #   LLVM_REPO   — path to llvm-project (default: sibling of fuzz-fill)
@@ -14,7 +14,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FUZZ_FILL_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# This file lives at fuzz-fill/analysis/commit_coverage/
+FUZZ_FILL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 LLVM_REPO="${LLVM_REPO:-$(cd "${FUZZ_FILL_ROOT}/../llvm-project" && pwd)}"
 
 COMMIT="${COMMIT:-${1:-}}"
