@@ -1,5 +1,5 @@
 #!/bin/bash
-# For each LLVM base revision: cherry-pick lit-coverage helpers, rebuild amdgpu BB,
+# For each LLVM base revision: cherry-pick lit-coverage helpers, rebuild BB tools,
 # then run fuzz-fill coverage + diff + commit-lines with a per-commit output tree.
 #
 # Requires a clean llvm-project working tree at the start of each iteration
@@ -10,19 +10,27 @@
 #   COMMITS_FILE=/path/to/commits.txt ./run_commit_lines_coverage_for_commits.sh
 #     (one revision per line; # starts a comment; blank lines ignored)
 #
+# Example (AMDGPU):
+#   BUILD_SCRIPT=build-amdgpu-bb.sh BUILD_DIR=build-amdgpu-bb \
+#     FILTER=CodeGen/AMDGPU PATH_FILTER=llvm/lib/Target/AMDGPU \
+#     COMMITS_FILE=commits.txt ./run_commit_lines_coverage_for_commits.sh
+#
 # Optional environment:
 #   FUZZ_FILL_ROOT     — fuzz-fill repo root (default: ../.. from this script)
 #   LLVM_REPO          — llvm-project path (default: sibling of fuzz-fill)
 #   OUTPUT_ROOT_BASE   — under this, each run uses bb_coverage_commit_lines_<short_sha>/
 #                        (default: $FUZZ_FILL_ROOT/data/coverage_output)
-#   FILTER             — lit filter (default: CodeGen/AMDGPU)
+#   FILTER             — lit filter (default: CodeGen/SPIRV)
+#   PATH_FILTER        — symcov path substring (default: llvm/lib/Target/SPIRV)
 #   LLVM_BIN           — dir with clang for LIT (default: $LLVM_REPO/build/bin)
-#   INSTRUMENTED_BIN_DIR — sancov-instrumented tools (default: $LLVM_REPO/build-amdgpu-bb/bin)
+#   BUILD_SCRIPT       — BB build script under llvm-project (default: build-spirv-bb.sh)
+#   BUILD_DIR          — instrumented build tree name/dir under llvm-project (default: build-spirv-bb)
+#   INSTRUMENTED_BIN_DIR — sancov-instrumented tools (default: $LLVM_REPO/$BUILD_DIR/bin)
 #   SKIP_CHERRY_PICK   — if 1, only build + coverage (HEAD must already be set up)
 #   SKIP_BUILD         — if 1, only run coverage steps
 #
 # Each commit output folder includes resource_stats.csv: wall/user/sys CPU and max RSS
-# (from GNU /usr/bin/time) for ./build-amdgpu-bb.sh and `python -m coverage test-suite`,
+# (from GNU /usr/bin/time) for BUILD_SCRIPT and `python -m coverage test-suite`,
 # plus total wall time for the full iteration (cherry-pick through commit-lines).
 
 set -euo pipefail
@@ -31,14 +39,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHERRY_SCRIPT="${SCRIPT_DIR}/llvm_lit_coverage_cherry_pick.sh"
 FUZZ_FILL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 LLVM_REPO="${LLVM_REPO:-$(cd "${FUZZ_FILL_ROOT}/../llvm-project" && pwd)}"
-OUTPUT_ROOT_BASE="${OUTPUT_ROOT_BASE:-${FUZZ_FILL_ROOT}/data/coverage_output}"
-FILTER="${FILTER:-CodeGen/AMDGPU}"
+OUTPUT_ROOT_BASE="${OUTPUT_ROOT_BASE:-${FUZZ_FILL_ROOT}/data/coverage_output/spirv_20_lines}"
+FILTER="${FILTER:-CodeGen/SPIRV}"
+PATH_FILTER="${PATH_FILTER:-llvm/lib/Target/SPIRV}"
 LLVM_BIN="${LLVM_BIN:-${LLVM_REPO}/build/bin}"
-INSTRUMENTED_BIN_DIR="${INSTRUMENTED_BIN_DIR:-${LLVM_REPO}/build-amdgpu-bb/bin}"
+BUILD_SCRIPT="${BUILD_SCRIPT:-build-spirv-bb.sh}"
+BUILD_DIR="${BUILD_DIR:-build-spirv-bb}"
+if [[ "${BUILD_SCRIPT}" != /* ]]; then
+	BUILD_SCRIPT="${LLVM_REPO}/${BUILD_SCRIPT}"
+fi
+BUILD_SCRIPT_DISPLAY="${BUILD_SCRIPT#"${LLVM_REPO}/"}"
+INSTRUMENTED_BIN_DIR="${INSTRUMENTED_BIN_DIR:-${LLVM_REPO}/${BUILD_DIR}/bin}"
 SKIP_CHERRY_PICK="${SKIP_CHERRY_PICK:-0}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 
-COMMITS_FILE="${COMMITS_FILE:-${SCRIPT_DIR}/commits.txt}"
+COMMITS_FILE="${COMMITS_FILE:-${SCRIPT_DIR}/commits_spirv_at_least_20_lines.txt}"
 
 COMMIT_ARRAY=()
 if [[ -n "${COMMITS_FILE:-}" ]]; then
@@ -75,8 +90,8 @@ if [[ ! -f "${CHERRY_SCRIPT}" ]]; then
 	exit 1
 fi
 
-if [[ ! -f "${LLVM_REPO}/build-amdgpu-bb.sh" ]]; then
-	echo "Error: expected ${LLVM_REPO}/build-amdgpu-bb.sh" >&2
+if [[ ! -f "${BUILD_SCRIPT}" ]]; then
+	echo "Error: BUILD_SCRIPT not found: ${BUILD_SCRIPT}" >&2
 	exit 1
 fi
 
@@ -138,16 +153,16 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 	fi
 
 	if [[ "${SKIP_BUILD}" != "1" ]]; then
-		echo "Building in ${LLVM_REPO} (./build-amdgpu-bb.sh) ..."
+		echo "Building in ${LLVM_REPO} (./${BUILD_SCRIPT_DISPLAY} -> ${BUILD_DIR}) ..."
 		BUILD_STAT="$(mktemp "${OUT}/.build_stats.XXXXXX")"
-		run_gnu_timed "${BUILD_STAT}" bash -lc "cd \"${LLVM_REPO}\" && exec ./build-amdgpu-bb.sh"
+		run_gnu_timed "${BUILD_STAT}" bash -lc "cd \"${LLVM_REPO}\" && exec ./${BUILD_SCRIPT_DISPLAY}"
 		if [[ -n "${BUILD_STAT}" && -s "${BUILD_STAT}" ]]; then
 			IFS=',' read -r BUILD_WALL BUILD_USER BUILD_SYS BUILD_RSS <"${BUILD_STAT}" || true
 		fi
 		rm -f "${BUILD_STAT}"
 		BUILD_STAT=""
 	else
-		echo "SKIP_BUILD=1 — not running build-amdgpu-bb.sh"
+		echo "SKIP_BUILD=1 — not running ${BUILD_SCRIPT_DISPLAY}"
 	fi
 
 	mkdir -p "${ADDED_LINES_DIR}" "${COMMIT_LINES_REPORT_DIR}"
@@ -160,7 +175,8 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 		--output-dir "${TEST_SUITE_OUTPUT_DIR}" \
 		--llvm-bin "${LLVM_BIN}" \
 		--instrumented-bin "${INSTRUMENTED_BIN_DIR}" \
-		--lit-filter "${FILTER}"
+		--lit-filter "${FILTER}" \
+		--path-filter "${PATH_FILTER}"
 	if [[ -n "${TS_STAT}" && -s "${TS_STAT}" ]]; then
 		IFS=',' read -r TS_WALL TS_USER TS_SYS TS_RSS <"${TS_STAT}" || true
 	fi
@@ -178,7 +194,8 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 		--output-dir "${COMMIT_LINES_REPORT_DIR}" \
 		--test-suite-output-dir "${TEST_SUITE_OUTPUT_DIR}" \
 		--llvm-repo "${LLVM_REPO}" \
-		--added-lines-csv "${ADDED_LINES_DIR}/added_lines.csv"
+		--added-lines-csv "${ADDED_LINES_DIR}/added_lines.csv" \
+		--path-filter "${PATH_FILTER}"
 
 	ITER_END_SEC="$(date +%s)"
 	TOTAL_WALL_SEC="$((ITER_END_SEC - ITER_START_SEC))"

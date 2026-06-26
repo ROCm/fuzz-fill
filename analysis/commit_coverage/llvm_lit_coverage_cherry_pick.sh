@@ -27,9 +27,10 @@ if [[ -z "${COMMIT}" ]]; then
 	exit 1
 fi
 
-# Oldest first — same pair as lit-coverage vs local main (adjust if those SHAs change).
+# Oldest first — same trio as lit-coverage vs local main (adjust if those SHAs change).
 CHERRY1="${CHERRY1:-c6e28fc17076}"
 CHERRY2="${CHERRY2:-cfbb3c44c5fd}"
+CHERRY3="${CHERRY3:-ecd331b81c51}"
 
 if [[ ! -d "${LLVM_REPO}/.git" ]]; then
 	echo "Error: LLVM_REPO is not a git repo: ${LLVM_REPO}" >&2
@@ -51,8 +52,8 @@ else
 	git -C "${LLVM_REPO}" checkout "${COMMIT}"
 fi
 
-echo "Cherry-picking ${CHERRY1} then ${CHERRY2}"
-git -C "${LLVM_REPO}" cherry-pick "${CHERRY1}" "${CHERRY2}"
+echo "Cherry-picking ${CHERRY1}, ${CHERRY2}, then ${CHERRY3}"
+git -C "${LLVM_REPO}" cherry-pick "${CHERRY1}" "${CHERRY2}" "${CHERRY3}"
 
 echo "Done. HEAD is now:"
 git -C "${LLVM_REPO}" log -1 --oneline

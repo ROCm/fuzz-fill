@@ -48,6 +48,12 @@ def main():
         help="Path to the coverage-instrumented LLVM bin directory")
     p_test_suite.add_argument("--lit-filter", type=str, default=None,
         help="Prefix passed to llvm-lit as --filter=<PREFIX>")
+    p_test_suite.add_argument(
+        "--path-filter",
+        type=str,
+        default=DEFAULT_PATH_FILTER,
+        help="Substring filter on symcov file paths when aggregating coverage.",
+    )
 
     p_new_tests.add_argument("--instrumented-bin", type=Path, required=True, 
         help="Path to the coverage-instrumented LLVM bin directory")
@@ -104,10 +110,13 @@ def main():
 
     if args.subcmd == "test-suite":
         print("Getting baseline coverage for the test suite")
-        test_runner = TestRunner(mode="lit", 
-            filepaths=filepaths, 
-            lit_filter=args.lit_filter, 
-            debug=args.debug)
+        test_runner = TestRunner(
+            mode="lit",
+            filepaths=filepaths,
+            lit_filter=args.lit_filter,
+            path_filter=args.path_filter,
+            debug=args.debug,
+        )
         test_runner.run()
 
     elif args.subcmd == "new-tests":

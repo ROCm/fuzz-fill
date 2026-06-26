@@ -6,7 +6,7 @@ import subprocess
 import pandas as pd
 from pathlib import Path
 
-from coverage.constants import DEFAULT_LIT_FILTER, TEST_FLAGS
+from coverage.constants import DEFAULT_LIT_FILTER, DEFAULT_PATH_FILTER, TEST_FLAGS
 from coverage.filepaths import Filepaths
 from coverage.sancov import Sancov
 
@@ -21,6 +21,7 @@ class TestRunner:
         mode: str,
         filepaths: Filepaths,
         lit_filter: str | None = None,
+        path_filter: str = DEFAULT_PATH_FILTER,
         new_tests_limit: int = 1,
         debug: bool = False,
     ) -> None:
@@ -28,6 +29,7 @@ class TestRunner:
         self.filepaths = filepaths
         self.raw_sancov_output_dir = filepaths.output_dir / "raw_sancov"
         self.debug = debug
+        self._path_filter = path_filter
 
         self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -191,7 +193,9 @@ class TestRunner:
         opt_sancov.merge()
         opt_sancov.symbolize(opt_sancov.get_merged_sancov_path(), opt_sancov.get_merged_symcov_path())
 
-        llc_address_line_map, joint_coverage_df = llc_sancov.get_joint_coverage(opt_sancov)
+        llc_address_line_map, joint_coverage_df = llc_sancov.get_joint_coverage(
+            opt_sancov, self._path_filter
+        )
 
         llc_address_line_map.to_csv(self.filepaths.output_dir / self.filepaths.llc_address_line_map_file, index=False)
         joint_coverage_df.to_csv(self.filepaths.output_dir / self.filepaths.joint_llc_and_opt_coverage_file, index=False)
