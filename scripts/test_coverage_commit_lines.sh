@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# End-to-end: added_lines -> LIT baseline symcov -> commit-lines uncovered list.
+# End-to-end: added-lines -> LIT baseline symcov -> commit-lines uncovered list.
 # Run from fuzz-fill repo root (same layout as scripts/test_coverage.sh).
 
 HOME=/home/agorzyns/local/dev
@@ -12,7 +12,7 @@ LLVM_BIN=$LLVM/build/bin
 
 OUTPUT_DIR=$FUZZ/data/coverage_output/bb_coverage_commit_lines_170626
 TEST_SUITE_OUTPUT_DIR=$OUTPUT_DIR/test_suite
-ADDED_LINES_DIR=$OUTPUT_DIR/added_lines
+ADDED_LINES_DIR=$OUTPUT_DIR/added-lines
 COMMIT_LINES_REPORT_DIR=$OUTPUT_DIR/commit_lines_report
 
 #FILTER="CodeGen/AMDGPU/loop"
@@ -43,6 +43,6 @@ python -m coverage commit-lines \
     --output-dir "$COMMIT_LINES_REPORT_DIR" \
     --test-suite-output-dir "$TEST_SUITE_OUTPUT_DIR" \
     --llvm-repo "$LLVM" \
-    --added-lines-csv "$ADDED_LINES_DIR/added_lines.csv"
+    --added-lines-csv "$ADDED_LINES_DIR/added-lines.csv"
 
 echo "Uncovered added lines: $COMMIT_LINES_REPORT_DIR/commit_lines_uncovered.csv"

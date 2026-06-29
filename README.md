@@ -64,7 +64,7 @@ python -m coverage commit-lines \
   [--output-dir DIR] [--path-filter SUBSTRING] [--debug]
 ```
 
-See **`scripts/test_coverage_commit_lines.sh`** for an end-to-end example (**`added_lines`** → **`test-suite`** → **`commit-lines`**).
+See **`scripts/test_coverage_commit_lines.sh`** for an end-to-end example (**`added-lines`** → **`test-suite`** → **`commit-lines`**).
 
 ### `test-suite`
 
@@ -340,11 +340,11 @@ cd llvm-project/
   integration-tests/
 ```
 
-## `added_lines` module (commit added lines)
+## `added-lines` module (commit added lines)
 
-This is a **separate** Python module from the **`coverage diff`** subcommand in the **Coverage module** subcommands table earlier in this README. It lives under **`src/added_lines/`** and is invoked as **`python -m added_lines`**.
+This is a **separate** Python module from the **`coverage diff`** subcommand in the **Coverage module** subcommands table earlier in this README. It lives under **`src/added_lines/`** and is invoked as **`python -m added_lines`** (console script **`added-lines`** when installed).
 
-The tool takes a **git repository** (typically your **`llvm-project`** checkout) and a **commit** revision (`HEAD`, a hash, `main~3`, and so on). It runs **`git show --first-parent`** on that commit, parses the resulting unified diff, and writes **`added_lines.csv`** under **`--output-dir`**. The CSV has a header row **`path`**, **`line_no`**, **`text`**: one row per line that appears on the **added** side of the patch (with the line number in the post-commit file). The same CSV is also printed to **stdout**.
+The tool takes a **git repository** (typically your **`llvm-project`** checkout) and a **commit** revision (`HEAD`, a hash, `main~3`, and so on). It runs **`git show --first-parent`** on that commit, parses the resulting unified diff, and writes **`added-lines.csv`** under **`--output-dir`**. The CSV has a header row **`path`**, **`line_no`**, **`text`**: one row per line that appears on the **added** side of the patch (with the line number in the post-commit file). The same CSV is also printed to **stdout**.
 
 **Why this exists:** the goal is to list **exactly which source lines were introduced by a commit**, so you can compare that set to baseline coverage from the LLVM test suite (for example the **`test_coverage.csv`** produced by **`python -m coverage test-suite`**). Any added line that still has no suite coverage is a concrete candidate to target with new tests or fuzzing.
 
@@ -352,7 +352,7 @@ Merge commits are handled via **`--first-parent`** on **`git show`**, so you get
 
 ### Example
 
-`scripts/test_added_lines.sh` mirrors **`scripts/test_coverage.sh`**: set **`HOME`**, **`LLVM`**, **`OUTPUT_DIR`**, and **`COMMIT`**, then run **`python -m added_lines`**.
+`scripts/test-added-lines.sh` mirrors **`scripts/test_coverage.sh`**: set **`HOME`**, **`LLVM`**, **`OUTPUT_DIR`**, and **`COMMIT`**, then run **`python -m added_lines`**.
 
 ```text
 python -m added_lines \

@@ -1,6 +1,6 @@
 #!/bin/bash
 # For each LLVM base revision: cherry-pick lit-coverage helpers, rebuild BB tools,
-# then run fuzz-fill added_lines + coverage + commit-lines with a per-commit output tree.
+# then run fuzz-fill added-lines + coverage + commit-lines with a per-commit output tree.
 #
 # Requires a clean llvm-project working tree at the start of each iteration
 # (the cherry-pick script enforces this).
@@ -126,7 +126,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 	SHORT="$(git -C "${LLVM_REPO}" rev-parse --short "${RESOLVED}")"
 	OUT="${OUTPUT_ROOT_BASE}/bb_coverage_commit_lines_${SHORT}"
 	TEST_SUITE_OUTPUT_DIR="${OUT}/test_suite"
-	ADDED_LINES_DIR="${OUT}/added_lines"
+	ADDED_LINES_DIR="${OUT}/added-lines"
 	COMMIT_LINES_REPORT_DIR="${OUT}/commit_lines_report"
 	RESOURCE_CSV="${OUT}/resource_stats.csv"
 
@@ -194,7 +194,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 		--output-dir "${COMMIT_LINES_REPORT_DIR}" \
 		--test-suite-output-dir "${TEST_SUITE_OUTPUT_DIR}" \
 		--llvm-repo "${LLVM_REPO}" \
-		--added-lines-csv "${ADDED_LINES_DIR}/added_lines.csv" \
+		--added-lines-csv "${ADDED_LINES_DIR}/added-lines.csv" \
 		--path-filter "${PATH_FILTER}"
 
 	ITER_END_SEC="$(date +%s)"

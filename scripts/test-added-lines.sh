@@ -3,7 +3,7 @@ set -euo pipefail
 
 HOME=/home/agorzyns/local/dev
 LLVM=$HOME/llvm-project
-OUTPUT_DIR=$HOME/fuzz-fill/data/added_lines_output/bb_added_lines_090626
+OUTPUT_DIR=$HOME/fuzz-fill/data/added-lines-output/bb-added-lines_090626
 COMMIT=b01fe4e
 
 # Clear old output directory
