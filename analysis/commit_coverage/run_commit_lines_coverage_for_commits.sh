@@ -1,6 +1,6 @@
 #!/bin/bash
 # For each LLVM base revision: cherry-pick lit-coverage helpers, rebuild BB tools,
-# then run fuzz-fill coverage + diff + commit-lines with a per-commit output tree.
+# then run fuzz-fill added_lines + coverage + commit-lines with a per-commit output tree.
 #
 # Requires a clean llvm-project working tree at the start of each iteration
 # (the cherry-pick script enforces this).
@@ -126,7 +126,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 	SHORT="$(git -C "${LLVM_REPO}" rev-parse --short "${RESOLVED}")"
 	OUT="${OUTPUT_ROOT_BASE}/bb_coverage_commit_lines_${SHORT}"
 	TEST_SUITE_OUTPUT_DIR="${OUT}/test_suite"
-	ADDED_LINES_DIR="${OUT}/diff_added_lines"
+	ADDED_LINES_DIR="${OUT}/added_lines"
 	COMMIT_LINES_REPORT_DIR="${OUT}/commit_lines_report"
 	RESOURCE_CSV="${OUT}/resource_stats.csv"
 
@@ -169,6 +169,12 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 
 	cd "${FUZZ_FILL_ROOT}"
 
+	echo "Computing added-lines for ${COMMIT} ..."
+	python -m added_lines \
+		--llvm-repo "${LLVM_REPO}" \
+		--commit "${COMMIT}" \
+		--output-dir "${ADDED_LINES_DIR}"
+
 	echo "Running test-suite coverage (symcov) ..."
 	TS_STAT="$(mktemp "${OUT}/.test_suite_stats.XXXXXX")"
 	run_gnu_timed "${TS_STAT}" python -m coverage test-suite \
@@ -182,12 +188,6 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 	fi
 	rm -f "${TS_STAT}"
 	TS_STAT=""
-
-	echo "Computing added-lines for ${COMMIT} ..."
-	python -m diff added-lines \
-		--llvm-repo "${LLVM_REPO}" \
-		--commit "${COMMIT}" \
-		--output-dir "${ADDED_LINES_DIR}"
 
 	echo "Computing commit-lines report ..."
 	python -m coverage commit-lines \

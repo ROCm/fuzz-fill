@@ -10,11 +10,6 @@ from added_lines.added_lines import AddedLine, collect_added_lines
 from added_lines.constants import ADDED_LINES_FILENAME, DEFAULT_OUTPUT_DIR
 
 
-def add_shared_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--debug", action="store_true", default=False)
-
-
 def resolve_output_dir(path: Path) -> Path:
     s = str(path)
     if "<timestamp>" in s:
@@ -37,23 +32,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="List source lines added in a single LLVM git commit."
     )
-    sub = parser.add_subparsers(
-        dest="subcmd",
-        metavar="{added-lines}",
-        required=True,
-    )
-    p_lines = sub.add_parser(
-        "added-lines",
-        help="Print every line introduced by the given commit (git show / unified diff).",
-    )
-    add_shared_arguments(p_lines)
-    p_lines.add_argument(
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--debug", action="store_true", default=False)
+    parser.add_argument(
         "--llvm-repo",
         type=Path,
         required=True,
         help="Path to the llvm-project (or any) git checkout.",
     )
-    p_lines.add_argument(
+    parser.add_argument(
         "--commit",
         type=str,
         required=True,
@@ -67,10 +54,6 @@ def main() -> None:
 
     if args.debug:
         print("Debug mode enabled", flush=True)
-
-    if args.subcmd != "added-lines":
-        print(f"Unknown subcommand: {args.subcmd}", flush=True)
-        raise SystemExit(1)
 
     repo = args.llvm_repo.resolve()
     out_dir = resolve_output_dir(args.output_dir)
