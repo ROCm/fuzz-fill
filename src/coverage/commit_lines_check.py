@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from coverage.constants import DEFAULT_PATH_FILTER
 from coverage.sancov import Sancov
 
 
@@ -41,7 +40,7 @@ def run_commit_lines_check(
     test_suite_output_dir: Path,
     llvm_repo: Path,
     added_lines_csv: Path,
-    path_filter: str = DEFAULT_PATH_FILTER,
+    path_filter: str,
     report_path: Path,
 ) -> None:
     """
@@ -49,9 +48,10 @@ def run_commit_lines_check(
     leaves **completely** cold on every SanitizerCoverage site for that source line
     (joint llc/opt view).
 
-    A line is listed only when it appears in symcov ``point-symbol-info`` (after
-    *path_filter*) and **every** merged instrumentation point on that ``(file, line)``
-    is **absent** from ``covered-points`` (no llc/opt hit on any of those addresses).
+    A line is listed only when it appears in symcov ``point-symbol-info`` (scoped by
+    the ``path_filter`` saved in ``run_config.json`` from ``coverage test-suite``) and
+    **every** merged instrumentation point on that ``(file, line)`` is **absent** from
+    ``covered-points`` (no llc/opt hit on any of those addresses).
 
     Each row includes **``point_addresses``**: distinct SanitizerCoverage point ids for
     that ``(file, line)`` (``point_this`` / ``point_other`` from the llc/opt merge),

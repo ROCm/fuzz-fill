@@ -10,7 +10,8 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-from coverage.constants import DEFAULT_PATH_FILTER
+from coverage.constants import DEFAULT_LIT_FILTER
+from coverage.run_config import path_filter_from_lit_filter
 from typing import Literal
 
 class Sancov:
@@ -282,7 +283,11 @@ class Sancov:
         with symcov_path.open("w") as f:
             subprocess.run(cmd, check=True, stdout=f, stderr=subprocess.STDOUT)
 
-    def get_joint_coverage(self, other: Sancov, path_filter: str = DEFAULT_PATH_FILTER) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def get_joint_coverage(
+        self,
+        other: Sancov,
+        path_filter: str | None = None,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         Build the LLC address map and baseline covered lines for *this* (llc) vs *other* (opt).
 
@@ -300,6 +305,9 @@ class Sancov:
 
         with other.get_merged_symcov_path().open(encoding="utf-8") as f:
             other_symcov = json.load(f)
+
+        if path_filter is None:
+            path_filter = path_filter_from_lit_filter(DEFAULT_LIT_FILTER)
 
         this_df = self.get_coverage_df(this_symcov, path_filter)
         other_df = self.get_coverage_df(other_symcov, path_filter)

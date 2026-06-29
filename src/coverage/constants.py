@@ -4,7 +4,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Default for llvm-lit ``--filter=`` when none is passed.
 DEFAULT_LIT_FILTER = "CodeGen/AMDGPU"
-DEFAULT_PATH_FILTER = "llvm/lib/Target/AMDGPU"
+DEFAULT_RUN_CONFIG_FILE = "run_config.json"
 
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "coverage_output" / f"cov_<timestamp>"
 

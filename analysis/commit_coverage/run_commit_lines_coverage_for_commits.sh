@@ -12,7 +12,7 @@
 #
 # Example (AMDGPU):
 #   BUILD_SCRIPT=build-amdgpu-bb.sh BUILD_DIR=build-amdgpu-bb \
-#     FILTER=CodeGen/AMDGPU PATH_FILTER=llvm/lib/Target/AMDGPU \
+#     FILTER=CodeGen/AMDGPU \
 #     COMMITS_FILE=commits.txt ./run_commit_lines_coverage_for_commits.sh
 #
 # Optional environment:
@@ -20,8 +20,7 @@
 #   LLVM_REPO          — llvm-project path (default: sibling of fuzz-fill)
 #   OUTPUT_ROOT_BASE   — under this, each run uses bb_coverage_commit_lines_<short_sha>/
 #                        (default: $FUZZ_FILL_ROOT/data/coverage_output)
-#   FILTER             — lit filter (default: CodeGen/SPIRV)
-#   PATH_FILTER        — symcov path substring (default: llvm/lib/Target/SPIRV)
+#   FILTER             — lit filter (default: CodeGen/SPIRV); symcov path scope is derived
 #   LLVM_BIN           — dir with clang for LIT (default: $LLVM_REPO/build/bin)
 #   BUILD_SCRIPT       — BB build script under llvm-project (default: build-spirv-bb.sh)
 #   BUILD_DIR          — instrumented build tree name/dir under llvm-project (default: build-spirv-bb)
@@ -41,7 +40,6 @@ FUZZ_FILL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 LLVM_REPO="${LLVM_REPO:-$(cd "${FUZZ_FILL_ROOT}/../llvm-project" && pwd)}"
 OUTPUT_ROOT_BASE="${OUTPUT_ROOT_BASE:-${FUZZ_FILL_ROOT}/data/coverage_output/spirv_20_lines}"
 FILTER="${FILTER:-CodeGen/SPIRV}"
-PATH_FILTER="${PATH_FILTER:-llvm/lib/Target/SPIRV}"
 LLVM_BIN="${LLVM_BIN:-${LLVM_REPO}/build/bin}"
 BUILD_SCRIPT="${BUILD_SCRIPT:-build-spirv-bb.sh}"
 BUILD_DIR="${BUILD_DIR:-build-spirv-bb}"
@@ -181,8 +179,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 		--output-dir "${TEST_SUITE_OUTPUT_DIR}" \
 		--llvm-bin "${LLVM_BIN}" \
 		--instrumented-bin "${INSTRUMENTED_BIN_DIR}" \
-		--lit-filter "${FILTER}" \
-		--path-filter "${PATH_FILTER}"
+		--lit-filter "${FILTER}"
 	if [[ -n "${TS_STAT}" && -s "${TS_STAT}" ]]; then
 		IFS=',' read -r TS_WALL TS_USER TS_SYS TS_RSS <"${TS_STAT}" || true
 	fi
@@ -194,8 +191,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 		--output-dir "${COMMIT_LINES_REPORT_DIR}" \
 		--test-suite-output-dir "${TEST_SUITE_OUTPUT_DIR}" \
 		--llvm-repo "${LLVM_REPO}" \
-		--added-lines-csv "${ADDED_LINES_DIR}/added-lines.csv" \
-		--path-filter "${PATH_FILTER}"
+		--added-lines-csv "${ADDED_LINES_DIR}/added-lines.csv"
 
 	ITER_END_SEC="$(date +%s)"
 	TOTAL_WALL_SEC="$((ITER_END_SEC - ITER_START_SEC))"

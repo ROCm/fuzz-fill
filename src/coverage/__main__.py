@@ -10,12 +10,12 @@ from coverage.constants import (
     DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_NEW_COVERAGE_CSV,
-    DEFAULT_PATH_FILTER,
     DEFAULT_COMMIT_LINES_REPORT,
 )
 
 from coverage.analyser import CoverageAnalyzer
 from coverage.commit_lines_check import run_commit_lines_check
+from coverage.run_config import load_run_config
 
 def main():
 
@@ -48,13 +48,7 @@ def main():
     p_test_suite.add_argument("--instrumented-bin", type=Path, required=True, 
         help="Path to the coverage-instrumented LLVM bin directory")
     p_test_suite.add_argument("--lit-filter", type=str, default=None,
-        help="Prefix passed to llvm-lit as --filter=<PREFIX>")
-    p_test_suite.add_argument(
-        "--path-filter",
-        type=str,
-        default=DEFAULT_PATH_FILTER,
-        help="Substring filter on symcov file paths when aggregating coverage.",
-    )
+        help="Prefix passed to llvm-lit as --filter=<PREFIX> (also selects symcov path scope).")
 
     p_new_tests.add_argument("--instrumented-bin", type=Path, required=True, 
         help="Path to the coverage-instrumented LLVM bin directory")
@@ -80,7 +74,8 @@ def main():
         required=True,
         help=(
             "Same directory passed as ``--output-dir`` to ``coverage test-suite`` "
-            "(must contain ``processed_sancov/llc.0.symcov`` and ``opt.0.symcov``)."
+            "(must contain ``processed_sancov/llc.0.symcov``, ``opt.0.symcov``, and "
+            "``run_config.json``)."
         ),
     )
     p_commit_lines.add_argument(
@@ -94,12 +89,6 @@ def main():
         type=Path,
         required=True,
         help="CSV from ``python -m added_lines`` (columns path, line_no, text).",
-    )
-    p_commit_lines.add_argument(
-        "--path-filter",
-        type=str,
-        default=DEFAULT_PATH_FILTER,
-        help="Substring filter on symcov file paths (same idea as sancov path filter).",
     )
 
     args = parser.parse_args()
@@ -115,7 +104,6 @@ def main():
             mode="lit",
             filepaths=filepaths,
             lit_filter=args.lit_filter,
-            path_filter=args.path_filter,
             debug=args.debug,
         )
         test_runner.run()
@@ -146,11 +134,12 @@ def main():
         )
         args.output_dir.mkdir(parents=True, exist_ok=True)
         report_path = args.output_dir / DEFAULT_COMMIT_LINES_REPORT
+        run_config = load_run_config(args.test_suite_output_dir.resolve())
         run_commit_lines_check(
             test_suite_output_dir=args.test_suite_output_dir.resolve(),
             llvm_repo=args.llvm_repo,
             added_lines_csv=args.added_lines_csv.resolve(),
-            path_filter=args.path_filter,
+            path_filter=run_config["path_filter"],
             report_path=report_path,
         )
 
