@@ -1,6 +1,6 @@
 #!/bin/bash
 # For each LLVM base revision: cherry-pick lit-coverage helpers, rebuild BB tools,
-# then run fuzz-fill added-lines + coverage + commit-lines with a per-commit output tree.
+# then run fuzz-fill added-lines + coverage + target-lines with a per-commit output tree.
 #
 # Requires a clean llvm-project working tree at the start of each iteration
 # (the cherry-pick script enforces this).
@@ -12,16 +12,15 @@
 #
 # Example (AMDGPU):
 #   BUILD_SCRIPT=build-amdgpu-bb.sh BUILD_DIR=build-amdgpu-bb \
-#     FILTER=CodeGen/AMDGPU PATH_FILTER=llvm/lib/Target/AMDGPU \
+#     FILTER=CodeGen/AMDGPU \
 #     COMMITS_FILE=commits.txt ./run_commit_lines_coverage_for_commits.sh
 #
 # Optional environment:
 #   FUZZ_FILL_ROOT     — fuzz-fill repo root (default: ../.. from this script)
 #   LLVM_REPO          — llvm-project path (default: sibling of fuzz-fill)
-#   OUTPUT_ROOT_BASE   — under this, each run uses bb_coverage_commit_lines_<short_sha>/
+#   OUTPUT_ROOT_BASE   — under this, each run uses bb_coverage_target_lines_<short_sha>/
 #                        (default: $FUZZ_FILL_ROOT/data/coverage_output)
-#   FILTER             — lit filter (default: CodeGen/SPIRV)
-#   PATH_FILTER        — symcov path substring (default: llvm/lib/Target/SPIRV)
+#   FILTER             — lit filter (default: CodeGen/SPIRV); symcov path scope is derived
 #   LLVM_BIN           — dir with clang for LIT (default: $LLVM_REPO/build/bin)
 #   BUILD_SCRIPT       — BB build script under llvm-project (default: build-spirv-bb.sh)
 #   BUILD_DIR          — instrumented build tree name/dir under llvm-project (default: build-spirv-bb)
@@ -31,7 +30,7 @@
 #
 # Each commit output folder includes resource_stats.csv: wall/user/sys CPU and max RSS
 # (from GNU /usr/bin/time) for BUILD_SCRIPT and `python -m coverage test-suite`,
-# plus total wall time for the full iteration (cherry-pick through commit-lines).
+# plus total wall time for the full iteration (cherry-pick through target-lines).
 
 set -euo pipefail
 
@@ -41,7 +40,6 @@ FUZZ_FILL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 LLVM_REPO="${LLVM_REPO:-$(cd "${FUZZ_FILL_ROOT}/../llvm-project" && pwd)}"
 OUTPUT_ROOT_BASE="${OUTPUT_ROOT_BASE:-${FUZZ_FILL_ROOT}/data/coverage_output/spirv_20_lines}"
 FILTER="${FILTER:-CodeGen/SPIRV}"
-PATH_FILTER="${PATH_FILTER:-llvm/lib/Target/SPIRV}"
 LLVM_BIN="${LLVM_BIN:-${LLVM_REPO}/build/bin}"
 BUILD_SCRIPT="${BUILD_SCRIPT:-build-spirv-bb.sh}"
 BUILD_DIR="${BUILD_DIR:-build-spirv-bb}"
@@ -124,10 +122,10 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 		exit 1
 	fi
 	SHORT="$(git -C "${LLVM_REPO}" rev-parse --short "${RESOLVED}")"
-	OUT="${OUTPUT_ROOT_BASE}/bb_coverage_commit_lines_${SHORT}"
+	OUT="${OUTPUT_ROOT_BASE}/bb_coverage_target_lines_${SHORT}"
 	TEST_SUITE_OUTPUT_DIR="${OUT}/test_suite"
 	ADDED_LINES_DIR="${OUT}/added-lines"
-	COMMIT_LINES_REPORT_DIR="${OUT}/commit_lines_report"
+	TARGET_LINES_REPORT_DIR="${OUT}/target_lines_report"
 	RESOURCE_CSV="${OUT}/resource_stats.csv"
 
 	mkdir -p "${OUT}"
@@ -165,7 +163,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 		echo "SKIP_BUILD=1 — not running ${BUILD_SCRIPT_DISPLAY}"
 	fi
 
-	mkdir -p "${ADDED_LINES_DIR}" "${COMMIT_LINES_REPORT_DIR}"
+	mkdir -p "${ADDED_LINES_DIR}" "${TARGET_LINES_REPORT_DIR}"
 
 	cd "${FUZZ_FILL_ROOT}"
 
@@ -181,21 +179,19 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 		--output-dir "${TEST_SUITE_OUTPUT_DIR}" \
 		--llvm-bin "${LLVM_BIN}" \
 		--instrumented-bin "${INSTRUMENTED_BIN_DIR}" \
-		--lit-filter "${FILTER}" \
-		--path-filter "${PATH_FILTER}"
+		--lit-filter "${FILTER}"
 	if [[ -n "${TS_STAT}" && -s "${TS_STAT}" ]]; then
 		IFS=',' read -r TS_WALL TS_USER TS_SYS TS_RSS <"${TS_STAT}" || true
 	fi
 	rm -f "${TS_STAT}"
 	TS_STAT=""
 
-	echo "Computing commit-lines report ..."
-	python -m coverage commit-lines \
-		--output-dir "${COMMIT_LINES_REPORT_DIR}" \
+	echo "Computing target-lines report ..."
+	python -m coverage target-lines \
+		--output-dir "${TARGET_LINES_REPORT_DIR}" \
 		--test-suite-output-dir "${TEST_SUITE_OUTPUT_DIR}" \
 		--llvm-repo "${LLVM_REPO}" \
-		--added-lines-csv "${ADDED_LINES_DIR}/added-lines.csv" \
-		--path-filter "${PATH_FILTER}"
+		--target-lines-csv "${ADDED_LINES_DIR}/added-lines.csv"
 
 	ITER_END_SEC="$(date +%s)"
 	TOTAL_WALL_SEC="$((ITER_END_SEC - ITER_START_SEC))"
@@ -208,7 +204,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 			"${TS_WALL}" "${TS_USER}" "${TS_SYS}" "${TS_RSS}"
 	} >"${RESOURCE_CSV}"
 
-	echo "Done ${SHORT}: ${COMMIT_LINES_REPORT_DIR}/commit_lines_uncovered.csv"
+	echo "Done ${SHORT}: ${TARGET_LINES_REPORT_DIR}/target_lines_uncovered.csv"
 	echo "Resource stats: ${RESOURCE_CSV}"
 done
 

@@ -73,6 +73,7 @@ def _tool(bin_dir: str, name: str) -> str:
 
 
 _llvm_build_dir = os.path.dirname(_llvm_bin_dir)
+_llvm_repo_dir = os.path.dirname(_llvm_build_dir)
 _venv_cmd = f". {shlex.quote(_venv_activate)}"
 
 config.name = "fuzz-fill-integration-tests"
@@ -86,6 +87,7 @@ config.substitutions.extend(
         ("%sancov", _tool(_llvm_bin_dir, "sancov")),
         ("%FileCheck", _tool(_llvm_bin_dir, "FileCheck")),
         ("%llvm-build-dir", shlex.quote(_llvm_build_dir)),
+        ("%llvm-repo", shlex.quote(_llvm_repo_dir)),
         ("%venv", _venv_cmd),
         ("%coverage", f"{_venv_cmd} && python -m coverage"),
         ("%reduce", f"{_venv_cmd} && python -m reduce"),

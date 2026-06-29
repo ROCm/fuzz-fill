@@ -6,9 +6,10 @@ import subprocess
 import pandas as pd
 from pathlib import Path
 
-from coverage.constants import DEFAULT_LIT_FILTER, DEFAULT_PATH_FILTER, TEST_FLAGS
+from coverage.constants import TEST_FLAGS
 from coverage.filepaths import Filepaths
 from coverage.lit_config import ensure_lit_sancov_env_forwarding
+from coverage.run_config import build_run_config, resolved_lit_filter, write_run_config
 from coverage.sancov import Sancov
 
 class TestRunner:
@@ -22,7 +23,6 @@ class TestRunner:
         mode: str,
         filepaths: Filepaths,
         lit_filter: str | None = None,
-        path_filter: str = DEFAULT_PATH_FILTER,
         new_tests_limit: int = 1,
         debug: bool = False,
     ) -> None:
@@ -30,12 +30,14 @@ class TestRunner:
         self.filepaths = filepaths
         self.raw_sancov_output_dir = filepaths.output_dir / "raw_sancov"
         self.debug = debug
-        self._path_filter = path_filter
 
         self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
 
         if self.mode == "lit":
-            self._lit_filter = lit_filter if lit_filter is not None else DEFAULT_LIT_FILTER
+            self._lit_filter = resolved_lit_filter(lit_filter)
+            run_config = build_run_config(lit_filter=lit_filter)
+            self._path_filter = run_config["path_filter"]
+            write_run_config(self.filepaths.output_dir, lit_filter=lit_filter)
             self.raw_sancov_output_dir.mkdir(parents=True, exist_ok=True)
 
         elif self.mode == "standalone":
