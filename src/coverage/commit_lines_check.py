@@ -1,4 +1,4 @@
-"""Compare ``diff added-lines`` CSV against test-suite symcov (llc + opt)."""
+"""Compare added-lines CSV against test-suite symcov (llc + opt)."""
 
 from __future__ import annotations
 

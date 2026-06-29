@@ -33,7 +33,8 @@ def main():
         "commit-lines",
         help=(
             "List added-lines rows where every symcov point on that line is uncovered "
-            "by the suite (expects ``coverage test-suite`` output; no lit re-run)."
+            "by the suite (expects ``coverage test-suite`` output and a CSV from "
+            "``python -m added_lines``; no lit re-run)."
         ),
     )
 
@@ -92,7 +93,7 @@ def main():
         "--added-lines-csv",
         type=Path,
         required=True,
-        help="CSV from ``python -m diff added-lines`` (columns path, line_no, text).",
+        help="CSV from ``python -m added_lines`` (columns path, line_no, text).",
     )
     p_commit_lines.add_argument(
         "--path-filter",

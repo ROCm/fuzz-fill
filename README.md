@@ -50,7 +50,7 @@ Build LLVM twice:
 
 Use this after **`python -m coverage test-suite`** has produced **`processed_sancov/llc.0.symcov`** and **`opt.0.symcov`** under the test-suite output directory. It does **not** run lit again, so you can repeat the analysis with different **`--added-lines-csv`** inputs.
 
-Pass the CSV from **`python -m diff added-lines`** (columns **`path`**, **`line_no`**, **`text`**). For each row, the tool resolves **`path`** against symcov absolute paths (suffix match on the path within the LLVM tree, or resolved **`--llvm-repo`/path**).
+Pass the CSV from **`python -m added_lines`** (columns **`path`**, **`line_no`**, **`text`**). For each row, the tool resolves **`path`** against symcov absolute paths (suffix match on the path within the LLVM tree, or resolved **`--llvm-repo`/path**).
 
 **Output:** **`--output-dir`/`commit_lines_uncovered.csv`** (see **`DEFAULT_COMMIT_LINES_REPORT`** in **`src/coverage/constants.py`**). Each row is an added line where **every** SanitizerCoverage point on that source line is **off** under the joint llc/opt suite run (no address on that line appears in **`covered-points`**). The column **`point_addresses`** lists those point ids (**semicolon-separated**, same style as **`covered-points`** in other CSVs). Lines that are **partially** covered (some points hit, some not) are **omitted** from the CSV but counted as **`partial`** on stdout.
 
@@ -64,7 +64,7 @@ python -m coverage commit-lines \
   [--output-dir DIR] [--path-filter SUBSTRING] [--debug]
 ```
 
-See **`scripts/test_coverage_commit_lines.sh`** for an end-to-end example (**`test-suite`** → **`diff added-lines`** → **`commit-lines`**).
+See **`scripts/test_coverage_commit_lines.sh`** for an end-to-end example (**`added-lines`** → **`test-suite`** → **`commit-lines`**).
 
 ### `test-suite`
 
@@ -340,11 +340,11 @@ cd llvm-project/
   integration-tests/
 ```
 
-## `diff` package (commit added lines)
+## `added-lines` module (commit added lines)
 
-This is a **separate** Python module from the **`coverage diff`** subcommand in the **Coverage module** subcommands table earlier in this README. It lives under **`src/diff/`** and is invoked as **`python -m diff`**.
+This is a **separate** Python module from the **`coverage diff`** subcommand in the **Coverage module** subcommands table earlier in this README. It lives under **`src/added_lines/`** and is invoked as **`python -m added_lines`** (console script **`added-lines`** when installed).
 
-The tool takes a **git repository** (typically your **`llvm-project`** checkout) and a **commit** revision (`HEAD`, a hash, `main~3`, and so on). It runs **`git show --first-parent`** on that commit, parses the resulting unified diff, and writes **`added_lines.csv`** under **`--output-dir`**. The CSV has a header row **`path`**, **`line_no`**, **`text`**: one row per line that appears on the **added** side of the patch (with the line number in the post-commit file). The same CSV is also printed to **stdout**.
+The tool takes a **git repository** (typically your **`llvm-project`** checkout) and a **commit** revision (`HEAD`, a hash, `main~3`, and so on). It runs **`git show --first-parent`** on that commit, parses the resulting unified diff, and writes **`added-lines.csv`** under **`--output-dir`**. The CSV has a header row **`path`**, **`line_no`**, **`text`**: one row per line that appears on the **added** side of the patch (with the line number in the post-commit file). The same CSV is also printed to **stdout**.
 
 **Why this exists:** the goal is to list **exactly which source lines were introduced by a commit**, so you can compare that set to baseline coverage from the LLVM test suite (for example the **`test_coverage.csv`** produced by **`python -m coverage test-suite`**). Any added line that still has no suite coverage is a concrete candidate to target with new tests or fuzzing.
 
@@ -352,13 +352,13 @@ Merge commits are handled via **`--first-parent`** on **`git show`**, so you get
 
 ### Example
 
-`scripts/test_diff.sh` mirrors **`scripts/test_coverage.sh`**: set **`HOME`**, **`LLVM`**, **`OUTPUT_DIR`**, and **`COMMIT`**, then run **`python -m diff added-lines`**.
+`scripts/test-added-lines.sh` mirrors **`scripts/test_coverage.sh`**: set **`HOME`**, **`LLVM`**, **`OUTPUT_DIR`**, and **`COMMIT`**, then run **`python -m added_lines`**.
 
 ```text
-python -m diff added-lines \
+python -m added_lines \
   --output-dir DIR \
   --llvm-repo DIR \
   --commit REV
 ```
 
-Shared flags match the coverage CLI style: **`--output-dir`** (default from `src/diff/constants.py`), **`--debug`**.
+Shared flags match the coverage CLI style: **`--output-dir`** (default from `src/added_lines/constants.py`), **`--debug`**.
