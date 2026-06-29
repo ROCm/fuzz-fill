@@ -23,25 +23,25 @@ def main():
 
     sub = parser.add_subparsers(
         dest="subcmd",
-        metavar="{test-suite,new-tests,diff,commit-lines}",
+        metavar="{test-suite,new-tests,diff,target-lines}",
         required=True,
     )
     p_test_suite = sub.add_parser("test-suite")
     p_new_tests = sub.add_parser("new-tests")
     p_diff = sub.add_parser("diff")
-    p_commit_lines = sub.add_parser(
-        "commit-lines",
+    p_target_lines = sub.add_parser(
+        "target-lines",
         help=(
-            "List added-lines rows where every symcov point on that line is uncovered "
-            "by the suite (expects ``coverage test-suite`` output and a CSV from "
-            "``python -m added_lines``; no lit re-run)."
+            "List target-lines CSV rows where every symcov point on that line is uncovered "
+            "by the suite (expects ``coverage test-suite`` output and a lines CSV; "
+            "no lit re-run)."
         ),
     )
 
     add_shared_arguments(p_test_suite)
     add_shared_arguments(p_new_tests)
     add_shared_arguments(p_diff)
-    add_shared_arguments(p_commit_lines)
+    add_shared_arguments(p_target_lines)
 
     p_test_suite.add_argument("--llvm-bin", type=Path, required=True,
         help="Path to the uninstrumented LLVM bin directory")
@@ -68,7 +68,7 @@ def main():
     p_diff.add_argument("--new-tests-output-dir", type=Path, required=True,
         help="Directory containing the new tests coverage output")
 
-    p_commit_lines.add_argument(
+    p_target_lines.add_argument(
         "--test-suite-output-dir",
         type=Path,
         required=True,
@@ -78,17 +78,17 @@ def main():
             "``run_config.json``)."
         ),
     )
-    p_commit_lines.add_argument(
+    p_target_lines.add_argument(
         "--llvm-repo",
         type=Path,
         required=True,
-        help="LLVM checkout used to resolve ``path`` in the added-lines CSV (suffix match to symcov paths).",
+        help="LLVM checkout used to resolve ``path`` in the target-lines CSV (suffix match to symcov paths).",
     )
-    p_commit_lines.add_argument(
-        "--added-lines-csv",
+    p_target_lines.add_argument(
+        "--target-lines-csv",
         type=Path,
         required=True,
-        help="CSV from ``python -m added_lines`` (columns path, line_no, text).",
+        help="CSV of source lines to check (columns path, line_no, text).",
     )
 
     args = parser.parse_args()
@@ -126,9 +126,9 @@ def main():
 
         coverage_analyzer.get_incremental_coverage()
 
-    elif args.subcmd == "commit-lines":
+    elif args.subcmd == "target-lines":
         print(
-            "Checking added lines from CSV against test-suite llc/opt symcov "
+            "Checking target lines from CSV against test-suite llc/opt symcov "
             "(no lit re-run)",
             flush=True,
         )
@@ -138,7 +138,7 @@ def main():
         run_commit_lines_check(
             test_suite_output_dir=args.test_suite_output_dir.resolve(),
             llvm_repo=args.llvm_repo,
-            added_lines_csv=args.added_lines_csv.resolve(),
+            added_lines_csv=args.target_lines_csv.resolve(),
             path_filter=run_config["path_filter"],
             report_path=report_path,
         )

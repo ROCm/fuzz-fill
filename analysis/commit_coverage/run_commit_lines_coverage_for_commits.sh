@@ -1,6 +1,6 @@
 #!/bin/bash
 # For each LLVM base revision: cherry-pick lit-coverage helpers, rebuild BB tools,
-# then run fuzz-fill added-lines + coverage + commit-lines with a per-commit output tree.
+# then run fuzz-fill added-lines + coverage + target-lines with a per-commit output tree.
 #
 # Requires a clean llvm-project working tree at the start of each iteration
 # (the cherry-pick script enforces this).
@@ -30,7 +30,7 @@
 #
 # Each commit output folder includes resource_stats.csv: wall/user/sys CPU and max RSS
 # (from GNU /usr/bin/time) for BUILD_SCRIPT and `python -m coverage test-suite`,
-# plus total wall time for the full iteration (cherry-pick through commit-lines).
+# plus total wall time for the full iteration (cherry-pick through target-lines).
 
 set -euo pipefail
 
@@ -186,12 +186,12 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 	rm -f "${TS_STAT}"
 	TS_STAT=""
 
-	echo "Computing commit-lines report ..."
-	python -m coverage commit-lines \
+	echo "Computing target-lines report ..."
+	python -m coverage target-lines \
 		--output-dir "${COMMIT_LINES_REPORT_DIR}" \
 		--test-suite-output-dir "${TEST_SUITE_OUTPUT_DIR}" \
 		--llvm-repo "${LLVM_REPO}" \
-		--added-lines-csv "${ADDED_LINES_DIR}/added-lines.csv"
+		--target-lines-csv "${ADDED_LINES_DIR}/added-lines.csv"
 
 	ITER_END_SEC="$(date +%s)"
 	TOTAL_WALL_SEC="$((ITER_END_SEC - ITER_START_SEC))"

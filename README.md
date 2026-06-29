@@ -102,13 +102,13 @@ Under `$OUTPUT_DIR`:
 ### What it does
 
 ```text
-added-lines  →  test-suite  →  commit-lines
+added-lines  →  test-suite  →  target-lines
 (from git)     (baseline)      (uncovered added lines)
 ```
 
 1. **`added-lines`** — parse `git show` for a commit and list every line added on the right-hand side of the diff.
 2. **`test-suite`** — same baseline coverage run as Workflow 1 (produces symcov under `processed_sancov/`).
-3. **`commit-lines`** — for each added line, check whether **every** SanitizerCoverage point on that line is off under the suite run. Fully uncovered lines go into the report; partially covered lines are counted but omitted from the CSV.
+3. **`target-lines`** — for each line in the target CSV, check whether **every** SanitizerCoverage point on that line is off under the suite run. Fully uncovered lines go into the report; partially covered lines are counted but omitted from the CSV.
 
 Step 3 does **not** re-run LIT, so you can repeat it with different `added-lines.csv` inputs as long as the `test-suite` symcov artifacts are still present.
 
@@ -137,7 +137,7 @@ Under `$OUTPUT_DIR`:
 | Path | Contents |
 |------|----------|
 | `added-lines/added-lines.csv` | Added lines from the commit (`path`, `line_no`, `text`) |
-| `test_suite/processed_sancov/` | Baseline symcov (required by `commit-lines`) |
+| `test_suite/processed_sancov/` | Baseline symcov (required by `target-lines`) |
 | `commit_lines_report/commit_lines_uncovered.csv` | **Main result** — added lines where every suite point on that line is off |
 
 ---
@@ -170,7 +170,7 @@ The workflows above call these modules. Use `--help` on any command for the full
 | `python -m coverage test-suite` | Baseline LIT coverage (both workflows) |
 | `python -m coverage new-tests` | Coverage from a fuzz-generated test corpus (Workflow 1) |
 | `python -m coverage diff` | Suite gaps filled by fuzz tests (Workflow 1) |
-| `python -m coverage commit-lines` | Uncovered added lines vs baseline symcov (Workflow 2) |
+| `python -m coverage target-lines` | Uncovered target lines vs baseline symcov (Workflow 2) |
 | `python -m added_lines` | Lines added by a git commit (Workflow 2) |
 | `python -m reduce` | Testcase reduction |
 
