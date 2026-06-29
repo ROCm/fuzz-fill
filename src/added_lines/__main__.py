@@ -6,8 +6,8 @@ import io
 from datetime import datetime
 from pathlib import Path
 
-from diff.added_lines import AddedLine, collect_added_lines
-from diff.constants import ADDED_LINES_FILENAME, DEFAULT_OUTPUT_DIR
+from added_lines.added_lines import AddedLine, collect_added_lines
+from added_lines.constants import ADDED_LINES_FILENAME, DEFAULT_OUTPUT_DIR
 
 
 def add_shared_arguments(parser: argparse.ArgumentParser) -> None:
