@@ -97,7 +97,7 @@ Under `$OUTPUT_DIR`:
 
 **When to use this:** you landed a patch and want a precise list of **added** source lines that the regression suite still does not fully cover.
 
-**Reference script:** [`scripts/test_coverage_commit_lines.sh`](scripts/test_coverage_commit_lines.sh)
+**Reference script:** [`scripts/test_coverage_target_lines.sh`](scripts/test_coverage_target_lines.sh)
 
 ### What it does
 
@@ -114,7 +114,7 @@ Step 3 does **not** re-run LIT, so you can repeat it with different `added-lines
 
 ### Configure and run
 
-Edit the variables at the top of `scripts/test_coverage_commit_lines.sh`:
+Edit the variables at the top of `scripts/test_coverage_target_lines.sh`:
 
 | Variable | Meaning |
 |----------|---------|
@@ -127,7 +127,7 @@ Edit the variables at the top of `scripts/test_coverage_commit_lines.sh`:
 Then run from the fuzz-fill repo root:
 
 ```bash
-./scripts/test_coverage_commit_lines.sh
+./scripts/test_coverage_target_lines.sh
 ```
 
 ### Key outputs
@@ -138,7 +138,7 @@ Under `$OUTPUT_DIR`:
 |------|----------|
 | `added-lines/added-lines.csv` | Added lines from the commit (`path`, `line_no`, `text`) |
 | `test_suite/processed_sancov/` | Baseline symcov (required by `target-lines`) |
-| `commit_lines_report/commit_lines_uncovered.csv` | **Main result** — added lines where every suite point on that line is off |
+| `target_lines_report/target_lines_uncovered.csv` | **Main result** — added lines where every suite point on that line is off |
 
 ---
 

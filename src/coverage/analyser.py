@@ -29,8 +29,7 @@ class CoverageAnalyzer:
         llc_address_line_map = pd.read_csv(self.llc_address_line_map_file)
         
         llc_address_line_map["line"] = llc_address_line_map["line"].astype(int)
-        llc_address_line_map["point_llc"] = llc_address_line_map["point_llc"].map(lambda x: f"0x{x}" if pd.notna(x) else x)        
-        llc_address_line_map["n_addresses_in_line"] = llc_address_line_map.groupby(["file", "line"], sort=False)["file"].transform("count")
+        llc_address_line_map["point_llc"] = llc_address_line_map["point_llc"].map(lambda x: f"0x{x}" if pd.notna(x) else x)
         llc_address_line_map["file_line"] = llc_address_line_map["file"] + ":" + llc_address_line_map["line"].astype(str)
 
         baseline_covered_lines = {
@@ -72,10 +71,18 @@ class CoverageAnalyzer:
             
             print(f"New test {test_name} has {len(new_coverage_df)} new covered addresses in target files")
 
-            # Check whether the newly covered addresses constitute a new line
-            new_coverage_df["n_covered_addresses_in_line"] = new_coverage_df.groupby(["file", "line"], sort=False)["file"].transform("count")
-
-            new_test_covered_lines = new_coverage_df[new_coverage_df['n_covered_addresses_in_line'] == new_coverage_df['n_addresses_in_line']]
+            # Rows where every point on the line is hit by this test.
+            hit_df = new_coverage_df.copy()
+            hit_df["covered"] = 1
+            fully_covered = Sancov.full_line_keys(hit_df, covered_column="covered")
+            if fully_covered:
+                keys_df = pd.DataFrame(list(fully_covered), columns=["file", "line"])
+                keys_df["line"] = keys_df["line"].astype(int)
+                new_test_covered_lines = new_coverage_df.merge(
+                    keys_df, on=["file", "line"], how="inner"
+                )
+            else:
+                new_test_covered_lines = new_coverage_df.iloc[0:0]
 
             if len(new_test_covered_lines) > 0:
 

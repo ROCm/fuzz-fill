@@ -1,0 +1,2 @@
+path,line_no,text
+llvm/lib/Target/AMDGPU/AMDGPUAliasAnalysis.cpp,103,test line from integration fixture
