@@ -8,6 +8,7 @@ from pathlib import Path
 
 from coverage.constants import DEFAULT_LIT_FILTER, DEFAULT_PATH_FILTER, TEST_FLAGS
 from coverage.filepaths import Filepaths
+from coverage.lit_config import ensure_lit_sancov_env_forwarding
 from coverage.sancov import Sancov
 
 class TestRunner:
@@ -83,6 +84,8 @@ class TestRunner:
             print(f"Sancov files already exist in {self.raw_sancov_output_dir}, skipping lit tests")
             return
 
+        lit_site_cfg = ensure_lit_sancov_env_forwarding(self.filepaths.instrumented_bin)
+
         argv = [
             str(self.filepaths.instrumented_bin / "llvm-lit"),
             "../llvm/test/",
@@ -94,6 +97,7 @@ class TestRunner:
             print(f"\tRunning: {argv})")
             print(f"\tUBSAN_OPTIONS: {env['UBSAN_OPTIONS']}")
             print(f"\tCWD: {cwd}")
+            print(f"\tLit site config: {lit_site_cfg}")
             print(f"\tCoverage directory: {self.raw_sancov_output_dir}")
         else:
             subprocess.run(argv, cwd=cwd, env=env, check=True)

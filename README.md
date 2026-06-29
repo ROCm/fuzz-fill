@@ -28,7 +28,7 @@ You need **two** builds of the **same** LLVM revision:
 
 Both scripts are run from your `llvm-project` checkout. Use the same compiler for both builds.
 
-For **llvm-lit** tests under `llvm-project/llvm/test` (e.g. AMDGPU `CodeGen/AMDGPU`), copy **`config/amdgpu-be/lit.local.cfg.py`** into the matching test tree so LIT forwards **`UBSAN_OPTIONS`** to subprocesses.
+**`python -m coverage test-suite`** patches **`<instrumented-build>/test/lit.site.cfg.py`** so LIT forwards **`UBSAN_OPTIONS`** to every test subprocess. The patch is idempotent and is re-applied if CMake regenerates that file.
 
 The example scripts below assume paths like:
 
