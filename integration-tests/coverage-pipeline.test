@@ -3,11 +3,12 @@
 # COM: llvm-project checkout + two builds (see README "Running tests").
 # COM: Lit filter is a small AMDGPU slice (CodeGen/AMDGPU/loop); new-tests uses --n 1.
 
-# RUN: rm -rf %t && mkdir -p %t/test_suite %t/new_tests %t/diff && \
+# RUN: rm -rf %t && mkdir -p %t/test_suite %t/new_tests %t/diff %t/target_lines && \
 # RUN: LLVM_BIN=$(dirname %FileCheck) && INSTR=$(dirname %sancov-llc) && \
-# RUN: %coverage test-suite --output-dir %t/test_suite --llvm-bin "$LLVM_BIN" --instrumented-bin "$INSTR" --lit-filter CodeGen/AMDGPU/loop && \
-# RUN: %coverage new-tests --output-dir %t/new_tests --instrumented-bin "$INSTR" --new-tests-dir %S/fixtures/coverage-new-tests --n 1 && \
-# RUN: %coverage diff --output-dir %t/diff --llvm-bin "$LLVM_BIN" --test-suite-output-dir %t/test_suite --new-tests-output-dir %t/new_tests
+# RUN: %coverage test-suite --output-dir %t/test_suite --llvm-bin "$LLVM_BIN" --instrumented-bin "$INSTR" --lit-filter CodeGen/AMDGPU/loop
+# RUN: %coverage new-tests --output-dir %t/new_tests --instrumented-bin "$INSTR" --new-tests-dir %S/fixtures/coverage-new-tests --n 1 
+# RUN: %coverage diff --output-dir %t/diff --llvm-bin "$LLVM_BIN" --test-suite-output-dir %t/test_suite --new-tests-output-dir %t/new_tests 
+# RUN: %coverage target-lines --output-dir %t/target_lines --test-suite-output-dir %t/test_suite --llvm-repo %llvm-repo --target-lines-csv %S/fixtures/target-lines-sample.csv
 
 # RUN: test -f %t/test_suite/run_config.json
 # RUN: test -f %t/test_suite/test_coverage.csv
