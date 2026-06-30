@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import pandas as pd
 from pathlib import Path
 
@@ -88,8 +89,10 @@ class TestRunner:
 
         lit_site_cfg = ensure_lit_sancov_env_forwarding(self.filepaths.instrumented_bin)
 
+        llvm_lit = self.filepaths.instrumented_bin / "llvm-lit"
         argv = [
-            str(self.filepaths.instrumented_bin / "llvm-lit"),
+            sys.executable,
+            str(llvm_lit),
             "../llvm/test/",
             f"--filter={self._lit_filter}",
         ]
