@@ -373,7 +373,7 @@ class Sancov:
         self,
         other: Sancov,
         path_filter: str | None = None,
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame, JointCoverageView]:
         """
         Build the LLC address map and baseline covered lines for *this* (llc) vs *other* (opt).
 
@@ -382,8 +382,8 @@ class Sancov:
         instrument the same site, either tool hitting it counts. Ll-only and opt-only
         points on the line are included as well.
 
-        Returns ``(llc_address_line_map, baseline_coverage)`` with columns
-        ``file``, ``line``, ``point_<suffix>`` on the map and ``file``, ``line``,
+        Returns ``(llc_address_line_map, baseline_coverage, joint_coverage_view)`` with
+        columns ``file``, ``line``, ``point_<suffix>`` on the map and ``file``, ``line``,
         ``point_<suffix>`` on baseline rows (one row per instrumented point).
         """
         if path_filter is None:
@@ -434,7 +434,7 @@ class Sancov:
                 ],
                 ignore_index=True,
             )
-            return (this_address_line_map, baseline_coverage)
+            return (this_address_line_map, baseline_coverage, view)
 
         elif self.coverage_mode == "partial":
             raise NotImplementedError(f"Coverage mode {self.coverage_mode} not implemented")

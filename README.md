@@ -85,6 +85,7 @@ Under `$OUTPUT_DIR`:
 | Path | Contents |
 |------|----------|
 | `test_suite/test_coverage.csv` | Suite baseline: source lines the LIT run covers (joint llc + opt, full-line mode) |
+| `test_suite/line_coverage_status.csv` | Per-line coverage status (`full` / `partial` / `none`) for all instrumented lines |
 | `test_suite/processed_sancov/` | Merged, symbolized symcov files — reuse these if you re-run `diff` with different new tests |
 | `new_tests/raw_sancov/` | Per-test raw sancov shards |
 | `diff/new_coverage.csv` | **Main result** — columns `test`, `file`, `line`, `covered-points`: fuzz tests that fill suite coverage gaps |
@@ -107,10 +108,10 @@ added-lines  →  test-suite  →  target-lines
 ```
 
 1. **`added-lines`** — parse `git show` for a commit and list every line added on the right-hand side of the diff.
-2. **`test-suite`** — same baseline coverage run as Workflow 1 (produces symcov under `processed_sancov/`).
+2. **`test-suite`** — same baseline coverage run as Workflow 1 (produces `line_coverage_status.csv` and other baseline artifacts).
 3. **`target-lines`** — for each line in the target CSV, check whether **every** SanitizerCoverage point on that line is off under the suite run. Fully uncovered lines go into the report; partially covered lines are counted but omitted from the CSV.
 
-Step 3 does **not** re-run LIT, so you can repeat it with different `added-lines.csv` inputs as long as the `test-suite` symcov artifacts are still present.
+Step 3 does **not** re-run LIT, so you can repeat it with different `added-lines.csv` inputs as long as `test_suite/line_coverage_status.csv` is still present.
 
 ### Configure and run
 
@@ -137,7 +138,7 @@ Under `$OUTPUT_DIR`:
 | Path | Contents |
 |------|----------|
 | `added-lines/added-lines.csv` | Added lines from the commit (`path`, `line_no`, `text`) |
-| `test_suite/processed_sancov/` | Baseline symcov (required by `target-lines`) |
+| `test_suite/line_coverage_status.csv` | Baseline per-line coverage (required by `target-lines`) |
 | `target_lines_report/target_lines_uncovered.csv` | **Main result** — added lines where every suite point on that line is off |
 
 ---
@@ -170,7 +171,7 @@ The workflows above call these modules. Use `--help` on any command for the full
 | `python -m coverage test-suite` | Baseline LIT coverage (both workflows) |
 | `python -m coverage new-tests` | Coverage from a fuzz-generated test corpus (Workflow 1) |
 | `python -m coverage diff` | Suite gaps filled by fuzz tests (Workflow 1) |
-| `python -m coverage target-lines` | Uncovered target lines vs baseline symcov (Workflow 2) |
+| `python -m coverage target-lines` | Uncovered target lines vs baseline `line_coverage_status.csv` (Workflow 2) |
 | `python -m added_lines` | Lines added by a git commit (Workflow 2) |
 | `python -m reduce` | Testcase reduction |
 

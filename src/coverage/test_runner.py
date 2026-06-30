@@ -6,9 +6,10 @@ import subprocess
 import pandas as pd
 from pathlib import Path
 
-from coverage.constants import TEST_FLAGS
+from coverage.constants import DEFAULT_LINE_COVERAGE_STATUS_FILE, TEST_FLAGS
 from coverage.filepaths import Filepaths
 from coverage.lit_config import ensure_lit_sancov_env_forwarding
+from coverage.line_coverage import export_line_coverage_status
 from coverage.run_config import build_run_config, resolved_lit_filter, write_run_config
 from coverage.sancov import Sancov
 
@@ -199,10 +200,14 @@ class TestRunner:
         opt_sancov.merge()
         opt_sancov.symbolize(opt_sancov.get_merged_sancov_path(), opt_sancov.get_merged_symcov_path())
 
-        llc_address_line_map, joint_coverage_df = llc_sancov.get_joint_coverage(
+        llc_address_line_map, joint_coverage_df, view = llc_sancov.get_joint_coverage(
             opt_sancov, self._path_filter
         )
 
+        export_line_coverage_status(
+            view,
+            self.filepaths.output_dir / DEFAULT_LINE_COVERAGE_STATUS_FILE,
+        )
         llc_address_line_map.to_csv(self.filepaths.output_dir / self.filepaths.llc_address_line_map_file, index=False)
         joint_coverage_df.to_csv(self.filepaths.output_dir / self.filepaths.joint_llc_and_opt_coverage_file, index=False)
 

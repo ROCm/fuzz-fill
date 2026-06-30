@@ -31,7 +31,7 @@ def main():
     p_target_lines = sub.add_parser(
         "target-lines",
         help=(
-            "List target-lines CSV rows where every symcov point on that line is uncovered "
+            "List target-lines CSV rows where every coverage point on that line is uncovered "
             "by the suite (expects ``coverage test-suite`` output and a lines CSV; "
             "no lit re-run)."
         ),
@@ -73,15 +73,23 @@ def main():
         required=True,
         help=(
             "Same directory passed as ``--output-dir`` to ``coverage test-suite`` "
-            "(must contain ``processed_sancov/llc.0.symcov``, ``opt.0.symcov``, and "
-            "``run_config.json``)."
+            "(must contain ``line_coverage_status.csv``)."
+        ),
+    )
+    p_target_lines.add_argument(
+        "--line-coverage-csv",
+        type=Path,
+        default=None,
+        help=(
+            "Baseline line coverage CSV (default: "
+            "``<test-suite-output-dir>/line_coverage_status.csv``)."
         ),
     )
     p_target_lines.add_argument(
         "--llvm-repo",
         type=Path,
         required=True,
-        help="LLVM checkout used to resolve ``path`` in the target-lines CSV (suffix match to symcov paths).",
+        help="LLVM checkout used to resolve ``path`` in the target-lines CSV (suffix match to baseline source paths).",
     )
     p_target_lines.add_argument(
         "--target-lines-csv",
@@ -127,7 +135,7 @@ def main():
 
     elif args.subcmd == "target-lines":
         print(
-            "Checking target lines from CSV against test-suite llc/opt symcov "
+            "Checking target lines from CSV against test-suite line coverage status "
             "(no lit re-run)",
             flush=True,
         )
@@ -138,6 +146,7 @@ def main():
         TargetLinesAnalyzer(
             filepaths,
             llvm_repo=args.llvm_repo,
+            line_coverage_csv=args.line_coverage_csv,
         ).run()
 
     else:

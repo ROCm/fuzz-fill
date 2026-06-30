@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# End-to-end: added-lines -> LIT baseline symcov -> target-lines uncovered list.
+# End-to-end: added-lines -> LIT baseline -> target-lines uncovered list.
 # Run from fuzz-fill repo root (same layout as scripts/test_coverage.sh).
 
 HOME=/home/agorzyns/local/dev
@@ -31,7 +31,7 @@ python -m added_lines \
     --commit "$COMMIT" \
     --output-dir "$ADDED_LINES_DIR"
 
-# 2) Baseline suite coverage (required symcov under TEST_SUITE_OUTPUT_DIR/processed_sancov/)
+# 2) Baseline suite coverage (required line_coverage_status.csv under TEST_SUITE_OUTPUT_DIR)
 python -m coverage test-suite \
     --output-dir "$TEST_SUITE_OUTPUT_DIR" \
     --llvm-bin "$LLVM_BIN" \

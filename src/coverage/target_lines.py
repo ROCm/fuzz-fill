@@ -1,21 +1,20 @@
-"""Compare target-lines CSV against test-suite symcov (llc + opt)."""
+"""Compare target-lines CSV against test-suite line coverage status."""
 
 from __future__ import annotations
 
 import csv
 from pathlib import Path
 
-from coverage.constants import DEFAULT_TARGET_LINES_REPORT
+from coverage.constants import DEFAULT_LINE_COVERAGE_STATUS_FILE, DEFAULT_TARGET_LINES_REPORT
 from coverage.filepaths import Filepaths
-from coverage.run_config import load_run_config
-from coverage.sancov import Sancov
+from coverage.line_coverage import load_line_coverage_status
 
 
-def _match_symcov_file(rel_path: str, symcov_files: set[str]) -> str | None:
-    """Map git-style relative path to an absolute path string present in symcov."""
+def _match_source_file(rel_path: str, source_files: frozenset[str]) -> str | None:
+    """Map git-style relative path to an absolute path string present in the baseline CSV."""
     rel_parts = Path(rel_path).as_posix().split("/")
     n = len(rel_parts)
-    for abs_f in symcov_files:
+    for abs_f in source_files:
         parts = Path(abs_f).as_posix().split("/")
         if len(parts) >= n and parts[-n:] == rel_parts:
             return abs_f
@@ -29,6 +28,7 @@ class TargetLinesAnalyzer:
         *,
         llvm_repo: Path,
         target_lines_csv: Path | None = None,
+        line_coverage_csv: Path | None = None,
     ) -> None:
         self.filepaths = filepaths
         self.llvm_repo = llvm_repo.resolve()
@@ -37,6 +37,13 @@ class TargetLinesAnalyzer:
             raise ValueError("target_lines_csv is required")
         if filepaths.output_test_suite_dir is None:
             raise ValueError("output_test_suite_dir is required")
+        if line_coverage_csv is not None:
+            self.line_coverage_csv = line_coverage_csv.resolve()
+        else:
+            self.line_coverage_csv = (
+                filepaths.output_test_suite_dir.resolve()
+                / DEFAULT_LINE_COVERAGE_STATUS_FILE
+            )
         report_name = filepaths.target_lines_report or DEFAULT_TARGET_LINES_REPORT
         self.report_path = filepaths.output_dir / report_name
 
@@ -48,11 +55,7 @@ class TargetLinesAnalyzer:
         Lines that are **partially** covered are omitted from the CSV but counted in the
         printed summary. Unknown paths and non-instrumented lines are summary-only.
         """
-        run_config = load_run_config(self.filepaths.output_test_suite_dir.resolve())
-        view = Sancov.load_joint_coverage_from_suite_dir(
-            self.filepaths.output_test_suite_dir.resolve(),
-            run_config["path_filter"],
-        )
+        baseline = load_line_coverage_status(self.line_coverage_csv)
 
         self.report_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -85,30 +88,30 @@ class TargetLinesAnalyzer:
                     ) from e
                 text = row.get("text", "")
 
-                sym_file = _match_symcov_file(rel, view.symcov_files)
-                if sym_file is None:
+                source_file = _match_source_file(rel, baseline.source_files)
+                if source_file is None:
                     cand = (self.llvm_repo / rel).resolve()
-                    if str(cand) in view.symcov_files:
-                        sym_file = str(cand)
+                    if str(cand) in baseline.source_files:
+                        source_file = str(cand)
 
-                if sym_file is None:
+                if source_file is None:
                     stats["unknown_file"] += 1
                 else:
-                    key = (sym_file, line_no)
-                    status = view.line_status.get(key)
+                    key = (source_file, line_no)
+                    status = baseline.line_status.get(key)
                     if status is None:
                         stats["not_instrumented"] += 1
                     elif status == "full":
                         stats["covered"] += 1
                     elif status == "none":
                         stats["all_uncovered"] += 1
-                        addrs = view.point_addresses_by_line.get(key, [])
+                        addrs = baseline.point_addresses_by_line.get(key, [])
                         uncovered_rows.append(
                             {
                                 "path": rel,
                                 "line_no": str(line_no),
                                 "text": text,
-                                "symcov_file": sym_file,
+                                "symcov_file": source_file,
                                 "point_addresses": ";".join(addrs),
                             }
                         )

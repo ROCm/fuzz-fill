@@ -11,6 +11,7 @@
 # RUN: %coverage target-lines --output-dir %t/target_lines --test-suite-output-dir %t/test_suite --llvm-repo %llvm-repo --target-lines-csv %S/fixtures/target-lines-sample.csv
 
 # RUN: test -f %t/test_suite/run_config.json
+# RUN: test -f %t/test_suite/line_coverage_status.csv
 # RUN: test -f %t/test_suite/test_coverage.csv
 # RUN: test -f %t/test_suite/llc_address_line_map.csv
 # RUN: test -f %t/diff/new_coverage.csv
