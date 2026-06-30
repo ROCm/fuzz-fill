@@ -9,4 +9,5 @@ LLVM_SANCOV_BUILD_DIR=$HOME/llvm-project/build-amdgpu-bb/bin/
   --venv ./venv/ \
   --llvm-build $LLVM_BUILD_DIR \
   --llvm-sancov-build $LLVM_SANCOV_BUILD_DIR \
+  --llvm-src $HOME/llvm-project \
   integration-tests/

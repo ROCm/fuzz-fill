@@ -23,10 +23,10 @@ You need **two** builds of the **same** LLVM revision:
 
 | Build | Purpose | How |
 |-------|---------|-----|
-| **Uninstrumented** | `sancov` merge/symbolize, `llvm-reduce`, `llc` in interesting scripts | `./scripts/build-llvm.sh --compiler-path /path/to/clang/bin . ./build-uninstrumented` |
-| **SanitizerCoverage** | Run `llvm-lit`, instrumented `llc`/`opt` | `./scripts/build-llvm-sancov.sh --compiler-path /path/to/clang/bin ./scripts/allowlist-amdgpu.txt . ./build-sancov` |
+| **Uninstrumented** | `sancov` merge/symbolize, `llvm-reduce`, LIT helper tools | `./scripts/build-llvm.sh /path/to/clang /path/to/clang++ llvm-project llvm-project/build-uninstrumented` |
+| **SanitizerCoverage** | Run `llvm-lit`, instrumented `llc`/`opt` | `./scripts/build-llvm-sancov.sh ./scripts/allowlist-amdgpu.txt llvm-project llvm-project/build-uninstrumented llvm-project/build-sancov` |
 
-Both scripts are run from your `llvm-project` checkout. Use the same compiler for both builds.
+Run `build-llvm.sh` first. The sancov build is compiled with `clang`/`clang++` from the uninstrumented `bin/`.
 
 **`python -m coverage test-suite`** patches **`<instrumented-build>/test/lit.site.cfg.py`** so LIT forwards **`UBSAN_OPTIONS`** to every test subprocess. The patch is idempotent and is re-applied if CMake regenerates that file.
 
@@ -185,7 +185,8 @@ Integration tests need both LLVM `bin` directories (same version):
   --venv ./venv/ \
   --llvm-build llvm-project/build-uninstrumented/bin/ \
   --llvm-sancov-build llvm-project/build-sancov/bin/ \
+  --llvm-src llvm-project/ \
   integration-tests/
 ```
 
-`--llvm-build` is the uninstrumented tree; `--llvm-sancov-build` is the SanitizerCoverage build.
+`--llvm-build` is the uninstrumented tree; `--llvm-sancov-build` is the SanitizerCoverage build; `--llvm-src` is the llvm-project checkout root (used as `%llvm-repo` in tests).

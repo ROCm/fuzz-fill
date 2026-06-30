@@ -3,12 +3,13 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: test.sh --venv <venv-dir> --llvm-build <bin-dir> --llvm-sancov-build <bin-dir> [lit args...]
+Usage: test.sh --venv <venv-dir> --llvm-build <bin-dir> --llvm-sancov-build <bin-dir> --llvm-src <src-dir> [lit args...]
 
 Required:
   --venv               Path to Python virtualenv directory.
   --llvm-build         Path to uninstrumented LLVM build bin (FileCheck, sancov).
   --llvm-sancov-build  Path to SanitizerCoverage-instrumented LLVM build bin (llc, opt).
+  --llvm-src           Path to llvm-project checkout root (directory containing llvm/).
 
 Any additional arguments are forwarded to lit unchanged.
 If no extra arguments are provided, lit runs on ".".
@@ -18,6 +19,7 @@ EOF
 venv_dir=""
 llvm_build=""
 llvm_sancov_build=""
+llvm_src=""
 lit_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -49,6 +51,15 @@ while [[ $# -gt 0 ]]; do
             llvm_sancov_build="$2"
             shift 2
             ;;
+        --llvm-src)
+            if [[ $# -lt 2 ]]; then
+                echo "error: --llvm-src requires a value" >&2
+                usage
+                exit 2
+            fi
+            llvm_src="$2"
+            shift 2
+            ;;
         --help|-h)
             usage
             exit 0
@@ -78,6 +89,12 @@ if [[ -z "$llvm_sancov_build" ]]; then
     exit 2
 fi
 
+if [[ -z "$llvm_src" ]]; then
+    echo "error: --llvm-src is required" >&2
+    usage
+    exit 2
+fi
+
 if [[ ! -d "$venv_dir" ]]; then
     echo "error: venv directory does not exist: $venv_dir" >&2
     exit 2
@@ -93,9 +110,15 @@ if [[ ! -d "$llvm_sancov_build" ]]; then
     exit 2
 fi
 
+if [[ ! -d "$llvm_src/llvm" ]]; then
+    echo "error: llvm-project checkout not found at: $llvm_src/llvm" >&2
+    exit 2
+fi
+
 export FUZZ_FILL_VENV_DIR="$venv_dir"
 export FUZZ_FILL_LLVM_BIN_DIR="$llvm_build"
 export FUZZ_FILL_LLVM_SANCOV_BIN_DIR="$llvm_sancov_build"
+export FUZZ_FILL_LLVM_SRC_DIR="$llvm_src"
 
 if [[ ${#lit_args[@]} -eq 0 ]]; then
     lit_args=(.)
