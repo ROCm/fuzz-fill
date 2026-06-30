@@ -20,9 +20,19 @@ for _fuzz_fill_name in ("UBSAN_OPTIONS",):
 """
 
 
+def llvm_build_root(instrumented_bin: Path) -> Path:
+    """Top of the instrumented LLVM build tree (parent of ``bin/``)."""
+    return instrumented_bin.resolve().parent
+
+
 def lit_site_config_path(instrumented_bin: Path) -> Path:
     """``test/lit.site.cfg.py`` for the instrumented LLVM build."""
-    return instrumented_bin.resolve().parent / LIT_SITE_CONFIG_REL
+    return llvm_build_root(instrumented_bin) / LIT_SITE_CONFIG_REL
+
+
+def lit_test_suite_path(instrumented_bin: Path) -> Path:
+    """Build-tree test suite entry point (same path ``check-llvm`` passes to llvm-lit)."""
+    return llvm_build_root(instrumented_bin) / "test"
 
 
 def ensure_lit_sancov_env_forwarding(instrumented_bin: Path) -> Path:
