@@ -176,9 +176,70 @@ The workflows above call these modules. Use `--help` on any command for the full
 
 ---
 
+## Docker test image
+
+The Docker image bundles a pinned LLVM revision, both instrumented and uninstrumented builds, and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
+
+**Scripts:** [`scripts/build-image.sh`](scripts/build-image.sh), [`scripts/tmp-container.sh`](scripts/tmp-container.sh)
+
+### Build
+
+From the repo root (first build compiles LLVM and can take a while):
+
+```bash
+./scripts/build-image.sh
+```
+
+The image is tagged `fuzz-fill-test:latest` by default. Override with `IMAGE_NAME` / `IMAGE_TAG`. The build passes your host `UID`, `GID`, and username so files created in the container are owned by you.
+
+Inside the image, LLVM and fuzz-fill live at fixed paths (required by `lit.site.cfg.py`):
+
+| Path | Contents |
+|------|----------|
+| `/work/llvm-project` | LLVM source checkout |
+| `/work/llvm-build-uninstrumented/bin` | Uninstrumented tools (`sancov`, …) |
+| `/work/llvm-build-sancov/bin` | SanitizerCoverage build (`llvm-lit`, `llc`, `opt`) |
+| `/work/fuzz-fill` | fuzz-fill checkout with venv |
+
+### Run a container
+
+```bash
+./scripts/tmp-container.sh                              # interactive shell
+./scripts/tmp-container.sh --bind-repo                  # shell with host repo mounted
+./scripts/tmp-container.sh --bind-repo <command> [args] # one-shot command
+```
+
+Without `--bind-repo`, the container uses the fuzz-fill copy baked into the image.
+
+With `--bind-repo`, your local checkout is mounted at `/work/fuzz-fill`.
+
+### Run integration tests in Docker
+
+```bash
+./scripts/tmp-container.sh ./integration-tests/test.sh \
+  --venv ./venv \
+  --llvm-build /work/llvm-build-uninstrumented/bin \
+  --llvm-sancov-build /work/llvm-build-sancov/bin \
+  --llvm-src /work/llvm-project \
+  -v integration-tests/
+```
+
+Use `--bind-repo` when testing local changes to fuzz-fill:
+
+```bash
+./scripts/tmp-container.sh --bind-repo ./integration-tests/test.sh \
+  --venv ./venv \
+  --llvm-build /work/llvm-build-uninstrumented/bin \
+  --llvm-sancov-build /work/llvm-build-sancov/bin \
+  --llvm-src /work/llvm-project \
+  -v integration-tests/
+```
+
+---
+
 ## Running integration tests
 
-Integration tests need both LLVM `bin` directories (same version):
+Integration tests need both LLVM `bin` directories (same version). Locally:
 
 ```bash
 ./integration-tests/test.sh \
@@ -188,5 +249,7 @@ Integration tests need both LLVM `bin` directories (same version):
   --llvm-src llvm-project/ \
   integration-tests/
 ```
+
+Or use the [Docker test image](#docker-test-image) paths above.
 
 `--llvm-build` is the uninstrumented tree; `--llvm-sancov-build` is the SanitizerCoverage build; `--llvm-src` is the llvm-project checkout root (used as `%llvm-repo` in tests).
