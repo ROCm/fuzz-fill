@@ -27,12 +27,14 @@ class TestRunner:
         mode: str,
         filepaths: Filepaths,
         lit_filter: str | None = None,
+        jobs: int | None = None,
         new_tests_limit: int = 1,
         debug: bool = False,
     ) -> None:
         self.mode = mode
         self.filepaths = filepaths
         self.raw_sancov_output_dir = filepaths.output_dir / "raw_sancov"
+        self.jobs = jobs
         self.debug = debug
 
         self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
@@ -107,6 +109,8 @@ class TestRunner:
             str(lit_suite),
             f"--filter={self._lit_filter}",
         ]
+        if self.jobs is not None:
+            argv.append(f"-j{self.jobs}")
         cwd = instrumented_bin.parent
         env = self.ubsan_environ_with_coverage()
         if self.debug:

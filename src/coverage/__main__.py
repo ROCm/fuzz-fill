@@ -49,6 +49,8 @@ def main():
         help="Path to the coverage-instrumented LLVM bin directory")
     p_test_suite.add_argument("--lit-filter", type=str, default=None,
         help="Prefix passed to llvm-lit as --filter=<PREFIX> (also selects symcov path scope).")
+    p_test_suite.add_argument("-j", "--jobs", type=int, default=None,
+        help="Number of parallel jobs forwarded to llvm-lit as -j<N>. If unset, llvm-lit chooses.")
 
     p_new_tests.add_argument("--instrumented-bin", type=Path, required=True, 
         help="Path to the coverage-instrumented LLVM bin directory")
@@ -104,6 +106,7 @@ def main():
             mode="lit",
             filepaths=filepaths,
             lit_filter=args.lit_filter,
+            jobs=args.jobs,
             debug=args.debug,
         )
         test_runner.run()
