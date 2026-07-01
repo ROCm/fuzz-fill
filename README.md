@@ -140,7 +140,7 @@ Under `$OUTPUT_DIR`:
 |------|----------|
 | `added-lines/added-lines.csv` | Added lines from the commit (`path`, `line_no`, `text`) |
 | `baseline/processed_sancov/` | Baseline symcov (required by `target-lines`) |
-| `commit_lines_report/commit_lines_uncovered.csv` | **Main result** — added lines where every suite point on that line is off |
+| `target_lines_report/target_lines_uncovered.csv` | **Main result** — added lines where every suite point on that line is off |
 
 ---
 

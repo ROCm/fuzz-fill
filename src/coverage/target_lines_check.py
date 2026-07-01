@@ -1,4 +1,4 @@
-"""Compare added-lines CSV against baseline symcov (llc + opt)."""
+"""Compare target-lines CSV against test-suite symcov (llc + opt)."""
 
 from __future__ import annotations
 
@@ -38,16 +38,16 @@ def _instrumented_line_keys(
     return a | b
 
 
-def run_commit_lines_check(
+def run_target_lines_check(
     *,
     baseline_output_dir: Path,
     llvm_repo: Path,
-    added_lines_csv: Path,
+    target_lines_csv: Path,
     path_filter: str,
     report_path: Path,
 ) -> None:
     """
-    Emit added source lines from *added_lines_csv* that the **existing** LIT test suite
+    Emit target source lines from *target_lines_csv* that the **existing** LIT test suite
     leaves **completely** cold on every SanitizerCoverage site for that source line
     (joint llc/opt view).
 
@@ -66,12 +66,55 @@ def run_commit_lines_check(
     Rows with unknown path, or no instrumentation for that line under the filter, are
     counted in the printed summary only (they are omitted from the CSV).
     """
-    with log_timing(logger, "commit lines check"):
-        llc_path, opt_path = _processed_symcov_paths(baseline_output_dir)
-        if not llc_path.is_file():
+    llc_path, opt_path = _processed_symcov_paths(baseline_output_dir)
+    if not llc_path.is_file():
+        raise SystemExit(
+            f"Missing {llc_path}. Run ``coverage test-suite`` first (or pass the same "
+            f"--output-dir you used for that run as --test-suite-output-dir)."
+        )
+    if not opt_path.is_file():
+        raise SystemExit(
+            f"Missing {opt_path}. Run ``coverage test-suite`` first so llc and opt symcov exist."
+        )
+
+    with llc_path.open(encoding="utf-8") as f:
+        llc_symcov = json.load(f)
+    with opt_path.open(encoding="utf-8") as f:
+        opt_symcov = json.load(f)
+
+    this_df = Sancov.get_coverage_df(llc_symcov, path_filter)
+    other_df = Sancov.get_coverage_df(opt_symcov, path_filter)
+    merged_cov = Sancov.merged_llc_opt_coverage_df(this_df, other_df)
+    baseline_lines = Sancov.jointly_fully_covered_line_keys_from_merged(merged_cov)
+    all_uncovered_lines = Sancov.jointly_all_points_uncovered_line_keys_from_merged(
+        merged_cov
+    )
+    addr_map = Sancov.all_uncovered_line_point_addresses(
+        merged_cov, all_uncovered_lines
+    )
+    instrumented = _instrumented_line_keys(this_df, other_df)
+    symcov_files: set[str] = set(this_df["file"].unique()) | set(other_df["file"].unique())
+
+    llvm_repo = llvm_repo.resolve()
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+
+    uncovered_rows: list[dict[str, str]] = []
+    stats = {
+        "covered": 0,
+        "all_uncovered": 0,
+        "partial": 0,
+        "not_instrumented": 0,
+        "unknown_file": 0,
+    }
+
+    with target_lines_csv.open(encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            raise SystemExit(f"Empty or invalid CSV: {target_lines_csv}")
+        need = {"path", "line_no", "text"}
+        if not need.issubset(set(reader.fieldnames)):
             raise SystemExit(
-                f"Missing {llc_path}. Run ``coverage baseline`` first (or pass the same "
-                f"--output-dir you used for that run as --baseline-output-dir)."
+                f"{target_lines_csv}: expected columns {sorted(need)}, got {reader.fieldnames!r}"
             )
         if not opt_path.is_file():
             raise SystemExit(
@@ -108,14 +151,14 @@ def run_commit_lines_check(
             "unknown_file": 0,
         }
 
-        with added_lines_csv.open(encoding="utf-8", newline="") as f:
+        with target_lines_csv.open(encoding="utf-8", newline="") as f:
             reader = csv.DictReader(f)
             if reader.fieldnames is None:
-                raise SystemExit(f"Empty or invalid CSV: {added_lines_csv}")
+                raise SystemExit(f"Empty or invalid CSV: {target_lines_csv}")
             need = {"path", "line_no", "text"}
             if not need.issubset(set(reader.fieldnames)):
                 raise SystemExit(
-                    f"{added_lines_csv}: expected columns {sorted(need)}, got {reader.fieldnames!r}"
+                    f"{target_lines_csv}: expected columns {sorted(need)}, got {reader.fieldnames!r}"
                 )
             for row in reader:
                 rel = row["path"].strip()
@@ -162,10 +205,10 @@ def run_commit_lines_check(
             w.writeheader()
             w.writerows(uncovered_rows)
 
-        total_in = sum(stats.values())
-        print(
-            f"Wrote {report_path} ({len(uncovered_rows)} all-points-uncovered rows of {total_in} added lines). "
-            f"covered={stats['covered']} all_uncovered={stats['all_uncovered']} partial={stats['partial']} "
-            f"not_instrumented={stats['not_instrumented']} unknown_file={stats['unknown_file']}",
-            flush=True,
-        )
+    total_in = sum(stats.values())
+    print(
+        f"Wrote {report_path} ({len(uncovered_rows)} all-points-uncovered rows of {total_in} target lines). "
+        f"covered={stats['covered']} all_uncovered={stats['all_uncovered']} partial={stats['partial']} "
+        f"not_instrumented={stats['not_instrumented']} unknown_file={stats['unknown_file']}",
+        flush=True,
+    )

@@ -10,11 +10,11 @@ from coverage.constants import (
     DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_NEW_COVERAGE_CSV,
-    DEFAULT_COMMIT_LINES_REPORT,
+    DEFAULT_TARGET_LINES_REPORT,
 )
 
 from coverage.analyser import CoverageAnalyzer
-from coverage.commit_lines_check import run_commit_lines_check
+from coverage.target_lines_check import run_target_lines_check
 from coverage.run_config import load_run_config
 from fuzz_fill.log import add_log_level_argument, configure_logging, get_logger, log_timing
 
@@ -156,12 +156,12 @@ def main():
         )
         with log_timing(logger, "target-lines"):
             args.output_dir.mkdir(parents=True, exist_ok=True)
-            report_path = args.output_dir / DEFAULT_COMMIT_LINES_REPORT
+            report_path = args.output_dir / DEFAULT_TARGET_LINES_REPORT
             run_config = load_run_config(args.baseline_output_dir.resolve())
-            run_commit_lines_check(
+            run_target_lines_check(
                 baseline_output_dir=args.baseline_output_dir.resolve(),
                 llvm_repo=args.llvm_repo,
-                added_lines_csv=args.target_lines_csv.resolve(),
+                target_lines_csv=args.target_lines_csv.resolve(),
                 path_filter=run_config["path_filter"],
                 report_path=report_path,
             )
