@@ -25,6 +25,15 @@
 # RUN: %FileCheck %s --input-file=%t/baseline/line_coverage_summary.csv --check-prefix=BASELINE_CSV
 # BASELINE_CSV: {{.*}}/AMDGPUAlwaysInlinePass.cpp,160,full,
 
+# COM: These lines are uncovered by the test suite slice (none in line_coverage_summary.csv)
+# COM: but covered by the external test — manually confirmed at LLVM rev. 40cd48fd385b.
+# RUN: %FileCheck %s --input-file=%t/test_suite/line_coverage_summary.csv --check-prefix=SUMMARY_NONE
+# SUMMARY_NONE-DAG: {{.*}}AMDGPUAsmPrinter.cpp,211,none,
+# SUMMARY_NONE-DAG: {{.*}}AMDGPUAsmPrinter.cpp,588,none,
+# SUMMARY_NONE-DAG: {{.*}}AMDGPUAsmPrinter.cpp,596,none,
+# SUMMARY_NONE-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,590,none,
+# SUMMARY_NONE-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,680,none,
+
 # COM: These coverage gaps, uncovered by the test suite slice but covered by the external test, have been manually confirmed in LLVM rev. 40cd48fd385b.
 # RUN: %FileCheck %s --input-file=%t/incremental/new_coverage.csv --check-prefix=GAP_CSV
 # GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUAsmPrinter.cpp,211,
@@ -48,7 +57,7 @@
 # TARGET_CSV-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,590,
 # TARGET_CSV-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,680,
 
-# COM: AMDGPUAliasAnalysis.cpp:103 is in the sample CSV but is fully covered by the
-# COM: test suite slice, so target-lines must filter it out of the report.
+# COM: AMDGPUAliasAnalysis.cpp:103 is fully covered (full in line_coverage_summary.csv) but
+# COM: present in the sample target CSV, so target-lines must filter it out of the report.
 # RUN: %FileCheck %s --input-file=%t/target_lines/target_lines_uncovered.csv --check-prefix=TARGET_CSV_NOT
 # TARGET_CSV_NOT-NOT: /AMDGPUAliasAnalysis.cpp,103,
