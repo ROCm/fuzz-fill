@@ -103,11 +103,11 @@ RUN echo "=== fuzz-fill image LLVM source: $(cat /work/.llvm-source) ===" \
 
 USER "${UID}"
 WORKDIR /work/fuzz-fill
-RUN python3 -m venv venv && \
-    ./venv/bin/pip install --no-cache-dir -e . && \
-    echo 'source /work/fuzz-fill/venv/bin/activate' >> ~/.bashrc
+RUN python3 -m venv /work/fuzz-fill-venv && \
+    /work/fuzz-fill-venv/bin/pip install --no-cache-dir -e /work/fuzz-fill && \
+    echo 'source /work/fuzz-fill-venv/bin/activate' >> ~/.bashrc
 
-# Keep the venv active in every container (non-interactive and interactive).
-ENV VIRTUAL_ENV=/work/fuzz-fill/venv \
-    PATH="/work/fuzz-fill/venv/bin:${PATH}" \
-    PYTHON="/work/fuzz-fill/venv/bin/python"
+# Keep the venv outside /work/fuzz-fill so --bind-repo mounts do not hide it.
+ENV VIRTUAL_ENV=/work/fuzz-fill-venv \
+    PATH="/work/fuzz-fill-venv/bin:${PATH}" \
+    PYTHON="/work/fuzz-fill-venv/bin/python"

@@ -5,8 +5,7 @@
 #   tmp-container.sh <command> [args] run a command
 #   tmp-container.sh --bind-repo ...  mount local fuzz-fill over /work/fuzz-fill
 #
-# With --bind-repo, a named Docker volume keeps /work/fuzz-fill/venv so the
-# image Python env survives across bind mounts (created on first use).
+# The Python venv lives at /work/fuzz-fill-venv (outside the repo mount).
 
 set -euo pipefail
 
@@ -17,7 +16,7 @@ IMAGE_NAME="${IMAGE_NAME:-fuzz-fill-test}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
 CONTAINER_WORKDIR="/work/fuzz-fill"
-VENV_VOLUME="${FUZZ_FILL_VENV_VOLUME:-fuzz-fill-tmp-venv}"
+CONTAINER_VENV="/work/fuzz-fill-venv"
 
 usage() {
     cat <<EOF
@@ -28,17 +27,15 @@ Usage: $(basename "$0") [--bind-repo] [command [args...]]
 
 Options:
   --bind-repo              Bind the local fuzz-fill checkout at ${CONTAINER_WORKDIR}.
-                           Uses Docker volume ${VENV_VOLUME} for the venv so edits on
-                           the host do not hide the container Python environment.
+                           The venv at ${CONTAINER_VENV} stays outside the mount.
 
 Environment:
   IMAGE_NAME, IMAGE_TAG    Docker image (default: fuzz-fill-test:latest)
-  FUZZ_FILL_VENV_VOLUME    Named volume for venv when using --bind-repo
 
 Examples:
   $(basename "$0")
   $(basename "$0") --bind-repo
-  $(basename "$0") ./integration-tests/test.sh --venv ./venv \\
+  $(basename "$0") ./integration-tests/test.sh --venv ${CONTAINER_VENV} \\
       --llvm-build /work/llvm-build-uninstrumented/bin \\
       --llvm-sancov-build /work/llvm-build-sancov/bin \\
       --llvm-src /work/llvm-project -v integration-tests/
@@ -81,33 +78,14 @@ docker_args=(--rm)
 mount_args=()
 
 if [[ "${bind_repo}" -eq 1 ]]; then
-    mount_args+=(
-        -v "${REPO_ROOT}:${CONTAINER_WORKDIR}"
-        -v "${VENV_VOLUME}:${CONTAINER_WORKDIR}/venv"
-    )
+    mount_args+=(-v "${REPO_ROOT}:${CONTAINER_WORKDIR}")
 fi
-
-ensure_venv_cmd='if [[ ! -x /work/fuzz-fill/venv/bin/python ]]; then
-  echo "Initializing venv in volume '"${VENV_VOLUME}"'..."
-  python3 -m venv /work/fuzz-fill/venv
-  /work/fuzz-fill/venv/bin/pip install --no-cache-dir -e /work/fuzz-fill
-fi'
 
 if [[ $# -eq 0 ]]; then
     docker_args+=(-it)
-    if [[ "${bind_repo}" -eq 1 ]]; then
-        exec docker run "${docker_args[@]}" "${mount_args[@]}" -w "${CONTAINER_WORKDIR}" \
-            "${IMAGE}" bash -lc "${ensure_venv_cmd}; exec bash"
-    else
-        exec docker run "${docker_args[@]}" -w "${CONTAINER_WORKDIR}" \
-            "${IMAGE}" bash -l
-    fi
+    exec docker run "${docker_args[@]}" "${mount_args[@]}" -w "${CONTAINER_WORKDIR}" \
+        "${IMAGE}" bash -l
 fi
 
-if [[ "${bind_repo}" -eq 1 ]]; then
-    exec docker run "${docker_args[@]}" "${mount_args[@]}" -w "${CONTAINER_WORKDIR}" \
-        "${IMAGE}" bash -lc "${ensure_venv_cmd}; exec \"\$@\"" bash "$@"
-else
-    exec docker run "${docker_args[@]}" -w "${CONTAINER_WORKDIR}" \
-        "${IMAGE}" "$@"
-fi
+exec docker run "${docker_args[@]}" "${mount_args[@]}" -w "${CONTAINER_WORKDIR}" \
+    "${IMAGE}" "$@"
