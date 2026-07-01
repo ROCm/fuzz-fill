@@ -14,7 +14,9 @@ class CoverageAnalyzer:
     def __init__(self, filepaths: Filepaths, mode: Literal["partial", "full"]):
         self.filepaths = filepaths
         self.mode = mode
-        self.baseline_coverage_file = filepaths.output_baseline_dir / filepaths.joint_llc_and_opt_coverage_file
+        self.line_coverage_summary_file = (
+            filepaths.output_baseline_dir / filepaths.line_coverage_summary_file
+        )
         self.llc_address_line_map_file = filepaths.output_baseline_dir / filepaths.llc_address_line_map_file
         self.new_coverage_csv = filepaths.output_dir / filepaths.new_coverage_csv
 
@@ -28,9 +30,9 @@ class CoverageAnalyzer:
 
     def get_full_incremental_coverage(self) -> None:
         with log_timing(logger, "incremental coverage analysis"):
-            baseline_coverage = pd.read_csv(self.baseline_coverage_file)
+            line_coverage_summary = pd.read_csv(self.line_coverage_summary_file)
             llc_address_line_map = pd.read_csv(self.llc_address_line_map_file)
-            
+
             llc_address_line_map["line"] = llc_address_line_map["line"].astype(int)
             llc_address_line_map["point_llc"] = llc_address_line_map["point_llc"].map(
                 lambda x: Sancov.format_hex_address(x) if pd.notna(x) else x
@@ -38,9 +40,10 @@ class CoverageAnalyzer:
             llc_address_line_map["n_addresses_in_line"] = llc_address_line_map.groupby(["file", "line"], sort=False)["file"].transform("count")
             llc_address_line_map["file_line"] = llc_address_line_map["file"] + ":" + llc_address_line_map["line"].astype(str)
 
+            full_lines = line_coverage_summary[line_coverage_summary["coverage"] == "full"]
             baseline_covered_lines = {
                 (file, int(line))
-                for file, line in zip(baseline_coverage["file"], baseline_coverage["line"])
+                for file, line in zip(full_lines["file"], full_lines["line"])
             }
 
             self.new_coverage_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -74,7 +77,7 @@ class CoverageAnalyzer:
                     if len(new_coverage_df) == 0:
                         print(f"Candidate test {test_name} has no covered addresses in files that we are interested in")
                         continue
-                    
+
                     print(f"Candidate test {test_name} has {len(new_coverage_df)} new covered addresses in target files")
 
                     # Check whether the newly covered addresses constitute a new line
@@ -86,7 +89,7 @@ class CoverageAnalyzer:
 
                         per_test_csv = test_name
                         unique_locations = new_test_covered_lines[["file", "line"]].drop_duplicates()
-                        
+
                         print(f"Candidate test {test_name} has {len(unique_locations)} covered lines in target files")
                         keys = [
                             (file, int(line))

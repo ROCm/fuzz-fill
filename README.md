@@ -86,7 +86,7 @@ Under `$OUTPUT_DIR`:
 
 | Path | Contents |
 |------|----------|
-| `baseline/test_coverage.csv` | Suite baseline: source lines the LIT run covers (joint llc + opt, full-line mode) |
+| `baseline/line_coverage_summary.csv` | Per-line baseline coverage (joint llc + opt): `full`, `partial`, or `none` |
 | `baseline/processed_sancov/` | Merged, symbolized symcov files — reuse these if you re-run `incremental` with different candidate tests |
 | `candidate_tests/raw_sancov/` | Per-test raw sancov shards |
 | `incremental/new_coverage.csv` | **Main result** — columns `test`, `file`, `line`, `covered-points`: fuzz tests that fill suite coverage gaps |

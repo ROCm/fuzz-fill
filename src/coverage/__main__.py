@@ -7,7 +7,7 @@ from coverage.filepaths import Filepaths
 from coverage.test_runner import TestRunner
 from coverage.constants import (
     DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
-    DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE,
+    DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_NEW_COVERAGE_CSV,
     DEFAULT_TARGET_LINES_REPORT,
@@ -184,7 +184,7 @@ def get_filepaths(args: argparse.Namespace) -> Filepaths:
         output_baseline_dir=getattr(args, "baseline_output_dir", None),
         output_candidate_tests_dir=getattr(args, "candidate_tests_output_dir", None),
         llc_address_line_map_file=DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
-        joint_llc_and_opt_coverage_file=DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE,
+        line_coverage_summary_file=DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
         new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,
     )
 if __name__ == "__main__":
