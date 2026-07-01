@@ -1,19 +1,54 @@
-# COM: End-to-end smoke for scripts/test_coverage.sh shape: test-suite (llvm-lit),
-# COM: new-tests (standalone .ll under fixtures), then diff. Requires a matching
-# COM: llvm-project checkout + two builds (see README "Running tests").
-# COM: Lit filter is a small AMDGPU slice (CodeGen/AMDGPU/loop); new-tests uses --n 1.
+# COM: End-to-end check of the coverage pipeline over an AMDGPU test-suite slice:
+# COM:   a) test-suite:   measure coverage of the existing suite slice (the baseline)
+# COM:   b) new-tests:    measure coverage of an external test
+# COM:   c) diff:         report lines the new test covers that the baseline misses
+# COM:   d) target-lines: report which specific lines the baseline leaves uncovered
+# COM:
+# COM: Cross-check: the gaps diff reports must match the lines target-lines flags, and a
+# COM: baseline-covered line must show up in test-suite output but not in diff/target-lines.
 
-# RUN: rm -rf %t && mkdir -p %t/test_suite %t/new_tests %t/diff %t/target_lines && \
-# RUN: LLVM_BIN=$(dirname %FileCheck) && INSTR=$(dirname %sancov-llc) && \
-# RUN: %coverage test-suite --output-dir %t/test_suite --llvm-bin "$LLVM_BIN" --instrumented-bin "$INSTR" --lit-filter CodeGen/AMDGPU/loop
-# RUN: %coverage new-tests --output-dir %t/new_tests --instrumented-bin "$INSTR" --new-tests-dir %S/fixtures/coverage-new-tests --n 1
-# RUN: %coverage diff --output-dir %t/diff --llvm-bin "$LLVM_BIN" --test-suite-output-dir %t/test_suite --new-tests-output-dir %t/new_tests
+# RUN: rm -rf %t && mkdir -p %t/test_suite %t/new_tests %t/diff %t/target_lines
+# RUN: %coverage test-suite --output-dir %t/test_suite --llvm-bin "$(dirname %FileCheck)" --instrumented-bin "$(dirname %sancov-llc)" --lit-filter CodeGen/AMDGPU/loop
+# RUN: %coverage new-tests --output-dir %t/new_tests --instrumented-bin "$(dirname %sancov-llc)" --new-tests-dir %S/fixtures/coverage-new-tests --n 1
+# RUN: %coverage diff --output-dir %t/diff --llvm-bin "$(dirname %FileCheck)" --test-suite-output-dir %t/test_suite --new-tests-output-dir %t/new_tests
 # RUN: %coverage target-lines --output-dir %t/target_lines --test-suite-output-dir %t/test_suite --llvm-repo %llvm-repo --target-lines-csv %S/fixtures/target-lines-sample.csv
 
 # RUN: test -f %t/test_suite/run_config.json
 # RUN: test -f %t/test_suite/test_coverage.csv
 # RUN: test -f %t/test_suite/llc_address_line_map.csv
 # RUN: test -f %t/diff/new_coverage.csv
-# RUN: test -f %t/target_lines/target_lines_uncovered.csv
-# RUN: %FileCheck %s --input-file=%t/target_lines/target_lines_uncovered.csv --check-prefix=TARGET_CSV --implicit-check-not={{.}}
-# TARGET_CSV: path,line_no,text,symcov_file,point_addresses
+# RUN: test -f %t/target_lines/commit_lines_uncovered.csv
+
+# COM: AMDGPUAlwaysInlinePass.cpp:160 is covered by the test suite slice itself,
+# COM: so it must appear in the baseline test_coverage.csv and must NOT be reported
+# COM: as a new gain by diff in new_coverage.csv.
+# RUN: %FileCheck %s --input-file=%t/test_suite/test_coverage.csv --check-prefix=BASELINE_CSV
+# BASELINE_CSV: {{.*}}/AMDGPUAlwaysInlinePass.cpp,160,
+
+# COM: These coverage gaps, uncovered by the test suite slice but covered by the external test, have been manually confirmed in LLVM rev. 40cd48fd385b.
+# RUN: %FileCheck %s --input-file=%t/diff/new_coverage.csv --check-prefix=GAP_CSV
+# GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUAsmPrinter.cpp,211,
+# GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUAsmPrinter.cpp,588,
+# GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUAsmPrinter.cpp,596,
+# GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUHSAMetadataStreamer.cpp,590,
+# GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUHSAMetadataStreamer.cpp,680,
+
+# COM: AMDGPUAlwaysInlinePass.cpp:160 is already covered by the test suite slice, so
+# COM: diff must NOT report it as a new gain.
+# RUN: %FileCheck %s --input-file=%t/diff/new_coverage.csv --check-prefix=NO_BASELINE_GAIN
+# NO_BASELINE_GAIN-NOT: /AMDGPUAlwaysInlinePass.cpp,160,
+
+# COM: The same coverage gaps reported by diff (GAP_CSV) must be reported as
+# COM: all-points-uncovered by target-lines when fed as target lines.
+# RUN: %FileCheck %s --input-file=%t/target_lines/commit_lines_uncovered.csv --check-prefix=TARGET_CSV
+# TARGET_CSV-DAG: path,line_no,text,symcov_file,point_addresses
+# TARGET_CSV-DAG: {{.*}}AMDGPUAsmPrinter.cpp,211,
+# TARGET_CSV-DAG: {{.*}}AMDGPUAsmPrinter.cpp,588,
+# TARGET_CSV-DAG: {{.*}}AMDGPUAsmPrinter.cpp,596,
+# TARGET_CSV-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,590,
+# TARGET_CSV-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,680,
+
+# COM: AMDGPUAliasAnalysis.cpp:103 is in the sample CSV but is fully covered by the
+# COM: test suite slice, so target-lines must filter it out of the report.
+# RUN: %FileCheck %s --input-file=%t/target_lines/commit_lines_uncovered.csv --check-prefix=TARGET_CSV_NOT
+# TARGET_CSV_NOT-NOT: /AMDGPUAliasAnalysis.cpp,103,
