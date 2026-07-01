@@ -10,11 +10,12 @@ from coverage.constants import (
     DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_NEW_COVERAGE_CSV,
-    DEFAULT_TARGET_LINES_REPORT,
+    DEFAULT_COMMIT_LINES_REPORT,
 )
 
 from coverage.analyser import CoverageAnalyzer
-from coverage.target_lines import TargetLinesAnalyzer
+from coverage.commit_lines_check import run_commit_lines_check
+from coverage.run_config import load_run_config
 
 def main():
 
@@ -132,13 +133,15 @@ def main():
             flush=True,
         )
         args.output_dir.mkdir(parents=True, exist_ok=True)
-        filepaths.output_test_suite_dir = args.test_suite_output_dir
-        filepaths.target_lines_csv = args.target_lines_csv.resolve()
-        filepaths.target_lines_report = DEFAULT_TARGET_LINES_REPORT
-        TargetLinesAnalyzer(
-            filepaths,
+        report_path = args.output_dir / DEFAULT_COMMIT_LINES_REPORT
+        run_config = load_run_config(args.test_suite_output_dir.resolve())
+        run_commit_lines_check(
+            test_suite_output_dir=args.test_suite_output_dir.resolve(),
             llvm_repo=args.llvm_repo,
-        ).run()
+            added_lines_csv=args.target_lines_csv.resolve(),
+            path_filter=run_config["path_filter"],
+            report_path=report_path,
+        )
 
     else:
         print(f"Unknown subcommand: {args.subcmd}")
@@ -159,8 +162,6 @@ def get_filepaths(args: argparse.Namespace) -> Filepaths:
         llc_address_line_map_file=DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
         joint_llc_and_opt_coverage_file=DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE,
         new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,
-        target_lines_csv=getattr(args, "target_lines_csv", None),
-        target_lines_report=DEFAULT_TARGET_LINES_REPORT,
     )
 if __name__ == "__main__":
     main()

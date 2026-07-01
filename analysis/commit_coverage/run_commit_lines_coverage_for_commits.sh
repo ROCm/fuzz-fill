@@ -18,7 +18,7 @@
 # Optional environment:
 #   FUZZ_FILL_ROOT     — fuzz-fill repo root (default: ../.. from this script)
 #   LLVM_REPO          — llvm-project path (default: sibling of fuzz-fill)
-#   OUTPUT_ROOT_BASE   — under this, each run uses bb_coverage_target_lines_<short_sha>/
+#   OUTPUT_ROOT_BASE   — under this, each run uses bb_coverage_commit_lines_<short_sha>/
 #                        (default: $FUZZ_FILL_ROOT/data/coverage_output)
 #   FILTER             — lit filter (default: CodeGen/SPIRV); symcov path scope is derived
 #   LLVM_BIN           — dir with clang for LIT (default: $LLVM_REPO/build/bin)
@@ -122,10 +122,10 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 		exit 1
 	fi
 	SHORT="$(git -C "${LLVM_REPO}" rev-parse --short "${RESOLVED}")"
-	OUT="${OUTPUT_ROOT_BASE}/bb_coverage_target_lines_${SHORT}"
+	OUT="${OUTPUT_ROOT_BASE}/bb_coverage_commit_lines_${SHORT}"
 	TEST_SUITE_OUTPUT_DIR="${OUT}/test_suite"
 	ADDED_LINES_DIR="${OUT}/added-lines"
-	TARGET_LINES_REPORT_DIR="${OUT}/target_lines_report"
+	COMMIT_LINES_REPORT_DIR="${OUT}/commit_lines_report"
 	RESOURCE_CSV="${OUT}/resource_stats.csv"
 
 	mkdir -p "${OUT}"
@@ -163,7 +163,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 		echo "SKIP_BUILD=1 — not running ${BUILD_SCRIPT_DISPLAY}"
 	fi
 
-	mkdir -p "${ADDED_LINES_DIR}" "${TARGET_LINES_REPORT_DIR}"
+	mkdir -p "${ADDED_LINES_DIR}" "${COMMIT_LINES_REPORT_DIR}"
 
 	cd "${FUZZ_FILL_ROOT}"
 
@@ -188,7 +188,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 
 	echo "Computing target-lines report ..."
 	python -m coverage target-lines \
-		--output-dir "${TARGET_LINES_REPORT_DIR}" \
+		--output-dir "${COMMIT_LINES_REPORT_DIR}" \
 		--test-suite-output-dir "${TEST_SUITE_OUTPUT_DIR}" \
 		--llvm-repo "${LLVM_REPO}" \
 		--target-lines-csv "${ADDED_LINES_DIR}/added-lines.csv"
@@ -204,7 +204,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 			"${TS_WALL}" "${TS_USER}" "${TS_SYS}" "${TS_RSS}"
 	} >"${RESOURCE_CSV}"
 
-	echo "Done ${SHORT}: ${TARGET_LINES_REPORT_DIR}/target_lines_uncovered.csv"
+	echo "Done ${SHORT}: ${COMMIT_LINES_REPORT_DIR}/commit_lines_uncovered.csv"
 	echo "Resource stats: ${RESOURCE_CSV}"
 done
 

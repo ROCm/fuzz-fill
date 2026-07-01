@@ -2,41 +2,17 @@
 
 from __future__ import annotations
 
-import dataclasses
-import json
 import shutil
 import subprocess
 import tempfile
-from pathlib import Path
-from typing import Literal
-
-import numpy as np
+import json
 import pandas as pd
+import numpy as np
+from pathlib import Path
 
-from coverage.constants import DEFAULT_LIT_FILTER, UNION_BATCH_SIZE
+from coverage.constants import DEFAULT_LIT_FILTER
 from coverage.run_config import path_filter_from_lit_filter
-
-
-@dataclasses.dataclass(frozen=True)
-class JointCoverageView:
-    """Joint llc/opt symcov analysis for a filtered test-suite run."""
-
-    merged_cov: pd.DataFrame
-    this_df: pd.DataFrame
-    other_df: pd.DataFrame
-    line_status: dict[tuple[str, int], Literal["full", "partial", "none"]]
-    instrumented_lines: set[tuple[str, int]]
-    symcov_files: set[str]
-    point_addresses_by_line: dict[tuple[str, int], list[str]]
-
-    @property
-    def fully_covered_lines(self) -> set[tuple[str, int]]:
-        return {k for k, v in self.line_status.items() if v == "full"}
-
-    @property
-    def all_uncovered_lines(self) -> set[tuple[str, int]]:
-        return {k for k, v in self.line_status.items() if v == "none"}
-
+from typing import Literal
 
 class Sancov:
 
@@ -47,7 +23,7 @@ class Sancov:
         raw_sancov_dir: Path | None = None,
         suffix: str | None = None,
         coverage_mode: Literal["partial", "full"] = "full",
-        union_batch: int = UNION_BATCH_SIZE,
+        union_batch: int = 200,
     ) -> None:
         self.sancov_bin = Path(bin_dir, "sancov")
         self.instrumented_bin = instrumented_bin
@@ -146,47 +122,47 @@ class Sancov:
         return merged
 
     @staticmethod
-    def line_status_from_merged(
+    def jointly_fully_covered_line_keys_from_merged(
         merged: pd.DataFrame,
-    ) -> dict[tuple[str, int], Literal["full", "partial", "none"]]:
-        """Per ``(file, line)`` coverage status from a llc/opt merged DataFrame."""
-        m = merged.copy()
-        m["line"] = m["line"].astype(int)
+    ) -> set[tuple[str, int]]:
+        """``(file, line)`` where every merged row has ``covered_either`` set."""
+        return Sancov.full_line_keys(merged, covered_column="covered_either")
+
+    @staticmethod
+    def jointly_all_points_uncovered_line_keys_from_merged(
+        merged: pd.DataFrame,
+    ) -> set[tuple[str, int]]:
+        """``(file, line)`` where no merged row has ``covered_either`` set."""
         agg = (
-            m.groupby(["file", "line"], as_index=False)
+            merged.groupby(["file", "line"], as_index=False)
             .agg(
                 n_covered=("covered_either", "sum"),
                 n_points=("covered_either", "count"),
             )
         )
-        status: dict[tuple[str, int], Literal["full", "partial", "none"]] = {}
-        for row in agg.itertuples(index=False):
-            if row.n_covered == 0:
-                cov: Literal["full", "partial", "none"] = "none"
-            elif row.n_covered == row.n_points:
-                cov = "full"
-            else:
-                cov = "partial"
-            status[(row.file, int(row.line))] = cov
-        return status
+        none_hit = agg[(agg["n_covered"] == 0) & (agg["n_points"] > 0)]
+        return set(zip(none_hit["file"], none_hit["line"]))
 
     @staticmethod
-    def point_addresses_by_line_from_merged(
-        merged: pd.DataFrame,
-        line_keys: set[tuple[str, int]] | None = None,
-    ) -> dict[tuple[str, int], list[str]]:
-        """Distinct sanitizer point ids (``point_this`` / ``point_other``) per line."""
-        if line_keys is None:
-            m = merged.copy()
-            m["line"] = m["line"].astype(int)
-            line_keys = set(zip(m["file"], m["line"]))
-        return Sancov._point_addresses_for_lines(merged, line_keys)
+    def jointly_fully_covered_line_keys_from_llc_opt_dfs(
+        this_df: pd.DataFrame, other_df: pd.DataFrame
+    ) -> set[tuple[str, int]]:
+        merged = Sancov.merged_llc_opt_coverage_df(this_df, other_df)
+        return Sancov.jointly_fully_covered_line_keys_from_merged(merged)
 
     @staticmethod
-    def _point_addresses_for_lines(
+    def jointly_all_points_uncovered_line_keys_from_llc_opt_dfs(
+        this_df: pd.DataFrame, other_df: pd.DataFrame
+    ) -> set[tuple[str, int]]:
+        merged = Sancov.merged_llc_opt_coverage_df(this_df, other_df)
+        return Sancov.jointly_all_points_uncovered_line_keys_from_merged(merged)
+
+    @staticmethod
+    def all_uncovered_line_point_addresses(
         merged: pd.DataFrame,
         line_keys: set[tuple[str, int]],
     ) -> dict[tuple[str, int], list[str]]:
+        """Distinct sanitizer point ids (``point_this`` / ``point_other``) per ``(file, line)``."""
         if not line_keys:
             return {}
         m = merged.copy()
@@ -210,68 +186,6 @@ class Sancov:
                     ordered.append(s)
             out[(f, ln)] = ordered
         return out
-
-    @staticmethod
-    def all_uncovered_line_point_addresses(
-        merged: pd.DataFrame,
-        line_keys: set[tuple[str, int]],
-    ) -> dict[tuple[str, int], list[str]]:
-        """Distinct sanitizer point ids for *line_keys* (typically all-uncovered lines)."""
-        return Sancov._point_addresses_for_lines(merged, line_keys)
-
-    @staticmethod
-    def symcov_paths(test_suite_output_dir: Path) -> tuple[Path, Path]:
-        base = test_suite_output_dir / "processed_sancov"
-        return base / "llc.0.symcov", base / "opt.0.symcov"
-
-    @classmethod
-    def load_joint_coverage(
-        cls,
-        llc_symcov_path: Path,
-        opt_symcov_path: Path,
-        path_filter: str,
-    ) -> JointCoverageView:
-        with llc_symcov_path.open(encoding="utf-8") as f:
-            llc_symcov = json.load(f)
-        with opt_symcov_path.open(encoding="utf-8") as f:
-            opt_symcov = json.load(f)
-
-        this_df = cls.get_coverage_df(llc_symcov, path_filter)
-        other_df = cls.get_coverage_df(opt_symcov, path_filter)
-        merged_cov = cls.merged_llc_opt_coverage_df(this_df, other_df)
-        line_status = cls.line_status_from_merged(merged_cov)
-        instrumented_lines = set(line_status.keys())
-        symcov_files = set(this_df["file"].unique()) | set(other_df["file"].unique())
-        uncovered = {k for k, v in line_status.items() if v == "none"}
-        point_addresses = cls._point_addresses_for_lines(merged_cov, uncovered)
-
-        return JointCoverageView(
-            merged_cov=merged_cov,
-            this_df=this_df,
-            other_df=other_df,
-            line_status=line_status,
-            instrumented_lines=instrumented_lines,
-            symcov_files=symcov_files,
-            point_addresses_by_line=point_addresses,
-        )
-
-    @classmethod
-    def load_joint_coverage_from_suite_dir(
-        cls,
-        test_suite_output_dir: Path,
-        path_filter: str,
-    ) -> JointCoverageView:
-        llc_path, opt_path = cls.symcov_paths(test_suite_output_dir)
-        if not llc_path.is_file():
-            raise SystemExit(
-                f"Missing {llc_path}. Run ``coverage test-suite`` first (or pass the same "
-                f"--output-dir you used for that run as --test-suite-output-dir)."
-            )
-        if not opt_path.is_file():
-            raise SystemExit(
-                f"Missing {opt_path}. Run ``coverage test-suite`` first so llc and opt symcov exist."
-            )
-        return cls.load_joint_coverage(llc_path, opt_path, path_filter)
 
     @staticmethod
     def get_coverage_summary_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -386,23 +300,28 @@ class Sancov:
         ``file``, ``line``, ``point_<suffix>`` on the map and ``file``, ``line``,
         ``point_<suffix>`` on baseline rows (one row per instrumented point).
         """
+        with self.get_merged_symcov_path().open(encoding="utf-8") as f:
+            this_symcov = json.load(f)
+
+        with other.get_merged_symcov_path().open(encoding="utf-8") as f:
+            other_symcov = json.load(f)
+
         if path_filter is None:
             path_filter = path_filter_from_lit_filter(DEFAULT_LIT_FILTER)
 
-        view = Sancov.load_joint_coverage(
-            self.get_merged_symcov_path(),
-            other.get_merged_symcov_path(),
-            path_filter,
-        )
-        this_df = view.this_df
-        other_df = view.other_df
+        this_df = self.get_coverage_df(this_symcov, path_filter)
+        other_df = self.get_coverage_df(other_symcov, path_filter)
 
         this_address_line_map = this_df[["file", "line", "point"]].copy()
         this_address_line_map["line"] = this_address_line_map["line"].astype(int)
         this_address_line_map.rename(columns={"point": f"point_{self.suffix}"}, inplace=True)
 
         if self.coverage_mode == "full":
-            baseline_lines = view.fully_covered_lines
+            merged_cov = Sancov.merged_llc_opt_coverage_df(this_df, other_df)
+            baseline_lines = Sancov.jointly_fully_covered_line_keys_from_merged(
+                merged_cov
+            )
+
             baseline_lines_df = pd.DataFrame(
                 list(baseline_lines), columns=["file", "line"]
             )
