@@ -50,8 +50,10 @@ class Sancov:
                 addrs.append(a)
                 lines.append(ln)
 
-        out = pd.DataFrame({"file": files, "point": addrs, "line": lines})
-        out[["line", "col"]] = out["line"].str.split(":", n=1, expand=True)
+        out = pd.DataFrame({"file": files, "point": addrs, "line": lines}, dtype=object)
+        out[["line", "col"]] = (
+            out["line"].str.split(":", n=1, expand=True).reindex(columns=[0, 1])
+        )
 
         return out
 
