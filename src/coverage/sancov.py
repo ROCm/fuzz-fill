@@ -389,5 +389,5 @@ class Sancov:
                 line_coverage_summary = Sancov.build_line_coverage_summary(merged_cov)
                 return (this_address_line_map, line_coverage_summary)
 
-                elif self.coverage_mode == "partial":
-                    raise NotImplementedError(f"Coverage mode {self.coverage_mode} not implemented")
+            elif self.coverage_mode == "partial":
+                raise NotImplementedError(f"Coverage mode {self.coverage_mode} not implemented")

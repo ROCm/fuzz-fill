@@ -35,9 +35,9 @@ def main():
     p_target_lines = sub.add_parser(
         "target-lines",
         help=(
-            "List target-lines CSV rows where every symcov point on that line is uncovered "
-            "by the suite (expects ``coverage baseline`` output and a lines CSV; "
-            "no lit re-run)."
+            "List target-lines CSV rows where every instrumentation point on that line is "
+            "uncovered by the suite (expects ``line_coverage_summary.csv`` from "
+            "``coverage baseline``; no lit re-run)."
         ),
     )
 
@@ -89,15 +89,14 @@ def main():
         required=True,
         help=(
             "Same directory passed as ``--output-dir`` to ``coverage baseline`` "
-            "(must contain ``processed_sancov/llc.0.symcov``, ``opt.0.symcov``, and "
-            "``run_config.json``)."
+            "(must contain ``line_coverage_summary.csv``)."
         ),
     )
     p_target_lines.add_argument(
         "--llvm-repo",
         type=Path,
         required=True,
-        help="LLVM checkout used to resolve ``path`` in the target-lines CSV (suffix match to symcov paths).",
+        help="LLVM checkout used to resolve ``path`` in the target-lines CSV (suffix match to summary paths).",
     )
     p_target_lines.add_argument(
         "--target-lines-csv",
@@ -150,7 +149,7 @@ def main():
 
     elif args.subcmd == "target-lines":
         print(
-            "Checking target lines from CSV against baseline llc/opt symcov "
+            "Checking target lines from CSV against baseline line coverage summary "
             "(no lit re-run)",
             flush=True,
         )
