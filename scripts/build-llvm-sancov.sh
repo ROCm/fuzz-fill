@@ -1,97 +1,141 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
-# Parse flags (-c is required; must appear before positional args)
-COMPILER_PATH=""
-while [[ "$1" == -* ]]; do
-    case "$1" in
-        -c|--compiler-path)
-            if [ -z "$2" ] || [[ "$2" == -* ]]; then
-                echo "Error: --compiler-path requires a path argument"
-                exit 1
-            fi
-            COMPILER_PATH="$2"
-            shift 2
-            ;;
-        *)
-            echo "Unknown option: $1"
-            exit 1
-            ;;
-    esac
-done
+usage() {
+    cat <<EOF
+Usage: $0 <allowlist> <llvm_dir> <uninstrumented_build_dir> <sancov_build_dir>
 
-if [ -z "$COMPILER_PATH" ]; then
-    echo "Error: -c|--compiler-path is required (directory containing clang and clang++)"
-    echo "Usage: $0 -c|--compiler-path <path> <allowlist_file> <llvm_dir> <build_dir>"
-    echo "  -c, --compiler-path:   Path to compiler bin directory (required)"
-    echo "  allowlist_file:        Path to the sanitizer coverage allowlist file"
-    echo "  llvm_dir:              Path to the LLVM source directory"
-    echo "  build_dir:             Path to the build directory (will be created if it doesn't exist)"
-    exit 1
-fi
+  allowlist                 Sanitizer coverage allowlist file
+  llvm_dir                  LLVM source tree (directory containing llvm/)
+  uninstrumented_build_dir  Prior build from build-llvm.sh; helper tools are symlinked from its bin/
+  sancov_build_dir          Output directory for instrumented llc/opt and this tree's llvm-lit/llvm-config
 
-# Usage: ./build-llvm-sancov.sh -c|--compiler-path <path> <allowlist_file> <llvm_dir> <build_dir>
-if [ "$#" -ne 3 ]; then
-    echo "Usage: $0 -c|--compiler-path <path> <allowlist_file> <llvm_dir> <build_dir>"
-    echo "  -c, --compiler-path:   Path to compiler bin directory (required)"
-    echo "  allowlist_file:        Path to the sanitizer coverage allowlist file"
-    echo "  llvm_dir:              Path to the LLVM source directory"
-    echo "  build_dir:             Path to the build directory (will be created if it doesn't exist)"
+Run build-llvm.sh first. The sancov build is compiled with clang/clang++ from the uninstrumented build's bin/.
+Lit helpers that need AMDGPU (llvm-objdump, llvm-mc, llvm-lto2) are built in this tree; other helpers are symlinked from the uninstrumented bin/.
+EOF
+}
+
+if [[ $# -ne 4 ]]; then
+    usage >&2
     exit 1
 fi
 
 ALLOWLIST="$1"
 LLVM_DIR="$2"
-BUILD_DIR="$3"
+UNINSTRUMENTED_BUILD_DIR="$3"
+SANCOV_BUILD_DIR="$4"
 
-# Validate that allowlist and llvm_dir exist
-if [ ! -f "$ALLOWLIST" ]; then
-    echo "Error: Allowlist file '$ALLOWLIST' does not exist"
+if [[ ! -f "$ALLOWLIST" ]]; then
+    echo "Error: allowlist file not found: $ALLOWLIST" >&2
     exit 1
 fi
 
-# Convert allowlist to absolute path (needed since we'll cd to build dir)
+if [[ ! -d "$LLVM_DIR/llvm" ]]; then
+    echo "Error: LLVM source not found at $LLVM_DIR/llvm" >&2
+    exit 1
+fi
+
 ALLOWLIST="$(realpath "$ALLOWLIST")"
+LLVM_DIR="$(realpath "$LLVM_DIR")"
+UNINSTRUMENTED_BUILD_DIR="$(realpath "$UNINSTRUMENTED_BUILD_DIR")"
+HELPER_BIN="$UNINSTRUMENTED_BUILD_DIR/bin"
 
-if [ ! -d "$LLVM_DIR" ]; then
-    echo "Error: LLVM directory '$LLVM_DIR' does not exist"
+if [[ ! -d "$HELPER_BIN" ]]; then
+    echo "Error: uninstrumented bin directory not found: $HELPER_BIN" >&2
     exit 1
 fi
 
-# Convert LLVM_DIR to absolute path
-LLVM_DIR="$(realpath "$LLVM_DIR")"
+C_COMPILER="$HELPER_BIN/clang"
+CXX_COMPILER="$HELPER_BIN/clang++"
+if [[ ! -x "$C_COMPILER" || ! -x "$CXX_COMPILER" ]]; then
+    echo "Error: uninstrumented build must provide $C_COMPILER and $CXX_COMPILER" >&2
+    echo "Run build-llvm.sh with LLVM_ENABLE_PROJECTS=clang first." >&2
+    exit 1
+fi
 
-# Create build directory if it doesn't exist
-mkdir -p "$BUILD_DIR"
+for tool in llvm-tblgen llvm-min-tblgen; do
+    if [[ ! -x "$HELPER_BIN/$tool" ]]; then
+        echo "Error: uninstrumented build must provide $HELPER_BIN/$tool" >&2
+        echo "Run build-llvm.sh first; TableGen tools are reused via LLVM_NATIVE_TOOL_DIR." >&2
+        exit 1
+    fi
+done
 
-# Convert BUILD_DIR to absolute path
-BUILD_DIR="$(realpath "$BUILD_DIR")"
+mkdir -p "$SANCOV_BUILD_DIR"
+SANCOV_BUILD_DIR="$(realpath "$SANCOV_BUILD_DIR")"
+SANCOV_BIN="$SANCOV_BUILD_DIR/bin"
+cd "$SANCOV_BUILD_DIR"
 
-# Change to build directory
-cd "$BUILD_DIR"
+SANCOV_FLAGS="-O0 -fno-inline -fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=bb,trace-pc-guard"
 
-echo "Building LLVM with coverage allowlist..."
-echo "  Allowlist:      $ALLOWLIST"
-echo "  LLVM Dir:       $LLVM_DIR"
-echo "  Build Dir:      $BUILD_DIR"
-echo "  Compiler Path:  $COMPILER_PATH"
+# Built locally (not symlinked from the X86-only uninstrumented tree).
+BUILT_TOOLS=(llc opt llvm-config llvm-objdump llvm-mc llvm-lto2)
+# Symlink everything else from the uninstrumented build except these.
+SKIP_TOOLS=(llc opt llvm-lit llvm-config llvm-objdump llvm-mc llvm-lto2)
+
+echo "Building instrumented llc/opt and AMDGPU lit helpers..."
+echo "  Allowlist:              $ALLOWLIST"
+echo "  LLVM source:            $LLVM_DIR"
+echo "  Uninstrumented build:   $UNINSTRUMENTED_BUILD_DIR"
+echo "  Sancov build:           $SANCOV_BUILD_DIR"
+echo "  C compiler:             $C_COMPILER"
+echo "  C++ compiler:           $CXX_COMPILER"
+echo "  Native tools:           $HELPER_BIN"
 echo
 
-cmake -G "Ninja" \
-    -DCMAKE_C_COMPILER="$COMPILER_PATH/clang" \
-    -DCMAKE_CXX_COMPILER="$COMPILER_PATH/clang++" \
-    -DCMAKE_CXX_FLAGS="-O0 -fno-inline -fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=bb,trace-pc-guard" \
-    -DCMAKE_C_FLAGS="-O0 -fno-inline -fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=bb,trace-pc-guard" \
+cmake -G Ninja \
+    -DCMAKE_C_COMPILER="$C_COMPILER" \
+    -DCMAKE_CXX_COMPILER="$CXX_COMPILER" \
+    -DCMAKE_C_FLAGS="$SANCOV_FLAGS" \
+    -DCMAKE_CXX_FLAGS="$SANCOV_FLAGS" \
     -DLLVM_TARGETS_TO_BUILD="X86;AMDGPU;SPIRV" \
-    -DLLVM_ENABLE_PROJECTS="clang" \
+    -DLLVM_ENABLE_PROJECTS="" \
     -DLLVM_OPTIMIZED_TABLEGEN=ON \
+    -DLLVM_NATIVE_TOOL_DIR="$HELPER_BIN" \
     -DLLVM_ENABLE_ASSERTIONS=OFF \
     -DCMAKE_BUILD_TYPE=Debug \
     -DBUILD_SHARED_LIBS=OFF \
     "$LLVM_DIR/llvm"
 
-ninja llc opt 
+# llvm-lit is generated into bin/ during cmake; llvm-config must be built.
+ninja "${BUILT_TOOLS[@]}"
 
-# These are required to run LIT without problems
-ninja FileCheck count not lli llvm-objcopy llvm-strip llvm-install-name-tool llvm-bitcode-strip split-file dsymutil lli-child-target llvm-ar llvm-as llvm-addr2line llvm-bcanalyzer llvm-cas llvm-cgdata llvm-config llvm-cov llvm-ctxprof-util llvm-cxxdump llvm-cvtres llvm-debuginfod-find llvm-debuginfo-analyzer llvm-diff llvm-dis llvm-dwarfdump llvm-dwarfutil llvm-dwp llvm-dlltool llvm-exegesis llvm-extract llvm-ir2vec llvm-isel-fuzzer llvm-ifs llvm-jitlink llvm-opt-fuzzer llvm-lib llvm-link llvm-lto llvm-lto2 llvm-mc llvm-mca llvm-modextract llvm-nm llvm-objdump llvm-otool llvm-pdbutil llvm-profdata llvm-profgen llvm-ranlib llvm-rc llvm-readelf llvm-readobj llvm-rtdyld llvm-sim llvm-size llvm-split llvm-stress llvm-strings llvm-readtapi llvm-undname llvm-windres llvm-c-test llvm-cxxfilt llvm-xray yaml2obj obj2yaml yaml-bench verify-uselistorder llvm-symbolizer sancov sanstats llvm-remarkutil
+for tool in "${BUILT_TOOLS[@]}"; do
+    if [[ ! -x "$SANCOV_BIN/$tool" ]]; then
+        echo "Error: $tool not found in $SANCOV_BIN after build" >&2
+        exit 1
+    fi
+done
+
+if [[ ! -x "$SANCOV_BIN/llvm-lit" ]]; then
+    echo "Error: llvm-lit not found in $SANCOV_BIN after configure" >&2
+    exit 1
+fi
+
+mkdir -p "$SANCOV_BIN"
+
+should_skip() {
+    local name="$1"
+    local skip
+    for skip in "${SKIP_TOOLS[@]}"; do
+        if [[ "$name" == "$skip" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+echo "Symlinking uninstrumented helper tools into $SANCOV_BIN..."
+linked=0
+for helper in "$HELPER_BIN"/*; do
+    [[ -f "$helper" ]] || continue
+    name="$(basename "$helper")"
+    if should_skip "$name"; then
+        continue
+    fi
+    ln -sf "$(realpath --relative-to="$SANCOV_BIN" "$helper")" "$SANCOV_BIN/$name"
+    linked=$((linked + 1))
+done
+
+echo "Done. Built ${BUILT_TOOLS[*]}, local llvm-lit, and $linked symlinks."

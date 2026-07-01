@@ -3,12 +3,16 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import pandas as pd
 from pathlib import Path
 
 from coverage.constants import TEST_FLAGS
 from coverage.filepaths import Filepaths
-from coverage.lit_config import ensure_lit_sancov_env_forwarding
+from coverage.lit_config import (
+    ensure_lit_sancov_env_forwarding,
+    lit_test_suite_path,
+)
 from coverage.run_config import build_run_config, resolved_lit_filter, write_run_config
 from coverage.sancov import Sancov
 
@@ -86,14 +90,24 @@ class TestRunner:
             print(f"Sancov files already exist in {self.raw_sancov_output_dir}, skipping lit tests")
             return
 
-        lit_site_cfg = ensure_lit_sancov_env_forwarding(self.filepaths.instrumented_bin)
+        instrumented_bin = self.filepaths.instrumented_bin
+        lit_site_cfg = ensure_lit_sancov_env_forwarding(instrumented_bin)
+        lit_suite = lit_test_suite_path(instrumented_bin)
+        if not lit_suite.is_dir():
+            raise FileNotFoundError(
+                f"LLVM lit test suite not found at {lit_suite}. "
+                "Expected an instrumented LLVM build configured with the "
+                "in-tree test suite (same layout as `ninja check-llvm`)."
+            )
 
+        llvm_lit = instrumented_bin / "llvm-lit"
         argv = [
-            str(self.filepaths.instrumented_bin / "llvm-lit"),
-            "../llvm/test/",
+            sys.executable,
+            str(llvm_lit),
+            str(lit_suite),
             f"--filter={self._lit_filter}",
         ]
-        cwd = self.filepaths.instrumented_bin.parent
+        cwd = instrumented_bin.parent
         env = self.ubsan_environ_with_coverage()
         if self.debug:
             print(f"\tRunning: {argv})")

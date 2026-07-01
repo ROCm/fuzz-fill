@@ -7,7 +7,7 @@ import sys
 
 import lit.formats
 
-def _require_bin_dir(env_var: str, human_label: str) -> str:
+def _require_dir(env_var: str, human_label: str) -> str:
     raw = os.environ.get(env_var)
     if not raw:
         print(
@@ -31,14 +31,24 @@ def _require_bin_dir(env_var: str, human_label: str) -> str:
     return path
 
 
-_llvm_bin_dir = _require_bin_dir(
+_llvm_bin_dir = _require_dir(
     "FUZZ_FILL_LLVM_BIN_DIR",
     "uninstrumented LLVM build bin directory (FileCheck, sancov)",
 )
-_llvm_sancov_bin_dir = _require_bin_dir(
+_llvm_sancov_bin_dir = _require_dir(
     "FUZZ_FILL_LLVM_SANCOV_BIN_DIR",
     "SanitizerCoverage-instrumented LLVM build bin directory (llc, opt)",
 )
+_llvm_src_dir = _require_dir(
+    "FUZZ_FILL_LLVM_SRC_DIR",
+    "llvm-project checkout root (directory containing llvm/)",
+)
+if not os.path.isdir(os.path.join(_llvm_src_dir, "llvm")):
+    print(
+        f"error: FUZZ_FILL_LLVM_SRC_DIR must contain llvm/: {_llvm_src_dir!r}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
 _venv_dir = os.environ.get("FUZZ_FILL_VENV_DIR")
 if not _venv_dir:
     print(
@@ -86,6 +96,7 @@ config.substitutions.extend(
         ("%sancov", _tool(_llvm_bin_dir, "sancov")),
         ("%FileCheck", _tool(_llvm_bin_dir, "FileCheck")),
         ("%llvm-build-dir", shlex.quote(_llvm_build_dir)),
+        ("%llvm-repo", shlex.quote(_llvm_src_dir)),
         ("%venv", _venv_cmd),
         ("%coverage", f"{_venv_cmd} && python -m coverage"),
         ("%reduce", f"{_venv_cmd} && python -m reduce"),
