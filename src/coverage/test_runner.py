@@ -262,9 +262,9 @@ class TestRunner:
                     )
                     sancov.write_empty_symcov()
 
-            llc_address_line_map, joint_coverage_df = llc_sancov.get_joint_coverage(
-                opt_sancov, self._path_filter
-            )
+        llc_address_line_map, joint_coverage_df, _line_coverage_summary = (
+            llc_sancov.get_joint_coverage(opt_sancov, self._path_filter)
+        )
 
             llc_address_line_map.to_csv(self.filepaths.output_dir / self.filepaths.llc_address_line_map_file, index=False)
             joint_coverage_df.to_csv(self.filepaths.output_dir / self.filepaths.joint_llc_and_opt_coverage_file, index=False)
