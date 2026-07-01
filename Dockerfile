@@ -4,6 +4,7 @@ FROM ubuntu:24.04 AS llvm-builder
 ARG DEBIAN_FRONTEND=noninteractive
 # Parent commit before the first fuzz-fill contribution: https://github.com/llvm/llvm-project/pull/185430.
 ARG LLVM_COMMIT=40cd48fd385b57855a104a4192c4d4468889d22d
+ARG SANCOV_ALLOWLIST=amdgpu
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -48,13 +49,22 @@ RUN /usr/local/bin/build-llvm.sh \
 
 COPY scripts/build-llvm-sancov.sh /usr/local/bin/
 COPY scripts/allowlist-amdgpu.txt /work/allowlist-amdgpu.txt
+COPY scripts/allowlist-spirv.txt /work/allowlist-spirv.txt
 RUN chmod +x /usr/local/bin/build-llvm-sancov.sh
 
-RUN /usr/local/bin/build-llvm-sancov.sh \
-    /work/allowlist-amdgpu.txt \
-    /work/llvm-project \
-    /work/llvm-build-uninstrumented \
-    /work/llvm-build-sancov
+ARG SANCOV_ALLOWLIST=amdgpu
+RUN case "${SANCOV_ALLOWLIST}" in \
+        amdgpu) allowlist=/work/allowlist-amdgpu.txt ;; \
+        spirv) allowlist=/work/allowlist-spirv.txt ;; \
+        *) echo "error: unsupported SANCOV_ALLOWLIST: ${SANCOV_ALLOWLIST} (expected amdgpu or spirv)" >&2; exit 1 ;; \
+    esac \
+ && echo "${SANCOV_ALLOWLIST}" > /work/.sancov-allowlist \
+ && echo "=== fuzz-fill: SanitizerCoverage allowlist = ${SANCOV_ALLOWLIST} ===" \
+ && /usr/local/bin/build-llvm-sancov.sh \
+        "${allowlist}" \
+        /work/llvm-project \
+        /work/llvm-build-uninstrumented \
+        /work/llvm-build-sancov
 
 FROM ubuntu:24.04 AS final
 
@@ -79,6 +89,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Preserve exact paths from the builder stage (required by lit.site.cfg.py).
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.llvm-source /work/.llvm-source
+COPY --chown=${UID}:${GID} --from=llvm-builder /work/.sancov-allowlist /work/.sancov-allowlist
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-project /work/llvm-project
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-build-uninstrumented /work/llvm-build-uninstrumented
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-build-sancov /work/llvm-build-sancov
@@ -87,7 +98,8 @@ COPY --chown=${UID}:${GID} pyproject.toml LICENCE.txt README.md /work/fuzz-fill/
 COPY --chown=${UID}:${GID} src /work/fuzz-fill/src
 COPY --chown=${UID}:${GID} integration-tests /work/fuzz-fill/integration-tests
 
-RUN echo "=== fuzz-fill image LLVM source: $(cat /work/.llvm-source) ==="
+RUN echo "=== fuzz-fill image LLVM source: $(cat /work/.llvm-source) ===" \
+ && echo "=== fuzz-fill image SanitizerCoverage allowlist: $(cat /work/.sancov-allowlist) ==="
 
 USER "${UID}"
 WORKDIR /work/fuzz-fill
