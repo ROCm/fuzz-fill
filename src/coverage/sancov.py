@@ -229,6 +229,21 @@ class Sancov:
             ) from e
         return {line.strip() for line in proc.stdout.splitlines() if line.strip()}
 
+    def has_raw_files(self) -> bool:
+        """True if any raw ``.sancov`` files exist for this suffix."""
+        return any(self.raw_sancov_dir.glob(f"{self.suffix}.*.sancov"))
+
+    def write_empty_symcov(self) -> None:
+        """Write a symcov with no instrumented or covered points.
+
+        Used when a tool (llc/opt) produced no coverage for the selected tests,
+        so downstream joint-coverage treats it as contributing zero points
+        instead of crashing on a missing file.
+        """
+        empty = {"point-symbol-info": {}, "covered-points": []}
+        with self.get_merged_symcov_path().open("w", encoding="utf-8") as f:
+            json.dump(empty, f)
+
     def merge(self) -> None:
         """Merge the sancov files for the given suffix."""
 
