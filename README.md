@@ -180,7 +180,7 @@ The workflows above call these modules. Use `--help` on any command for the full
 
 The Docker image bundles a pinned LLVM revision, both instrumented and uninstrumented builds, and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
 
-**Scripts:** [`scripts/build-image.sh`](scripts/build-image.sh), [`scripts/tmp-container.sh`](scripts/tmp-container.sh)
+**Scripts:** [`scripts/build-image.sh`](scripts/build-image.sh), [`scripts/test-image.sh`](scripts/test-image.sh), [`scripts/tmp-container.sh`](scripts/tmp-container.sh)
 
 ### Build
 
@@ -190,7 +190,20 @@ From the repo root (first build compiles LLVM and can take a while):
 ./scripts/build-image.sh
 ```
 
-The image is tagged `fuzz-fill-test:latest` by default. Override with `IMAGE_NAME` / `IMAGE_TAG`. The build passes your host `UID`, `GID`, and username so files created in the container are owned by you.
+By default the image is tagged `fuzz-fill-test:latest` and LLVM is downloaded from GitHub at a pinned revision.
+
+| Option | Meaning |
+|--------|---------|
+| `--llvm-dir <path>` | Use a local `llvm-project` checkout instead of downloading LLVM |
+| `--tag <tag>` | Docker image tag (default: `latest`) |
+| `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist baked into the instrumented build (default: `amdgpu`) |
+
+Examples:
+
+```bash
+./scripts/build-image.sh --llvm-dir llvm-project --tag local-llvm
+./scripts/build-image.sh --allowlist spirv --tag spirv
+```
 
 Inside the image, LLVM and fuzz-fill live at fixed paths (required by `lit.site.cfg.py`):
 
@@ -199,9 +212,39 @@ Inside the image, LLVM and fuzz-fill live at fixed paths (required by `lit.site.
 | `/work/llvm-project` | LLVM source checkout |
 | `/work/llvm-build-uninstrumented/bin` | Uninstrumented tools (`sancov`, …) |
 | `/work/llvm-build-sancov/bin` | SanitizerCoverage build (`llvm-lit`, `llc`, `opt`) |
-| `/work/fuzz-fill` | fuzz-fill checkout with venv |
+| `/work/fuzz-fill` | fuzz-fill checkout |
+| `/work/fuzz-fill-venv` | Python venv (outside the repo mount) |
+| `/work/.llvm-source` | How LLVM was sourced (`local build context` or `github <commit>`) |
+| `/work/.sancov-allowlist` | Allowlist used for the instrumented build (`amdgpu` or `spirv`) |
+
+### Run integration tests
+
+```bash
+./scripts/test-image.sh
+```
+
+This runs the full suite under `integration-tests/` using the image baked into the container. Pass the same `--tag` you used when building:
+
+```bash
+./scripts/build-image.sh --tag local-llvm
+./scripts/test-image.sh --tag local-llvm
+```
+
+Use `--bind-repo` to mount your local fuzz-fill checkout over `/work/fuzz-fill` while keeping the image venv at `/work/fuzz-fill-venv`:
+
+```bash
+./scripts/test-image.sh --bind-repo
+```
+
+Any extra arguments are forwarded to lit. For example:
+
+```bash
+./scripts/test-image.sh --tag local-llvm integration-tests/smoke.test
+```
 
 ### Run a container
+
+For an interactive shell or arbitrary commands:
 
 ```bash
 ./scripts/tmp-container.sh                              # interactive shell
@@ -211,24 +254,13 @@ Inside the image, LLVM and fuzz-fill live at fixed paths (required by `lit.site.
 
 Without `--bind-repo`, the container uses the fuzz-fill copy baked into the image.
 
-With `--bind-repo`, your local checkout is mounted at `/work/fuzz-fill`.
+With `--bind-repo`, your local checkout is mounted at `/work/fuzz-fill`; the venv stays at `/work/fuzz-fill-venv`.
 
-### Run integration tests in Docker
+To run integration tests manually inside the container:
 
 ```bash
 ./scripts/tmp-container.sh ./integration-tests/test.sh \
-  --venv ./venv \
-  --llvm-build /work/llvm-build-uninstrumented/bin \
-  --llvm-sancov-build /work/llvm-build-sancov/bin \
-  --llvm-src /work/llvm-project \
-  -v integration-tests/
-```
-
-Use `--bind-repo` when testing local changes to fuzz-fill:
-
-```bash
-./scripts/tmp-container.sh --bind-repo ./integration-tests/test.sh \
-  --venv ./venv \
+  --venv /work/fuzz-fill-venv \
   --llvm-build /work/llvm-build-uninstrumented/bin \
   --llvm-sancov-build /work/llvm-build-sancov/bin \
   --llvm-src /work/llvm-project \
@@ -250,6 +282,6 @@ Integration tests need both LLVM `bin` directories (same version). Locally:
   integration-tests/
 ```
 
-Or use the [Docker test image](#docker-test-image) paths above.
+Or use [`scripts/test-image.sh`](scripts/test-image.sh) with the [Docker test image](#docker-test-image).
 
 `--llvm-build` is the uninstrumented tree; `--llvm-sancov-build` is the SanitizerCoverage build; `--llvm-src` is the llvm-project checkout root (used as `%llvm-repo` in tests).
