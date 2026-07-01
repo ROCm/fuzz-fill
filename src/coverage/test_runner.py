@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import shutil
 import subprocess
@@ -28,6 +29,8 @@ class TestRunner:
         filepaths: Filepaths,
         lit_filter: str | None = None,
         new_tests_limit: int = 1,
+        jobs: int | None = None,
+        timeout: int = 5,
         debug: bool = False,
     ) -> None:
         self.mode = mode
@@ -46,6 +49,9 @@ class TestRunner:
 
         elif self.mode == "standalone":
             self._new_tests_limit = new_tests_limit
+            self._jobs = jobs if jobs is not None else (os.cpu_count() or 1)
+            self._jobs = max(1, self._jobs)
+            self._timeout = timeout
             self.instrumented_llc = filepaths.instrumented_bin / "llc"
             self.standalone_test_id = 0
             self.standalone_total_tests = 0
@@ -147,17 +153,31 @@ class TestRunner:
             self._print_standalone_progress("(no standalone inputs)")
             return
 
+        # Pre-assign ids in nested order so dir names match the sequential
+        # version and workers never share mutable id state.
+        work = []
+        tid = 0
         for test_path in to_run:
             for flag in TEST_FLAGS:
-                new_test_dir = self.filepaths.output_dir / f"test_{self.standalone_test_id}_{test_path.name}"
-                self.create_standalone_test_script(new_test_dir, test_path, flag)
-                outcome = self.run_standalone_test(new_test_dir)
+                test_dir = self.filepaths.output_dir / f"test_{tid}_{test_path.name}"
+                work.append((test_dir, test_path, flag))
+                tid += 1
+
+        def _run_one(item):
+            test_dir, test_path, flag = item
+            self.create_standalone_test_script(test_dir, test_path, flag)
+            return test_dir.name, self.run_standalone_test(test_dir)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self._jobs) as pool:
+            futures = [pool.submit(_run_one, item) for item in work]
+            # Drain on the main thread: counters/prints stay single-threaded.
+            for future in concurrent.futures.as_completed(futures):
+                name, outcome = future.result()
                 if outcome == "success":
                     self.standalone_tests_complete += 1
                 else:
                     self.standalone_tests_skipped += 1
-                self._print_standalone_progress(f"[{new_test_dir.name}]")
-                self.standalone_test_id += 1
+                self._print_standalone_progress(f"[{name}]")
 
     def create_standalone_test_script(
         self, test_dir: Path, test_path: Path, flag: str
@@ -170,7 +190,7 @@ class TestRunner:
             f.write(
                 f"export UBSAN_OPTIONS={self.ubsan_environ_with_coverage(out_dir=test_dir)['UBSAN_OPTIONS']}\n"
             )
-            f.write(f"{self.instrumented_llc} {flag} {test_path} -o /dev/null\n")
+            f.write(f"timeout -s9 {self._timeout} {self.instrumented_llc} {flag} {test_path} -o /dev/null\n")
         script.chmod(0o755)
 
     def run_standalone_test(self, test_dir: Path) -> str:
