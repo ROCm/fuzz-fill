@@ -170,7 +170,7 @@ class TestRunner:
             f.write(
                 f"export UBSAN_OPTIONS={self.ubsan_environ_with_coverage(out_dir=test_dir)['UBSAN_OPTIONS']}\n"
             )
-            f.write(f"{self.instrumented_llc} {flag} {test_path} > /dev/null 2>&1\n")
+            f.write(f"{self.instrumented_llc} {flag} {test_path} -o /dev/null\n")
         script.chmod(0o755)
 
     def run_standalone_test(self, test_dir: Path) -> str:
