@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from coverage.constants import DEFAULT_LINE_COVERAGE_SUMMARY_FILE
+from coverage.line_rules import LineCoverageIndex
 
 
 def _match_symcov_file(rel_path: str, summary_files: set[str]) -> str | None:
@@ -59,26 +60,8 @@ def run_target_lines_check(
     counted in the printed summary only (they are omitted from the CSV).
     """
     summary = _load_line_coverage_summary(baseline_output_dir)
-
-    instrumented = set(zip(summary["file"], summary["line"]))
-    baseline_lines = set(
-        zip(
-            summary.loc[summary["coverage"] == "full", "file"],
-            summary.loc[summary["coverage"] == "full", "line"],
-        )
-    )
-    all_uncovered_lines = set(
-        zip(
-            summary.loc[summary["coverage"] == "none", "file"],
-            summary.loc[summary["coverage"] == "none", "line"],
-        )
-    )
-    addr_map: dict[tuple[str, int], list[str]] = {}
-    for row in summary.loc[summary["coverage"] == "none"].itertuples(index=False):
-        addrs = [a for a in str(row.point_addresses).split(";") if a]
-        addr_map[(row.file, int(row.line))] = addrs
-
-    summary_files: set[str] = set(summary["file"].unique())
+    index = LineCoverageIndex.from_summary_df(summary)
+    summary_files: set[str] = {file for file, _ in index.instrumented}
 
     llvm_repo = llvm_repo.resolve()
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -120,14 +103,14 @@ def run_target_lines_check(
             if sym_file is None:
                 stats["unknown_file"] += 1
             else:
-                key = (sym_file, line_no)
-                if key not in instrumented:
+                coverage = index.classify(sym_file, line_no)
+                if coverage == "not_instrumented":
                     stats["not_instrumented"] += 1
-                elif key in baseline_lines:
+                elif coverage == "full":
                     stats["covered"] += 1
-                elif key in all_uncovered_lines:
+                elif coverage == "none":
                     stats["all_uncovered"] += 1
-                    addrs = addr_map.get(key, [])
+                    addrs = index.point_addresses.get((sym_file, line_no), [])
                     uncovered_rows.append(
                         {
                             "path": rel,
