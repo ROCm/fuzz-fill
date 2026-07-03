@@ -16,9 +16,15 @@ TESTS_DIR="${TESTS_DIR:-${REPO_ROOT}/../irtests/bitcode/amdgpu/all}"
 FILTER="CodeGen/AMDGPU" # All tests
 
 # Clear old output directories
+<<<<<<< HEAD
 rm -rf $BASELINE_OUTPUT_DIR
 #rm -rf $CANDIDATE_TESTS_OUTPUT_DIR
 #rm -rf $INCREMENTAL_OUTPUT_DIR
+=======
+rm -rf $TEST_SUITE_OUTPUT_DIR
+rm -rf $NEW_TESTS_OUTPUT_DIR
+rm -rf $DIFF_OUTPUT_DIR
+>>>>>>> 7096b54 (Uncomment test lines)
 
 cd "$REPO_ROOT"
 
@@ -28,6 +34,7 @@ python -m coverage baseline \
     --instrumented-bin $INSTRUMENTED_BIN_DIR \
     --lit-filter $FILTER 
 
+<<<<<<< HEAD
 #python -m coverage candidate-test \
 #    --output-dir $CANDIDATE_TESTS_OUTPUT_DIR \
 #    --instrumented-bin $INSTRUMENTED_BIN_DIR \
@@ -39,4 +46,17 @@ python -m coverage baseline \
 #    --llvm-bin $LLVM_BIN \
 #    --baseline-output-dir $BASELINE_OUTPUT_DIR \
 #    --candidate-tests-output-dir $CANDIDATE_TESTS_OUTPUT_DIR}
+=======
+python -m coverage new-tests \
+    --output-dir $NEW_TESTS_OUTPUT_DIR \
+    --instrumented-bin $INSTRUMENTED_BIN_DIR \
+    --new-tests-dir $TESTS_DIR \
+    --n 10
+
+python -m coverage diff \
+    --output-dir $DIFF_OUTPUT_DIR \
+    --llvm-bin $LLVM_BIN \
+    --test-suite-output-dir $TEST_SUITE_OUTPUT_DIR \
+    --new-tests-output-dir $NEW_TESTS_OUTPUT_DIR
+>>>>>>> 7096b54 (Uncomment test lines)
 
