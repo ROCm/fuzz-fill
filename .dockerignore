@@ -1,0 +1,4 @@
+# Keep the default build context small; pass a local checkout via
+#   ./scripts/build-image.sh --llvm-dir /path/to/llvm-project
+# which uses a separate named build context (see Dockerfile).
+llvm-project/
