@@ -46,16 +46,16 @@ class CoverageAnalyzer:
 
         sancov = Sancov(self.filepaths.llvm_bin)
 
-        # Keep track of lines that are newly covered by new tests
+        # Keep track of lines that are newly covered by candidate tests
         # so that we avoid adding them to the new coverage csv multiple times
         newly_covered_lines = set()
 
-        for new_test_dir in self.filepaths.output_new_tests_dir.iterdir():
+        for candidate_test_dir in self.filepaths.output_candidate_tests_dir.iterdir():
 
             # Check whether any new addresses are covered
-            test_name = new_test_dir.name
+            test_name = candidate_test_dir.name
 
-            sancov_file = get_sancov_file(new_test_dir)
+            sancov_file = get_sancov_file(candidate_test_dir)
 
             if sancov_file is None:
                 continue
@@ -67,10 +67,10 @@ class CoverageAnalyzer:
             new_coverage_df = llc_address_line_map[llc_address_line_map['point_llc'].isin(new_test_covered_addresses)].copy()
 
             if len(new_coverage_df) == 0:
-                print(f"New test {test_name} has no covered addresses in files that we are interested in")
+                print(f"Candidate test {test_name} has no covered addresses in files that we are interested in")
                 continue
             
-            print(f"New test {test_name} has {len(new_coverage_df)} new covered addresses in target files")
+            print(f"Candidate test {test_name} has {len(new_coverage_df)} new covered addresses in target files")
 
             # Check whether the newly covered addresses constitute a new line
             new_coverage_df["n_covered_addresses_in_line"] = new_coverage_df.groupby(["file", "line"], sort=False)["file"].transform("count")
@@ -82,7 +82,7 @@ class CoverageAnalyzer:
                 per_test_csv = test_name
                 unique_locations = new_test_covered_lines[["file", "line"]].drop_duplicates()
                 
-                print(f"New test {test_name} has {len(unique_locations)} covered lines in target files")
+                print(f"Candidate test {test_name} has {len(unique_locations)} covered lines in target files")
                 keys = [
                     (file, int(line))
                     for file, line in zip(unique_locations["file"], unique_locations["line"])
@@ -95,15 +95,15 @@ class CoverageAnalyzer:
                 # when working with full coverage
                 is_new_vs_baseline = [key not in baseline_covered_lines for key in keys]
 
-                # Compare to lines already covered by other new tests
-                is_new_vs_other_new_tests = [key not in newly_covered_lines for key in keys]
+                # Compare to lines already covered by other candidate tests
+                is_new_vs_other_candidate_tests = [key not in newly_covered_lines for key in keys]
 
-                # Keep only lines that are new vs baseline and new vs other new tests
-                mask = [a and b for a, b in zip(is_new_vs_baseline, is_new_vs_other_new_tests)]
+                # Keep only lines that are new vs baseline and new vs other candidate tests
+                mask = [a and b for a, b in zip(is_new_vs_baseline, is_new_vs_other_candidate_tests)]
                 unique_locations = unique_locations.loc[mask]
 
                 print(f"{sum(is_new_vs_baseline)} lines are new vs baseline out of {len(keys)}")
-                print(f"{sum(is_new_vs_other_new_tests)} lines are new vs other new tests out of {len(keys)}")
+                print(f"{sum(is_new_vs_other_candidate_tests)} lines are new vs other candidate tests out of {len(keys)}")
 
                 if unique_locations.empty:
                     continue

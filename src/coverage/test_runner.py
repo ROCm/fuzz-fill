@@ -29,7 +29,7 @@ class TestRunner:
         filepaths: Filepaths,
         lit_filter: str | None = None,
         jobs: int | None = None,
-        new_tests_limit: int = 1,
+        candidate_tests_limit: int = 1,
         jobs: int | None = None,
         timeout: int = 5,
         debug: bool = False,
@@ -50,7 +50,7 @@ class TestRunner:
             self.raw_sancov_output_dir.mkdir(parents=True, exist_ok=True)
 
         elif self.mode == "standalone":
-            self._new_tests_limit = new_tests_limit
+            self._candidate_tests_limit = candidate_tests_limit
             self._jobs = jobs if jobs is not None else (os.cpu_count() or 1)
             self._jobs = max(1, self._jobs)
             self._timeout = timeout
@@ -79,7 +79,7 @@ class TestRunner:
         """Sorted paths under ``test_root`` with suffix ``.ll`` or ``.bc``."""
         paths: set[Path] = set()
         for pattern in ("*.ll", "*.bc"):
-            paths.update(p for p in self.filepaths.new_tests_dir.rglob(pattern) if p.is_file())
+            paths.update(p for p in self.filepaths.candidate_tests_dir.rglob(pattern) if p.is_file())
         return sorted(paths)
 
     def run(self) -> None:
@@ -147,7 +147,7 @@ class TestRunner:
         """Generate each standalone test directory and run it before moving to the next."""
 
         paths = self.collect_llc_input_files()
-        to_run = paths[: self._new_tests_limit]
+        to_run = paths[: self._candidate_tests_limit]
         self.standalone_total_tests = len(to_run) * len(TEST_FLAGS)
         self.standalone_test_id = 0
         self.standalone_tests_complete = 0
@@ -212,7 +212,7 @@ class TestRunner:
             return "skipped"
 
         try:
-            subprocess.run(argv, cwd=self.filepaths.new_tests_dir, env=env, check=True)
+            subprocess.run(argv, cwd=self.filepaths.candidate_tests_dir, env=env, check=True)
         except subprocess.CalledProcessError as e:
             shutil.rmtree(test_dir)
             return "skipped"

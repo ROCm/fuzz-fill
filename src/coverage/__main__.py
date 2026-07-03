@@ -23,11 +23,11 @@ def main():
 
     sub = parser.add_subparsers(
         dest="subcmd",
-        metavar="{baseline,new-tests,incremental,target-lines}",
+        metavar="{baseline,candidate-test,incremental,target-lines}",
         required=True,
     )
     p_baseline = sub.add_parser("baseline")
-    p_new_tests = sub.add_parser("new-tests")
+    p_candidate_test = sub.add_parser("candidate-test")
     p_incremental = sub.add_parser("incremental")
     p_target_lines = sub.add_parser(
         "target-lines",
@@ -39,7 +39,7 @@ def main():
     )
 
     add_shared_arguments(p_baseline)
-    add_shared_arguments(p_new_tests)
+    add_shared_arguments(p_candidate_test)
     add_shared_arguments(p_incremental)
     add_shared_arguments(p_target_lines)
 
@@ -52,20 +52,20 @@ def main():
     p_baseline.add_argument("-j", "--jobs", type=int, default=None,
         help="Number of parallel jobs forwarded to llvm-lit as -j<N>. If unset, llvm-lit chooses.")
 
-    p_new_tests.add_argument("--instrumented-bin", type=Path, required=True, 
+    p_candidate_test.add_argument("--instrumented-bin", type=Path, required=True, 
         help="Path to the coverage-instrumented LLVM bin directory")
-    p_new_tests.add_argument("--new-tests-dir", type=Path, required=True,
-        help="Directory containing the new tests (.ll/.bc).")
-    p_new_tests.add_argument(
+    p_candidate_test.add_argument("--candidate-tests-dir", type=Path, required=True,
+        help="Directory containing the candidate tests (.ll/.bc).")
+    p_candidate_test.add_argument(
         "--n",
         type=int,
         default=1,
-        help="Number of new tests to process (.ll/.bc, sorted path order).",
+        help="Number of candidate tests to process (.ll/.bc, sorted path order).",
     )
-    p_new_tests.add_argument("-j", "--jobs", type=int, default=None,
-        help="Number of parallel jobs for running new tests. Defaults to the "
+    p_candidate_test.add_argument("-j", "--jobs", type=int, default=None,
+        help="Number of parallel jobs for running candidate tests. Defaults to the "
              "number of detected CPUs.")
-    p_new_tests.add_argument("--timeout", type=int, default=5,
+    p_candidate_test.add_argument("--timeout", type=int, default=5,
         help="Per-test wall-clock timeout in seconds; the test is killed with "
              "SIGKILL (timeout -s9) when exceeded. Default: 5.")
 
@@ -73,8 +73,8 @@ def main():
         help="Path to the uninstrumented LLVM bin directory")
     p_incremental.add_argument("--baseline-output-dir", type=Path, required=True,
         help="Directory containing the baseline coverage output")
-    p_incremental.add_argument("--new-tests-output-dir", type=Path, required=True,
-        help="Directory containing the new tests coverage output")
+    p_incremental.add_argument("--candidate-tests-output-dir", type=Path, required=True,
+        help="Directory containing the candidate tests coverage output")
 
     p_target_lines.add_argument(
         "--baseline-output-dir",
@@ -117,21 +117,21 @@ def main():
         )
         test_runner.run()
 
-    elif args.subcmd == "new-tests":
-        print("Getting coverage for the new tests")
+    elif args.subcmd == "candidate-test":
+        print("Getting coverage for the candidate tests")
         test_runner = TestRunner(
             mode="standalone",
             filepaths=filepaths,
-            new_tests_limit=args.n,
+            candidate_tests_limit=args.n,
             jobs=args.jobs,
             timeout=args.timeout,
         )
         test_runner.run()
     
     elif args.subcmd == "incremental":
-        print("Getting incremental coverage for new tests relative to the baseline test suite")
+        print("Getting incremental coverage for candidate tests relative to the baseline test suite")
         filepaths.output_baseline_dir = args.baseline_output_dir
-        filepaths.output_new_tests_dir = args.new_tests_output_dir
+        filepaths.output_candidate_tests_dir = args.candidate_tests_output_dir
 
         coverage_analyzer = CoverageAnalyzer(filepaths, mode="full")
 
@@ -167,9 +167,9 @@ def get_filepaths(args: argparse.Namespace) -> Filepaths:
         output_dir=args.output_dir,
         llvm_bin=getattr(args, "llvm_bin", None),
         instrumented_bin=getattr(args, "instrumented_bin", None),
-        new_tests_dir=getattr(args, "new_tests_dir", None),
+        candidate_tests_dir=getattr(args, "candidate_tests_dir", None),
         output_baseline_dir=getattr(args, "baseline_output_dir", None),
-        output_new_tests_dir=getattr(args, "output_new_tests_dir", None),
+        output_candidate_tests_dir=getattr(args, "candidate_tests_output_dir", None),
         llc_address_line_map_file=DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
         joint_llc_and_opt_coverage_file=DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE,
         new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,

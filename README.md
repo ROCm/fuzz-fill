@@ -48,12 +48,12 @@ Adjust these to match your trees before running.
 ### What it does
 
 ```text
-baseline  →  new-tests  →  incremental  →  reduce
+baseline  →  candidate-test  →  incremental  →  reduce
 (suite baseline)  (fuzz corpus)  (gaps filled)  (minimal LIT tests)
 ```
 
 1. **`baseline`** — run a filtered slice of the LLVM LIT suite with SanitizerCoverage to establish baseline coverage: which source lines the existing tests already hit.
-2. **`new-tests`** — run a directory of fuzz-generated tests (`.ll` / `.bc`) through instrumented `llc` and collect their coverage.
+2. **`candidate-test`** — run a directory of fuzz-generated tests (`.ll` / `.bc`) through instrumented `llc` and collect their coverage.
 3. **`incremental`** — compare fuzz-test coverage against the suite baseline and report which fuzz tests cover lines the suite misses — these are candidate gap-fillers.
 4. **`reduce`** — shrink promising tests into minimal cases suitable for adding to the suite (see [Reduce interesting tests](#reduce-interesting-tests) below).
 
@@ -76,7 +76,7 @@ Then run from the fuzz-fill repo root:
 ./scripts/test_coverage.sh
 ```
 
-By default the script runs only **`baseline`**. Uncomment the **`new-tests`** and **`incremental`** blocks when you are ready for the full pipeline.
+By default the script runs only **`baseline`**. Uncomment the **`candidate-test`** and **`incremental`** blocks when you are ready for the full pipeline.
 
 ### Key outputs
 
@@ -85,8 +85,8 @@ Under `$OUTPUT_DIR`:
 | Path | Contents |
 |------|----------|
 | `baseline/test_coverage.csv` | Suite baseline: source lines the LIT run covers (joint llc + opt, full-line mode) |
-| `baseline/processed_sancov/` | Merged, symbolized symcov files — reuse these if you re-run `incremental` with different new tests |
-| `new_tests/raw_sancov/` | Per-test raw sancov shards |
+| `baseline/processed_sancov/` | Merged, symbolized symcov files — reuse these if you re-run `incremental` with different candidate tests |
+| `candidate_tests/raw_sancov/` | Per-test raw sancov shards |
 | `incremental/new_coverage.csv` | **Main result** — columns `test`, `file`, `line`, `covered-points`: fuzz tests that fill suite coverage gaps |
 
 `new_coverage.csv` is the input for testcase reduction in step 4.
@@ -168,7 +168,7 @@ The workflows above call these modules. Use `--help` on any command for the full
 | Command | Role in workflows |
 |---------|-------------------|
 | `python -m coverage baseline` | Baseline LIT coverage (both workflows) |
-| `python -m coverage new-tests` | Coverage from a fuzz-generated test corpus (Workflow 1) |
+| `python -m coverage candidate-test` | Coverage from a fuzz-generated test corpus (Workflow 1) |
 | `python -m coverage incremental` | Suite gaps filled by fuzz tests (Workflow 1) |
 | `python -m coverage target-lines` | Uncovered target lines vs baseline symcov (Workflow 2) |
 | `python -m added_lines` | Lines added by a git commit (Workflow 2) |
