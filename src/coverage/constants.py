@@ -19,4 +19,4 @@ DEFAULT_COMMIT_LINES_REPORT = "commit_lines_uncovered.csv"
 UNION_BATCH_SIZE = 200
 
 # New test flags
-TEST_FLAGS = ["", "-OO", "-O1", "-O2", "-O3"]
+TEST_FLAGS = ["-O0", "-O1", "-O2", "-O3"]
