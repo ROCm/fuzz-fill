@@ -12,7 +12,10 @@ from pathlib import Path
 
 from coverage.constants import DEFAULT_LIT_FILTER
 from coverage.run_config import path_filter_from_lit_filter
+from fuzz_fill.log import get_logger, log_timing, run_subprocess
 from typing import Literal
+
+logger = get_logger("coverage.sancov")
 
 class Sancov:
 
@@ -232,8 +235,10 @@ class Sancov:
     def get_covered_addresses(self, sancov_file: Path) -> set[str]:
         """Get the covered addresses from a sancov file."""
         try:
-            proc = subprocess.run(
+            proc = run_subprocess(
+                logger,
                 [str(self.sancov_bin), "--print", str(sancov_file)],
+                label="sancov --print",
                 check=True,
                 capture_output=True,
                 text=True,
@@ -266,59 +271,63 @@ class Sancov:
 
     def merge(self) -> None:
         """Merge the sancov files for the given suffix."""
+        with log_timing(logger, f"sancov merge ({self.suffix})"):
+            merged_out = self.get_merged_sancov_path()
 
-        merged_out = self.get_merged_sancov_path()
+            raw_files = list(self.raw_sancov_dir.glob(f"{self.suffix}.*.sancov"))
+            if not raw_files:
+                raise FileNotFoundError(f"No sancov files found for suffix: {self.suffix}")
 
-        raw_files = list(self.raw_sancov_dir.glob(f"{self.suffix}.*.sancov"))
-        if not raw_files:
-            raise FileNotFoundError(f"No sancov files found for suffix: {self.suffix}")
+            """Merge raw ``.sancov`` files with repeated ``sancov -union`` (batched)."""
+            if len(raw_files) == 1:
+                shutil.copy(raw_files[0], merged_out)
+                return
 
-        """Merge raw ``.sancov`` files with repeated ``sancov -union`` (batched)."""
-        if len(raw_files) == 1:
-            shutil.copy(raw_files[0], merged_out)
-            return
-
-        sancov = self.sancov_bin
-        batch = self.union_batch
-        layer = list(raw_files)
-        with tempfile.TemporaryDirectory(dir=merged_out.parent) as tmp:
-            tmp_path = Path(tmp)
-            round_idx = 0
-            while len(layer) > 1:
-                nxt: list[Path] = []
-                for i in range(0, len(layer), batch):
-                    chunk = layer[i : i + batch]
-                    if len(chunk) == 1:
-                        nxt.append(chunk[0])
-                        continue
-                    out_f = tmp_path / f"u_{round_idx}_{len(nxt)}.sancov"
-                    subprocess.run(
-                        [str(sancov), "-union"]
-                        + [str(p) for p in chunk]
-                        + ["--output", str(out_f)],
-                        check=True,
-                    )
-                    nxt.append(out_f)
-                layer = nxt
-                round_idx += 1
-            shutil.copy(layer[0], merged_out)
+            sancov = self.sancov_bin
+            batch = self.union_batch
+            layer = list(raw_files)
+            with tempfile.TemporaryDirectory(dir=merged_out.parent) as tmp:
+                tmp_path = Path(tmp)
+                round_idx = 0
+                while len(layer) > 1:
+                    nxt: list[Path] = []
+                    for i in range(0, len(layer), batch):
+                        chunk = layer[i : i + batch]
+                        if len(chunk) == 1:
+                            nxt.append(chunk[0])
+                            continue
+                        out_f = tmp_path / f"u_{round_idx}_{len(nxt)}.sancov"
+                        run_subprocess(
+                            logger,
+                            [str(sancov), "-union"]
+                            + [str(p) for p in chunk]
+                            + ["--output", str(out_f)],
+                            check=True,
+                        )
+                        nxt.append(out_f)
+                    layer = nxt
+                    round_idx += 1
+                shutil.copy(layer[0], merged_out)
     
     def symbolize(
         self,
         sancov_path: Path,
         symcov_path: Path
     ) -> None:
+        with log_timing(logger, f"sancov symbolize ({self.suffix})"):
+            if symcov_path.exists():
+                logger.info(
+                    "Symcov file already exists at %s, skipping symbolization",
+                    symcov_path,
+                )
+                return
 
-        if symcov_path.exists():
-            print(f"Symcov file already exists at {symcov_path}, skipping symbolization")
-            return
+            logger.info("Symbolizing %s with %s", sancov_path, self.instrumented_bin)
 
-        print(f"Symbolizing {sancov_path} with {self.instrumented_bin}")
-        
-        cmd = [str(self.sancov_bin), "-symbolize", str(sancov_path), str(self.instrumented_bin)]
+            cmd = [str(self.sancov_bin), "-symbolize", str(sancov_path), str(self.instrumented_bin)]
 
-        with symcov_path.open("w") as f:
-            subprocess.run(cmd, check=True, stdout=f, stderr=subprocess.STDOUT)
+            with symcov_path.open("w") as f:
+                run_subprocess(logger, cmd, check=True, stdout=f, stderr=subprocess.STDOUT)
 
     def get_joint_coverage(
         self,
@@ -337,60 +346,61 @@ class Sancov:
         ``file``, ``line``, ``point_<suffix>`` on the map and ``file``, ``line``,
         ``point_<suffix>`` on baseline rows (one row per instrumented point).
         """
-        with self.get_merged_symcov_path().open(encoding="utf-8") as f:
-            this_symcov = json.load(f)
+        with log_timing(logger, f"joint coverage ({self.suffix})"):
+            with self.get_merged_symcov_path().open(encoding="utf-8") as f:
+                this_symcov = json.load(f)
 
-        with other.get_merged_symcov_path().open(encoding="utf-8") as f:
-            other_symcov = json.load(f)
+            with other.get_merged_symcov_path().open(encoding="utf-8") as f:
+                other_symcov = json.load(f)
 
-        if path_filter is None:
-            path_filter = path_filter_from_lit_filter(DEFAULT_LIT_FILTER)
+            if path_filter is None:
+                path_filter = path_filter_from_lit_filter(DEFAULT_LIT_FILTER)
 
-        this_df = self.get_coverage_df(this_symcov, path_filter)
-        other_df = self.get_coverage_df(other_symcov, path_filter)
+            this_df = self.get_coverage_df(this_symcov, path_filter)
+            other_df = self.get_coverage_df(other_symcov, path_filter)
 
-        this_address_line_map = this_df[["file", "line", "point"]].copy()
-        this_address_line_map["line"] = this_address_line_map["line"].astype(int)
-        this_address_line_map.rename(columns={"point": f"point_{self.suffix}"}, inplace=True)
+            this_address_line_map = this_df[["file", "line", "point"]].copy()
+            this_address_line_map["line"] = this_address_line_map["line"].astype(int)
+            this_address_line_map.rename(columns={"point": f"point_{self.suffix}"}, inplace=True)
 
-        if self.coverage_mode == "full":
-            merged_cov = Sancov.merged_llc_opt_coverage_df(this_df, other_df)
-            baseline_lines = Sancov.jointly_fully_covered_line_keys_from_merged(
-                merged_cov
-            )
+            if self.coverage_mode == "full":
+                merged_cov = Sancov.merged_llc_opt_coverage_df(this_df, other_df)
+                baseline_lines = Sancov.jointly_fully_covered_line_keys_from_merged(
+                    merged_cov
+                )
 
-            baseline_lines_df = pd.DataFrame(
-                list(baseline_lines), columns=["file", "line"]
-            )
+                baseline_lines_df = pd.DataFrame(
+                    list(baseline_lines), columns=["file", "line"]
+                )
 
-            this_df_merge = this_df.copy()
-            this_df_merge["line"] = this_df_merge["line"].astype(int)
-            other_df_merge = other_df.copy()
-            other_df_merge["line"] = other_df_merge["line"].astype(int)
+                this_df_merge = this_df.copy()
+                this_df_merge["line"] = this_df_merge["line"].astype(int)
+                other_df_merge = other_df.copy()
+                other_df_merge["line"] = other_df_merge["line"].astype(int)
 
-            llc_baseline = this_df_merge.merge(
-                baseline_lines_df, on=["file", "line"], how="inner"
-            )
-            llc_instrumented_lines = set(zip(this_df_merge["file"], this_df_merge["line"]))
-            opt_only_lines = baseline_lines - llc_instrumented_lines
-            opt_only_df = pd.DataFrame(list(opt_only_lines), columns=["file", "line"])
-            opt_baseline = other_df_merge.merge(
-                opt_only_df, on=["file", "line"], how="inner"
-            )
+                llc_baseline = this_df_merge.merge(
+                    baseline_lines_df, on=["file", "line"], how="inner"
+                )
+                llc_instrumented_lines = set(zip(this_df_merge["file"], this_df_merge["line"]))
+                opt_only_lines = baseline_lines - llc_instrumented_lines
+                opt_only_df = pd.DataFrame(list(opt_only_lines), columns=["file", "line"])
+                opt_baseline = other_df_merge.merge(
+                    opt_only_df, on=["file", "line"], how="inner"
+                )
 
-            point_col = f"point_{self.suffix}"
-            baseline_coverage = pd.concat(
-                [
-                    llc_baseline[["file", "line", "point"]].rename(
-                        columns={"point": point_col}
-                    ),
-                    opt_baseline[["file", "line", "point"]].rename(
-                        columns={"point": point_col}
-                    ),
-                ],
-                ignore_index=True,
-            )
-            return (this_address_line_map, baseline_coverage)
+                point_col = f"point_{self.suffix}"
+                baseline_coverage = pd.concat(
+                    [
+                        llc_baseline[["file", "line", "point"]].rename(
+                            columns={"point": point_col}
+                        ),
+                        opt_baseline[["file", "line", "point"]].rename(
+                            columns={"point": point_col}
+                        ),
+                    ],
+                    ignore_index=True,
+                )
+                return (this_address_line_map, baseline_coverage)
 
-        elif self.coverage_mode == "partial":
-            raise NotImplementedError(f"Coverage mode {self.coverage_mode} not implemented")
+            elif self.coverage_mode == "partial":
+                raise NotImplementedError(f"Coverage mode {self.coverage_mode} not implemented")

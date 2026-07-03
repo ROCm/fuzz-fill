@@ -16,7 +16,9 @@ from coverage.constants import (
 from coverage.analyser import CoverageAnalyzer
 from coverage.commit_lines_check import run_commit_lines_check
 from coverage.run_config import load_run_config
-from fuzz_fill.log import add_log_level_argument, configure_logging
+from fuzz_fill.log import add_log_level_argument, configure_logging, get_logger, log_timing
+
+logger = get_logger("coverage")
 
 def main():
 
@@ -114,34 +116,37 @@ def main():
 
     if args.subcmd == "baseline":
         print("Getting baseline coverage for the test suite")
-        test_runner = TestRunner(
-            mode="lit",
-            filepaths=filepaths,
-            lit_filter=args.lit_filter,
-            jobs=args.jobs,
-            debug=args.debug,
-        )
-        test_runner.run()
+        with log_timing(logger, "baseline"):
+            test_runner = TestRunner(
+                mode="lit",
+                filepaths=filepaths,
+                lit_filter=args.lit_filter,
+                jobs=args.jobs,
+                debug=args.debug,
+            )
+            test_runner.run()
 
     elif args.subcmd == "candidate-test":
         print("Getting coverage for the candidate tests")
-        test_runner = TestRunner(
-            mode="standalone",
-            filepaths=filepaths,
-            candidate_tests_limit=args.n,
-            jobs=args.jobs,
-            timeout=args.timeout,
-        )
-        test_runner.run()
+        with log_timing(logger, "candidate-test"):
+            test_runner = TestRunner(
+                mode="standalone",
+                filepaths=filepaths,
+                candidate_tests_limit=args.n,
+                jobs=args.jobs,
+                timeout=args.timeout,
+            )
+            test_runner.run()
     
     elif args.subcmd == "incremental":
         print("Getting incremental coverage for candidate tests relative to the baseline test suite")
-        filepaths.output_baseline_dir = args.baseline_output_dir
-        filepaths.output_candidate_tests_dir = args.candidate_tests_output_dir
+        with log_timing(logger, "incremental"):
+            filepaths.output_baseline_dir = args.baseline_output_dir
+            filepaths.output_candidate_tests_dir = args.candidate_tests_output_dir
 
-        coverage_analyzer = CoverageAnalyzer(filepaths, mode="full")
+            coverage_analyzer = CoverageAnalyzer(filepaths, mode="full")
 
-        coverage_analyzer.get_incremental_coverage()
+            coverage_analyzer.get_incremental_coverage()
 
     elif args.subcmd == "target-lines":
         print(
@@ -149,16 +154,17 @@ def main():
             "(no lit re-run)",
             flush=True,
         )
-        args.output_dir.mkdir(parents=True, exist_ok=True)
-        report_path = args.output_dir / DEFAULT_COMMIT_LINES_REPORT
-        run_config = load_run_config(args.baseline_output_dir.resolve())
-        run_commit_lines_check(
-            baseline_output_dir=args.baseline_output_dir.resolve(),
-            llvm_repo=args.llvm_repo,
-            added_lines_csv=args.target_lines_csv.resolve(),
-            path_filter=run_config["path_filter"],
-            report_path=report_path,
-        )
+        with log_timing(logger, "target-lines"):
+            args.output_dir.mkdir(parents=True, exist_ok=True)
+            report_path = args.output_dir / DEFAULT_COMMIT_LINES_REPORT
+            run_config = load_run_config(args.baseline_output_dir.resolve())
+            run_commit_lines_check(
+                baseline_output_dir=args.baseline_output_dir.resolve(),
+                llvm_repo=args.llvm_repo,
+                added_lines_csv=args.target_lines_csv.resolve(),
+                path_filter=run_config["path_filter"],
+                report_path=report_path,
+            )
 
     else:
         print(f"Unknown subcommand: {args.subcmd}")
