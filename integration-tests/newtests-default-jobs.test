@@ -1,0 +1,16 @@
+# COM: Run `coverage new-tests` WITHOUT -j so the default job count
+# COM: (os.cpu_count()) drives parallel execution. With 3 input files and
+# COM: len(TEST_FLAGS)=4 flag variants each, all 12 executions must complete
+# COM: and none be skipped.
+
+# RUN: rm -rf %t && mkdir -p %t/new_tests
+# RUN: %coverage new-tests --output-dir %t/new_tests --instrumented-bin "$(dirname %sancov-llc)" --new-tests-dir %S/fixtures/new-tests-parallel --n 3 | tee %t/new_tests.log
+
+# COM: Final progress line reports the tallies across all flag runs.
+# RUN: %FileCheck %s --input-file=%t/new_tests.log --check-prefix=EXEC
+# EXEC: complete=12  skipped=0  remaining=0
+
+# COM: Each of the 12 successful runs must leave exactly one sancov file, so the
+# COM: total number of sancov files across all test dirs must be exactly 12.
+# RUN: find %t/new_tests -name '*.sancov' | wc -l | %FileCheck %s --check-prefix=SANCOV_COUNT
+# SANCOV_COUNT: 12

@@ -62,6 +62,12 @@ def main():
         default=1,
         help="Number of new tests to process (.ll/.bc, sorted path order).",
     )
+    p_new_tests.add_argument("-j", "--jobs", type=int, default=None,
+        help="Number of parallel jobs for running new tests. Defaults to the "
+             "number of detected CPUs.")
+    p_new_tests.add_argument("--timeout", type=int, default=5,
+        help="Per-test wall-clock timeout in seconds; the test is killed with "
+             "SIGKILL (timeout -s9) when exceeded. Default: 5.")
 
     p_diff.add_argument("--llvm-bin", type=Path, required=True,
         help="Path to the uninstrumented LLVM bin directory")
@@ -117,6 +123,8 @@ def main():
             mode="standalone",
             filepaths=filepaths,
             new_tests_limit=args.n,
+            jobs=args.jobs,
+            timeout=args.timeout,
         )
         test_runner.run()
     
