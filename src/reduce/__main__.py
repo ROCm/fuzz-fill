@@ -2,6 +2,7 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
+from fuzz_fill.log import add_log_level_argument, configure_logging
 from reduce.config import load_reduce_config, pipeline_steps_for_only_pass
 from reduce.reducer import Reducer, known_pass_ids
 from reduce.test import Test
@@ -31,7 +32,9 @@ def main():
         metavar="PASS_ID",
         help="Run a single pass by id (input is config input; use .mir for llvm_reduce_mir).",
     )
+    add_log_level_argument(parser)
     ns = parser.parse_args()
+    configure_logging(ns.log_level)
     print("[main] loading config...", flush=True)
     cfg = load_reduce_config(ns.config, ns.llvm_bin.resolve())
 

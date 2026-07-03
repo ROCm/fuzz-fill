@@ -16,6 +16,7 @@ from coverage.constants import (
 from coverage.analyser import CoverageAnalyzer
 from coverage.commit_lines_check import run_commit_lines_check
 from coverage.run_config import load_run_config
+from fuzz_fill.log import add_log_level_argument, configure_logging
 
 def main():
 
@@ -104,6 +105,7 @@ def main():
     )
 
     args = parser.parse_args()
+    configure_logging(args.log_level)
 
     filepaths = get_filepaths(args)
 
@@ -165,6 +167,7 @@ def main():
 def add_shared_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--debug", action="store_true", default=False)
+    add_log_level_argument(parser)
 
 def get_filepaths(args: argparse.Namespace) -> Filepaths:
     return Filepaths(
