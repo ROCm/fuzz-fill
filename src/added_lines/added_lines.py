@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from fuzz_fill.log import get_logger, log_timing, run_subprocess
+
+logger = get_logger("added_lines")
 
 
 @dataclass(frozen=True)
@@ -19,7 +22,8 @@ _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
 
 def _verify_git_repo(repo: Path) -> None:
-    r = subprocess.run(
+    r = run_subprocess(
+        logger,
         ["git", "-C", str(repo), "rev-parse", "--is-inside-work-tree"],
         capture_output=True,
         text=True,
@@ -31,7 +35,8 @@ def _verify_git_repo(repo: Path) -> None:
 
 
 def _verify_commit(repo: Path, commit: str) -> None:
-    r = subprocess.run(
+    r = run_subprocess(
+        logger,
         ["git", "-C", str(repo), "rev-parse", "--verify", f"{commit}^{{commit}}"],
         capture_output=True,
         text=True,
@@ -43,7 +48,8 @@ def _verify_commit(repo: Path, commit: str) -> None:
 
 
 def git_show_patch(repo: Path, commit: str) -> str:
-    r = subprocess.run(
+    r = run_subprocess(
+        logger,
         [
             "git",
             "-C",
@@ -54,9 +60,9 @@ def git_show_patch(repo: Path, commit: str) -> str:
             "--pretty=format:",
             commit,
         ],
+        label="git show",
         capture_output=True,
         text=True,
-        check=False,
     )
     if r.returncode != 0:
         raise SystemExit(
@@ -137,7 +143,8 @@ def parse_added_lines(patch: str) -> list[AddedLine]:
 
 
 def collect_added_lines(repo: Path, commit: str) -> list[AddedLine]:
-    _verify_git_repo(repo)
-    _verify_commit(repo, commit)
-    patch = git_show_patch(repo, commit)
-    return parse_added_lines(patch)
+    with log_timing(logger, "collect added lines"):
+        _verify_git_repo(repo)
+        _verify_commit(repo, commit)
+        patch = git_show_patch(repo, commit)
+        return parse_added_lines(patch)

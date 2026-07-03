@@ -4,7 +4,6 @@ import os
 import re
 import shlex
 import shutil
-import subprocess
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -12,6 +11,9 @@ from pathlib import Path
 
 from reduce.reducer import ReduceContext
 from reduce.test import Test
+from fuzz_fill.log import get_logger, run_subprocess
+
+logger = get_logger("reduce.pass")
 
 
 def tmp_pass_path(tmp_dir: Path, step: int, slug: str, ext: str = "ll") -> Path:
@@ -181,7 +183,14 @@ def _run_llc_extract_core(
         *pass_specific_args,
         str(test.test_path.resolve()),
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True, cwd=ctx.tmp_dir)
+    r = run_subprocess(
+        logger,
+        cmd,
+        label=f"llc ({what})",
+        capture_output=True,
+        text=True,
+        cwd=ctx.tmp_dir,
+    )
     if r.returncode != 0:
         msg = (r.stderr or r.stdout or "").strip() or "(no output)"
         raise SystemExit(f"llc ({what}) failed ({r.returncode}):\n{msg}")
@@ -290,8 +299,10 @@ class LlvmReduceIrPass(ReducePass):
             f"-o={out}",
             str(test.test_path.resolve()),
         ]
-        r = subprocess.run(
+        r = run_subprocess(
+            logger,
             cmd,
+            label="llvm-reduce",
             capture_output=True,
             text=True,
             cwd=ctx.tmp_dir,
@@ -309,8 +320,10 @@ class LlvmReduceIrPass(ReducePass):
                 str(out.with_suffix(".ll").resolve()),
                 str(out.resolve()),
             ]
-            r = subprocess.run(
+            r = run_subprocess(
+                logger,
                 cmd,
+                label="llvm-dis",
                 capture_output=True,
                 text=True,
                 cwd=ctx.tmp_dir,
@@ -349,8 +362,10 @@ class CreducePass(ReducePass):
             str(interesting_copy.resolve()),
             str(out.resolve()),
         ]
-        r = subprocess.run(
+        r = run_subprocess(
+            logger,
             cmd,
+            label="creduce",
             capture_output=True,
             text=True,
             cwd=ctx.tmp_dir,
@@ -377,8 +392,10 @@ class LlvmReduceMirPass(ReducePass):
             f"-o={out}",
             str(test.test_path.resolve()),
         ]
-        r = subprocess.run(
+        r = run_subprocess(
+            logger,
             cmd,
+            label="llvm-reduce (-x=mir)",
             capture_output=True,
             text=True,
             cwd=ctx.tmp_dir,

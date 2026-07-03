@@ -16,6 +16,9 @@ from coverage.lit_config import (
 )
 from coverage.run_config import build_run_config, resolved_lit_filter, write_run_config
 from coverage.sancov import Sancov
+from fuzz_fill.log import get_logger, log_timing, run_subprocess
+
+logger = get_logger("coverage.test_runner")
 
 class TestRunner:
     """
@@ -125,7 +128,14 @@ class TestRunner:
             print(f"\tLit site config: {lit_site_cfg}")
             print(f"\tCoverage directory: {self.raw_sancov_output_dir}")
         else:
-            subprocess.run(argv, cwd=cwd, env=env, check=True)
+            run_subprocess(
+                logger,
+                argv,
+                label="llvm-lit",
+                cwd=cwd,
+                env=env,
+                check=True,
+            )
 
     def _print_standalone_progress(self, label: str | None = None) -> None:
         remaining = (
@@ -145,43 +155,44 @@ class TestRunner:
     def run_standalone_tests(self) -> None:
         """Generate each standalone test directory and run it before moving to the next."""
 
-        paths = self.collect_llc_input_files()
-        limit = self._candidate_tests_limit
-        to_run = paths if limit is None else paths[:limit]
-        self.standalone_total_tests = len(to_run) * len(TEST_FLAGS)
-        self.standalone_test_id = 0
-        self.standalone_tests_complete = 0
-        self.standalone_tests_skipped = 0
+        with log_timing(logger, "standalone candidate tests"):
+            paths = self.collect_llc_input_files()
+            limit = self._candidate_tests_limit
+            to_run = paths if limit is None else paths[:limit]
+            self.standalone_total_tests = len(to_run) * len(TEST_FLAGS)
+            self.standalone_test_id = 0
+            self.standalone_tests_complete = 0
+            self.standalone_tests_skipped = 0
 
-        if self.standalone_total_tests == 0:
-            self._print_standalone_progress("(no standalone inputs)")
-            return
+            if self.standalone_total_tests == 0:
+                self._print_standalone_progress("(no standalone inputs)")
+                return
 
-        # Pre-assign ids in nested order so dir names match the sequential
-        # version and workers never share mutable id state.
-        work = []
-        tid = 0
-        for test_path in to_run:
-            for flag in TEST_FLAGS:
-                test_dir = self.filepaths.output_dir / f"test_{tid}_{test_path.name}"
-                work.append((test_dir, test_path, flag))
-                tid += 1
+            # Pre-assign ids in nested order so dir names match the sequential
+            # version and workers never share mutable id state.
+            work = []
+            tid = 0
+            for test_path in to_run:
+                for flag in TEST_FLAGS:
+                    test_dir = self.filepaths.output_dir / f"test_{tid}_{test_path.name}"
+                    work.append((test_dir, test_path, flag))
+                    tid += 1
 
-        def _run_one(item):
-            test_dir, test_path, flag = item
-            self.create_standalone_test_script(test_dir, test_path, flag)
-            return test_dir.name, self.run_standalone_test(test_dir)
+            def _run_one(item):
+                test_dir, test_path, flag = item
+                self.create_standalone_test_script(test_dir, test_path, flag)
+                return test_dir.name, self.run_standalone_test(test_dir)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self._jobs) as pool:
-            futures = [pool.submit(_run_one, item) for item in work]
-            # Drain on the main thread: counters/prints stay single-threaded.
-            for future in concurrent.futures.as_completed(futures):
-                name, outcome = future.result()
-                if outcome == "success":
-                    self.standalone_tests_complete += 1
-                else:
-                    self.standalone_tests_skipped += 1
-                self._print_standalone_progress(f"[{name}]")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self._jobs) as pool:
+                futures = [pool.submit(_run_one, item) for item in work]
+                # Drain on the main thread: counters/prints stay single-threaded.
+                for future in concurrent.futures.as_completed(futures):
+                    name, outcome = future.result()
+                    if outcome == "success":
+                        self.standalone_tests_complete += 1
+                    else:
+                        self.standalone_tests_skipped += 1
+                    self._print_standalone_progress(f"[{name}]")
 
     def create_standalone_test_script(
         self, test_dir: Path, test_path: Path, flag: str
@@ -212,8 +223,14 @@ class TestRunner:
             return "skipped"
 
         try:
-            subprocess.run(argv, cwd=self.filepaths.candidate_tests_dir, env=env, check=True)
-        except subprocess.CalledProcessError as e:
+            run_subprocess(
+                logger,
+                argv,
+                cwd=self.filepaths.candidate_tests_dir,
+                env=env,
+                check=True,
+            )
+        except subprocess.CalledProcessError:
             shutil.rmtree(test_dir)
             return "skipped"
 
@@ -221,34 +238,35 @@ class TestRunner:
 
     def get_aggregate_coverage(self) -> None:
         """Get the aggregate coverage for the test suite."""
-        llc_sancov = Sancov(self.filepaths.llvm_bin, 
-                            self.filepaths.instrumented_bin / "llc", 
-                            self.raw_sancov_output_dir, 
-                            "llc")
+        with log_timing(logger, "aggregate coverage"):
+            llc_sancov = Sancov(self.filepaths.llvm_bin, 
+                                self.filepaths.instrumented_bin / "llc", 
+                                self.raw_sancov_output_dir, 
+                                "llc")
 
-        opt_sancov = Sancov(self.filepaths.llvm_bin, 
-                            self.filepaths.instrumented_bin / "opt", 
-                            self.raw_sancov_output_dir, 
-                            "opt")
+            opt_sancov = Sancov(self.filepaths.llvm_bin, 
+                                self.filepaths.instrumented_bin / "opt", 
+                                self.raw_sancov_output_dir, 
+                                "opt")
 
-        for sancov in (llc_sancov, opt_sancov):
-            if sancov.has_raw_files():
-                sancov.merge()
-                sancov.symbolize(sancov.get_merged_sancov_path(), sancov.get_merged_symcov_path())
-            else:
-                print(
-                    f"warning: no {sancov.suffix} sancov files in {self.raw_sancov_output_dir}; "
-                    f"the selected tests produced no {sancov.suffix} coverage. "
-                    f"Treating {sancov.suffix} as empty.",
-                    flush=True,
-                )
-                sancov.write_empty_symcov()
+            for sancov in (llc_sancov, opt_sancov):
+                if sancov.has_raw_files():
+                    sancov.merge()
+                    sancov.symbolize(sancov.get_merged_sancov_path(), sancov.get_merged_symcov_path())
+                else:
+                    print(
+                        f"warning: no {sancov.suffix} sancov files in {self.raw_sancov_output_dir}; "
+                        f"the selected tests produced no {sancov.suffix} coverage. "
+                        f"Treating {sancov.suffix} as empty.",
+                        flush=True,
+                    )
+                    sancov.write_empty_symcov()
 
-        llc_address_line_map, joint_coverage_df = llc_sancov.get_joint_coverage(
-            opt_sancov, self._path_filter
-        )
+            llc_address_line_map, joint_coverage_df = llc_sancov.get_joint_coverage(
+                opt_sancov, self._path_filter
+            )
 
-        llc_address_line_map.to_csv(self.filepaths.output_dir / self.filepaths.llc_address_line_map_file, index=False)
-        joint_coverage_df.to_csv(self.filepaths.output_dir / self.filepaths.joint_llc_and_opt_coverage_file, index=False)
+            llc_address_line_map.to_csv(self.filepaths.output_dir / self.filepaths.llc_address_line_map_file, index=False)
+            joint_coverage_df.to_csv(self.filepaths.output_dir / self.filepaths.joint_llc_and_opt_coverage_file, index=False)
 
 

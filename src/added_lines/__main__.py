@@ -8,6 +8,7 @@ from pathlib import Path
 
 from added_lines.added_lines import AddedLine, collect_added_lines
 from added_lines.constants import ADDED_LINES_FILENAME, DEFAULT_OUTPUT_DIR
+from fuzz_fill.log import add_log_level_argument, configure_logging
 
 
 def resolve_output_dir(path: Path) -> Path:
@@ -49,8 +50,10 @@ def main() -> None:
             "Uses git show --first-parent so merge commits diff against the first parent."
         ),
     )
+    add_log_level_argument(parser)
 
     args = parser.parse_args()
+    configure_logging(args.log_level)
 
     if args.debug:
         print("Debug mode enabled", flush=True)
