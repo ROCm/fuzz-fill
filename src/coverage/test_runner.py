@@ -27,12 +27,14 @@ class TestRunner:
         mode: str,
         filepaths: Filepaths,
         lit_filter: str | None = None,
+        jobs: int | None = None,
         new_tests_limit: int = 1,
         debug: bool = False,
     ) -> None:
         self.mode = mode
         self.filepaths = filepaths
         self.raw_sancov_output_dir = filepaths.output_dir / "raw_sancov"
+        self.jobs = jobs
         self.debug = debug
 
         self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
@@ -107,6 +109,8 @@ class TestRunner:
             str(lit_suite),
             f"--filter={self._lit_filter}",
         ]
+        if self.jobs is not None:
+            argv.append(f"-j{self.jobs}")
         cwd = instrumented_bin.parent
         env = self.ubsan_environ_with_coverage()
         if self.debug:
@@ -207,11 +211,18 @@ class TestRunner:
                             self.raw_sancov_output_dir, 
                             "opt")
 
-        llc_sancov.merge()
-        llc_sancov.symbolize(llc_sancov.get_merged_sancov_path(), llc_sancov.get_merged_symcov_path())
-
-        opt_sancov.merge()
-        opt_sancov.symbolize(opt_sancov.get_merged_sancov_path(), opt_sancov.get_merged_symcov_path())
+        for sancov in (llc_sancov, opt_sancov):
+            if sancov.has_raw_files():
+                sancov.merge()
+                sancov.symbolize(sancov.get_merged_sancov_path(), sancov.get_merged_symcov_path())
+            else:
+                print(
+                    f"warning: no {sancov.suffix} sancov files in {self.raw_sancov_output_dir}; "
+                    f"the selected tests produced no {sancov.suffix} coverage. "
+                    f"Treating {sancov.suffix} as empty.",
+                    flush=True,
+                )
+                sancov.write_empty_symcov()
 
         llc_address_line_map, joint_coverage_df = llc_sancov.get_joint_coverage(
             opt_sancov, self._path_filter
