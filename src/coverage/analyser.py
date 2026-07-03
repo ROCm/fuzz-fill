@@ -29,7 +29,9 @@ class CoverageAnalyzer:
         llc_address_line_map = pd.read_csv(self.llc_address_line_map_file)
         
         llc_address_line_map["line"] = llc_address_line_map["line"].astype(int)
-        llc_address_line_map["point_llc"] = llc_address_line_map["point_llc"].map(lambda x: f"0x{x}" if pd.notna(x) else x)        
+        llc_address_line_map["point_llc"] = llc_address_line_map["point_llc"].map(
+            lambda x: Sancov.format_hex_address(x) if pd.notna(x) else x
+        )
         llc_address_line_map["n_addresses_in_line"] = llc_address_line_map.groupby(["file", "line"], sort=False)["file"].transform("count")
         llc_address_line_map["file_line"] = llc_address_line_map["file"] + ":" + llc_address_line_map["line"].astype(str)
 

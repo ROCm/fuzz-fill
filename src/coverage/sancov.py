@@ -16,6 +16,17 @@ from typing import Literal
 
 class Sancov:
 
+    @staticmethod
+    def format_hex_address(addr: object) -> str:
+        """Normalize a SanitizerCoverage point id to ``0x`` + lowercase hex."""
+        s = str(addr).strip()
+        if s.lower().startswith("0x"):
+            s = s[2:]
+        if not s:
+            raise ValueError(f"empty sanitizer coverage point id: {addr!r}")
+        int(s, 16)
+        return f"0x{s.lower()}"
+
     def __init__(
         self,
         bin_dir: Path,
@@ -54,6 +65,8 @@ class Sancov:
         out[["line", "col"]] = (
             out["line"].str.split(":", n=1, expand=True).reindex(columns=[0, 1])
         )
+        if not out.empty:
+            out["point"] = out["point"].map(Sancov.format_hex_address)
 
         return out
 
@@ -78,7 +91,10 @@ class Sancov:
 
         df = Sancov.flatten_point_symbol_info(point_symbol_info)
 
-        covered_points = symcov.get("covered-points")
+        covered_points = {
+            Sancov.format_hex_address(p)
+            for p in (symcov.get("covered-points") or [])
+        }
 
         # Create coverage dataframe
         df["covered"] = df["point"].isin(covered_points).astype(int)
@@ -227,7 +243,11 @@ class Sancov:
             raise RuntimeError(
                 f"sancov --print failed for {sancov_file}: {err or e}"
             ) from e
-        return {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+        return {
+            Sancov.format_hex_address(line.strip())
+            for line in proc.stdout.splitlines()
+            if line.strip()
+        }
 
     def has_raw_files(self) -> bool:
         """True if any raw ``.sancov`` files exist for this suffix."""
