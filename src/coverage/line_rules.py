@@ -75,11 +75,11 @@ class LineCoverageIndex:
 
 
 def normalize_llc_address_line_map(llc_address_line_map: pd.DataFrame) -> pd.DataFrame:
-    """Return a copy with int ``line`` and ``0x``-prefixed ``point_llc`` values."""
+    """Return a copy with int ``line`` and normalized ``point_llc`` values."""
     m = llc_address_line_map.copy()
     m["line"] = m["line"].astype(int)
     m["point_llc"] = m["point_llc"].map(
-        lambda x: f"0x{x}" if pd.notna(x) else x
+        lambda x: Sancov.format_hex_address(x) if pd.notna(x) else x
     )
     return m
 
