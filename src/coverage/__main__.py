@@ -59,8 +59,12 @@ def main():
     p_candidate_test.add_argument(
         "--n",
         type=int,
-        default=1,
-        help="Number of candidate tests to process (.ll/.bc, sorted path order).",
+        default=None,
+        metavar="N",
+        help=(
+            "Process only the first N candidate tests (.ll/.bc, sorted path order). "
+            "Default: all tests under --candidate-tests-dir."
+        ),
     )
     p_candidate_test.add_argument("-j", "--jobs", type=int, default=None,
         help="Number of parallel jobs for running candidate tests. Defaults to the "

@@ -29,8 +29,7 @@ class TestRunner:
         filepaths: Filepaths,
         lit_filter: str | None = None,
         jobs: int | None = None,
-        candidate_tests_limit: int = 1,
-        jobs: int | None = None,
+        candidate_tests_limit: int | None = None,
         timeout: int = 5,
         debug: bool = False,
     ) -> None:
@@ -147,7 +146,8 @@ class TestRunner:
         """Generate each standalone test directory and run it before moving to the next."""
 
         paths = self.collect_llc_input_files()
-        to_run = paths[: self._candidate_tests_limit]
+        limit = self._candidate_tests_limit
+        to_run = paths if limit is None else paths[:limit]
         self.standalone_total_tests = len(to_run) * len(TEST_FLAGS)
         self.standalone_test_id = 0
         self.standalone_tests_complete = 0
