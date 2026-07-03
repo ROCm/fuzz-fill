@@ -2,7 +2,7 @@
 # Interesting iff llc (on candidate "$1") produces sancov whose `sancov --print`
 # output contains every address listed in COVERED_LIST (semicolon-separated, same
 # shape as new_coverage.csv "covered-points"). Row source:
-# data/coverage_output/bb_coverage_270426/diff/new_coverage.csv (AMDGPUArgumentUsageInfo.cpp:56).
+# data/coverage_output/bb_coverage_270426/incremental/new_coverage.csv (AMDGPUArgumentUsageInfo.cpp:56).
 
 LLVM_BIN=/home/agorzyns/local/dev/llvm-project/build-amdgpu-bb/bin
 

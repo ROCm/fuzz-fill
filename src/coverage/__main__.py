@@ -23,12 +23,12 @@ def main():
 
     sub = parser.add_subparsers(
         dest="subcmd",
-        metavar="{test-suite,new-tests,diff,target-lines}",
+        metavar="{test-suite,new-tests,incremental,target-lines}",
         required=True,
     )
     p_test_suite = sub.add_parser("test-suite")
     p_new_tests = sub.add_parser("new-tests")
-    p_diff = sub.add_parser("diff")
+    p_incremental = sub.add_parser("incremental")
     p_target_lines = sub.add_parser(
         "target-lines",
         help=(
@@ -40,7 +40,7 @@ def main():
 
     add_shared_arguments(p_test_suite)
     add_shared_arguments(p_new_tests)
-    add_shared_arguments(p_diff)
+    add_shared_arguments(p_incremental)
     add_shared_arguments(p_target_lines)
 
     p_test_suite.add_argument("--llvm-bin", type=Path, required=True,
@@ -69,11 +69,11 @@ def main():
         help="Per-test wall-clock timeout in seconds; the test is killed with "
              "SIGKILL (timeout -s9) when exceeded. Default: 5.")
 
-    p_diff.add_argument("--llvm-bin", type=Path, required=True,
+    p_incremental.add_argument("--llvm-bin", type=Path, required=True,
         help="Path to the uninstrumented LLVM bin directory")
-    p_diff.add_argument("--test-suite-output-dir", type=Path, required=True,
+    p_incremental.add_argument("--test-suite-output-dir", type=Path, required=True,
         help="Directory containing the test suite coverage output")
-    p_diff.add_argument("--new-tests-output-dir", type=Path, required=True,
+    p_incremental.add_argument("--new-tests-output-dir", type=Path, required=True,
         help="Directory containing the new tests coverage output")
 
     p_target_lines.add_argument(
@@ -128,7 +128,7 @@ def main():
         )
         test_runner.run()
     
-    elif args.subcmd == "diff":
+    elif args.subcmd == "incremental":
         print("Getting incremental coverage for new tests relative to the baseline test suite")
         filepaths.output_test_suite_dir = args.test_suite_output_dir
         filepaths.output_new_tests_dir = args.new_tests_output_dir

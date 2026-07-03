@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Create per-line reduce harness directories from diff/new_coverage.csv and
+Create per-line reduce harness directories from incremental/new_coverage.csv and
 matching folders under new_tests/.
 
 CSV columns: test_name, file, line, covered-points
