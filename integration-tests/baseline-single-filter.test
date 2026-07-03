@@ -15,4 +15,4 @@
 # COM: line number and llc point), not just the header.
 # RUN: %FileCheck %s --input-file=%t/baseline/test_coverage.csv --check-prefix=COVERAGE
 # COVERAGE: file,line,point_llc
-# COVERAGE: {{.*}}/AMDGPU/{{.*}}.cpp,{{[0-9]+}},{{[0-9a-f]+}}
+# COVERAGE: {{.*}}/AMDGPU/{{.*}}.cpp,{{[0-9]+}},0x{{[0-9a-f]+}}
