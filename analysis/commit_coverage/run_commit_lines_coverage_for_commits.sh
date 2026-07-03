@@ -29,7 +29,7 @@
 #   SKIP_BUILD         — if 1, only run coverage steps
 #
 # Each commit output folder includes resource_stats.csv: wall/user/sys CPU and max RSS
-# (from GNU /usr/bin/time) for BUILD_SCRIPT and `python -m coverage test-suite`,
+# (from GNU /usr/bin/time) for BUILD_SCRIPT and `python -m coverage baseline`,
 # plus total wall time for the full iteration (cherry-pick through target-lines).
 
 set -euo pipefail
@@ -123,7 +123,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 	fi
 	SHORT="$(git -C "${LLVM_REPO}" rev-parse --short "${RESOLVED}")"
 	OUT="${OUTPUT_ROOT_BASE}/bb_coverage_commit_lines_${SHORT}"
-	TEST_SUITE_OUTPUT_DIR="${OUT}/test_suite"
+	BASELINE_OUTPUT_DIR="${OUT}/baseline"
 	ADDED_LINES_DIR="${OUT}/added-lines"
 	COMMIT_LINES_REPORT_DIR="${OUT}/commit_lines_report"
 	RESOURCE_CSV="${OUT}/resource_stats.csv"
@@ -131,7 +131,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 	mkdir -p "${OUT}"
 
 	if [[ -z "${GNU_TIME}" ]]; then
-		echo "Warning: /usr/bin/time not executable; resource_stats.csv build/test-suite CPU and RSS columns will be empty." >&2
+		echo "Warning: /usr/bin/time not executable; resource_stats.csv build/baseline CPU and RSS columns will be empty." >&2
 	fi
 
 	ITER_START_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -173,10 +173,10 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 		--commit "${COMMIT}" \
 		--output-dir "${ADDED_LINES_DIR}"
 
-	echo "Running test-suite coverage (symcov) ..."
-	TS_STAT="$(mktemp "${OUT}/.test_suite_stats.XXXXXX")"
-	run_gnu_timed "${TS_STAT}" python -m coverage test-suite \
-		--output-dir "${TEST_SUITE_OUTPUT_DIR}" \
+	echo "Running baseline coverage (symcov) ..."
+	TS_STAT="$(mktemp "${OUT}/.baseline_stats.XXXXXX")"
+	run_gnu_timed "${TS_STAT}" python -m coverage baseline \
+		--output-dir "${BASELINE_OUTPUT_DIR}" \
 		--llvm-bin "${LLVM_BIN}" \
 		--instrumented-bin "${INSTRUMENTED_BIN_DIR}" \
 		--lit-filter "${FILTER}"
@@ -189,7 +189,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 	echo "Computing target-lines report ..."
 	python -m coverage target-lines \
 		--output-dir "${COMMIT_LINES_REPORT_DIR}" \
-		--test-suite-output-dir "${TEST_SUITE_OUTPUT_DIR}" \
+		--baseline-output-dir "${BASELINE_OUTPUT_DIR}" \
 		--llvm-repo "${LLVM_REPO}" \
 		--target-lines-csv "${ADDED_LINES_DIR}/added-lines.csv"
 

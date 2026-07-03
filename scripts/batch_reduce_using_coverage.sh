@@ -6,7 +6,7 @@ FUZZFILL=$BASE/fuzz-fill
 DATA_DIR=$FUZZFILL/data
 
 TESTS_TO_REDUCE=$DATA_DIR/siinstrinfo/siinstrinfo_new_coverage.csv
-NEW_TESTS_DIR=$DATA_DIR/siinstrinfo
+CANDIDATE_TESTS_DIR=$DATA_DIR/siinstrinfo
 OUTPUT_DIR=$DATA_DIR/output/reduced_090626_siinstrinfo
 LLVM_BIN=$BASE/llvm-project/build/bin
 
@@ -56,7 +56,7 @@ fi
 
 python3 scripts/batch_reduce_using_coverage.py \
   --csv "$TESTS_TO_REDUCE" \
-  --new-tests "$NEW_TESTS_DIR" \
+  --candidate-tests "$CANDIDATE_TESTS_DIR" \
   --output "$OUTPUT_DIR" \
   --llvm-bin "$LLVM_BIN" \
   --n $N_FILES \

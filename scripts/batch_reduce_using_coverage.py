@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Create per-line reduce harness directories from diff/new_coverage.csv and
-matching folders under new_tests/.
+Create per-line reduce harness directories from incremental/new_coverage.csv and
+matching folders under candidate_tests/.
 
 CSV columns: test_name, file, line, covered-points
-(test_name is a directory under --new-tests containing test.sh).
+(test_name is a directory under --candidate-tests containing test.sh).
 
 Each test.sh records the instrumented llc invocation (binary, flags, .bc path).
 Llvm flags on that command are copied into interesting_ir.sh and extract_*
@@ -135,7 +135,7 @@ class TestShInfo:
 
 
 def parse_test_sh(test_sh: Path) -> TestShInfo:
-    """Parse new_tests/<test_name>/test.sh for llc binary, flags, and .bc path."""
+    """Parse candidate_tests/<test_name>/test.sh for llc binary, flags, and .bc path."""
     if not test_sh.is_file():
         raise FileNotFoundError(f"test.sh not found: {test_sh}")
 
@@ -521,7 +521,7 @@ def prepare_test_case(
     line: int,
     covered: str,
     hexes_sorted: list[str],
-    new_tests: Path,
+    candidate_tests: Path,
     out_parent: Path,
     template_interesting: str,
     pipeline_steps: list[dict],
@@ -543,7 +543,7 @@ def prepare_test_case(
             file=sys.stderr,
         )
 
-    test_info = parse_test_sh(new_tests / test_name / "test.sh")
+    test_info = parse_test_sh(candidate_tests / test_name / "test.sh")
     input_name = copy_input_bc(test_info, dest_dir)
 
     reduced_dir = (dest_dir / "reduced").resolve()
@@ -601,10 +601,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Coverage CSV (test_name, file, line, covered-points).",
     )
     p.add_argument(
-        "--new-tests",
+        "--candidate-tests",
         type=Path,
         required=True,
-        help="new_tests directory; each CSV test_name is a subdirectory with test.sh.",
+        help="candidate_tests directory; each CSV test_name is a subdirectory with test.sh.",
     )
     p.add_argument(
         "--output",
@@ -697,7 +697,7 @@ def main(argv: list[str] | None = None) -> int:
         print("--n must be a positive integer.", file=sys.stderr)
         return 2
 
-    new_tests = args.new_tests.resolve()
+    candidate_tests = args.candidate_tests.resolve()
     llvm_bin = args.llvm_bin.resolve() if args.llvm_bin is not None else None
     out_parent = args.output.resolve()
     out_parent.mkdir(parents=True, exist_ok=True)
@@ -765,7 +765,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         try:
             covered, hexes_sorted = resolve_covered_hexes(row["covered-points"])
-            test_info = parse_test_sh(new_tests / row["test_name"].strip() / "test.sh")
+            test_info = parse_test_sh(candidate_tests / row["test_name"].strip() / "test.sh")
             row_pipeline = build_pipeline_steps(
                 pass_ids,
                 pass_under_test=args.pass_under_test,
@@ -782,7 +782,7 @@ def main(argv: list[str] | None = None) -> int:
                 line=line,
                 covered=covered,
                 hexes_sorted=hexes_sorted,
-                new_tests=new_tests,
+                candidate_tests=candidate_tests,
                 out_parent=out_parent,
                 template_interesting=template_interesting,
                 pipeline_steps=row_pipeline,

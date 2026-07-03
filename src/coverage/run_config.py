@@ -1,4 +1,4 @@
-"""Persist and load test-suite run settings (lit filter → symcov path filter)."""
+"""Persist and load baseline run settings (lit filter → symcov path filter)."""
 
 from __future__ import annotations
 
@@ -44,12 +44,12 @@ def write_run_config(output_dir: Path, *, lit_filter: str | None) -> Path:
     return path
 
 
-def load_run_config(test_suite_output_dir: Path) -> RunConfig:
-    path = test_suite_output_dir / DEFAULT_RUN_CONFIG_FILE
+def load_run_config(baseline_output_dir: Path) -> RunConfig:
+    path = baseline_output_dir / DEFAULT_RUN_CONFIG_FILE
     if not path.is_file():
         raise SystemExit(
-            f"Missing {path}. Run ``coverage test-suite`` first (same "
-            f"--output-dir / --test-suite-output-dir) so run_config.json is written."
+            f"Missing {path}. Run ``coverage baseline`` first (same "
+            f"--output-dir / --baseline-output-dir) so run_config.json is written."
         )
     with path.open(encoding="utf-8") as f:
         data = json.load(f)

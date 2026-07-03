@@ -1,4 +1,4 @@
-"""Compare added-lines CSV against test-suite symcov (llc + opt)."""
+"""Compare added-lines CSV against baseline symcov (llc + opt)."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ import pandas as pd
 from coverage.sancov import Sancov
 
 
-def _processed_symcov_paths(test_suite_output_dir: Path) -> tuple[Path, Path]:
-    base = test_suite_output_dir / "processed_sancov"
+def _processed_symcov_paths(baseline_output_dir: Path) -> tuple[Path, Path]:
+    base = baseline_output_dir / "processed_sancov"
     return base / "llc.0.symcov", base / "opt.0.symcov"
 
 
@@ -37,7 +37,7 @@ def _instrumented_line_keys(
 
 def run_commit_lines_check(
     *,
-    test_suite_output_dir: Path,
+    baseline_output_dir: Path,
     llvm_repo: Path,
     added_lines_csv: Path,
     path_filter: str,
@@ -49,7 +49,7 @@ def run_commit_lines_check(
     (joint llc/opt view).
 
     A line is listed only when it appears in symcov ``point-symbol-info`` (scoped by
-    the ``path_filter`` saved in ``run_config.json`` from ``coverage test-suite``) and
+    the ``path_filter`` saved in ``run_config.json`` from ``coverage baseline``) and
     **every** merged instrumentation point on that ``(file, line)`` is **absent** from
     ``covered-points`` (no llc/opt hit on any of those addresses).
 
@@ -63,15 +63,15 @@ def run_commit_lines_check(
     Rows with unknown path, or no instrumentation for that line under the filter, are
     counted in the printed summary only (they are omitted from the CSV).
     """
-    llc_path, opt_path = _processed_symcov_paths(test_suite_output_dir)
+    llc_path, opt_path = _processed_symcov_paths(baseline_output_dir)
     if not llc_path.is_file():
         raise SystemExit(
-            f"Missing {llc_path}. Run ``coverage test-suite`` first (or pass the same "
-            f"--output-dir you used for that run as --test-suite-output-dir)."
+            f"Missing {llc_path}. Run ``coverage baseline`` first (or pass the same "
+            f"--output-dir you used for that run as --baseline-output-dir)."
         )
     if not opt_path.is_file():
         raise SystemExit(
-            f"Missing {opt_path}. Run ``coverage test-suite`` first so llc and opt symcov exist."
+            f"Missing {opt_path}. Run ``coverage baseline`` first so llc and opt symcov exist."
         )
 
     with llc_path.open(encoding="utf-8") as f:
