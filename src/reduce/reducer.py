@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -11,6 +10,9 @@ from reduce.pass_registry import known_pass_ids, passes_from_ids
 from reduce.test import Test
 
 from reduce.config import PipelineStep
+from fuzz_fill.log import get_logger, log_timing, run_subprocess
+
+logger = get_logger("reduce")
 
 _INTERESTING_SCRIPT_KEY_BY_PASS: dict[str, str] = {
     "llvm_reduce_ir": "interesting",
@@ -46,8 +48,10 @@ def _verify_final_interesting(script: Path, candidate: Path) -> None:
     candidate = candidate.resolve()
     if not script.is_file():
         raise SystemExit(f"interesting-ness script not found: {script}")
-    r = subprocess.run(
+    r = run_subprocess(
+        logger,
         [str(script), str(candidate)],
+        label="interesting-ness check",
         capture_output=True,
         text=True,
     )
@@ -106,7 +110,8 @@ class Reducer:
                 tmp_dir=tmp_dir,
                 pass_options=MappingProxyType(dict(self._pipeline_steps[step].options)),
             )
-            test = p.run(ctx, test, step=step)
+            with log_timing(logger, f"pass {step + 1}/{n}: {pass_id}"):
+                test = p.run(ctx, test, step=step)
 
         suffix = test.test_path.suffix if test.test_path.suffix else ".ll"
         final_name = "reduced.ll" if suffix == ".ll" else f"reduced{suffix}"
@@ -120,7 +125,8 @@ class Reducer:
                 f"[reduce] verifying final interesting-ness ({interesting})...",
                 flush=True,
             )
-            _verify_final_interesting(interesting, final_path)
+            with log_timing(logger, "final interesting-ness check"):
+                _verify_final_interesting(interesting, final_path)
             print("[reduce] final interesting-ness check passed", flush=True)
 
         return Test(final_path, test.interesting, test.file, test.line)
