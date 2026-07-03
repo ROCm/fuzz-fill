@@ -4,7 +4,7 @@ from pathlib import Path
 @dataclasses.dataclass
 class Filepaths:
     output_dir: Path
-    output_test_suite_dir: Path | None   
+    output_baseline_dir: Path | None   
     output_new_tests_dir: Path | None
     output_diff_dir: Path | None
     llvm_bin: Path | None
@@ -15,7 +15,7 @@ class Filepaths:
     new_coverage_csv: Path | None
 
     def __init__(self, output_dir: Path,
-     output_test_suite_dir: Path | None = None,
+     output_baseline_dir: Path | None = None,
      output_new_tests_dir: Path | None = None,
      output_diff_dir: Path | None = None,
      llvm_bin: Path | None = None,
@@ -25,7 +25,7 @@ class Filepaths:
      joint_llc_and_opt_coverage_file: Path | None = None,
      new_coverage_csv: Path | None = None):
         self.output_dir = output_dir
-        self.output_test_suite_dir = output_test_suite_dir
+        self.output_baseline_dir = output_baseline_dir
         self.output_new_tests_dir = output_new_tests_dir
         self.output_diff_dir = output_diff_dir
         self.llvm_bin = llvm_bin

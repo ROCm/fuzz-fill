@@ -1,28 +1,28 @@
 # COM: End-to-end check of the coverage pipeline over an AMDGPU test-suite slice:
-# COM:   a) test-suite:   measure coverage of the existing suite slice (the baseline)
+# COM:   a) baseline:     measure coverage of the existing suite slice (the baseline)
 # COM:   b) new-tests:    measure coverage of an external test
 # COM:   c) incremental:  report lines the new test covers that the baseline misses
 # COM:   d) target-lines: report which specific lines the baseline leaves uncovered
 # COM:
 # COM: Cross-check: the gaps incremental reports must match the lines target-lines flags, and a
-# COM: baseline-covered line must show up in test-suite output but not in incremental/target-lines.
+# COM: baseline-covered line must show up in baseline output but not in incremental/target-lines.
 
-# RUN: rm -rf %t && mkdir -p %t/test_suite %t/new_tests %t/incremental %t/target_lines
-# RUN: %coverage test-suite --output-dir %t/test_suite --llvm-bin "$(dirname %FileCheck)" --instrumented-bin "$(dirname %sancov-llc)" --lit-filter CodeGen/AMDGPU/loop -j1
+# RUN: rm -rf %t && mkdir -p %t/baseline %t/new_tests %t/incremental %t/target_lines
+# RUN: %coverage baseline --output-dir %t/baseline --llvm-bin "$(dirname %FileCheck)" --instrumented-bin "$(dirname %sancov-llc)" --lit-filter CodeGen/AMDGPU/loop -j1
 # RUN: %coverage new-tests --output-dir %t/new_tests --instrumented-bin "$(dirname %sancov-llc)" --new-tests-dir %S/fixtures/coverage-new-tests --n 1
-# RUN: %coverage incremental --output-dir %t/incremental --llvm-bin "$(dirname %FileCheck)" --test-suite-output-dir %t/test_suite --new-tests-output-dir %t/new_tests
-# RUN: %coverage target-lines --output-dir %t/target_lines --test-suite-output-dir %t/test_suite --llvm-repo %llvm-repo --target-lines-csv %S/fixtures/target-lines-sample.csv
+# RUN: %coverage incremental --output-dir %t/incremental --llvm-bin "$(dirname %FileCheck)" --baseline-output-dir %t/baseline --new-tests-output-dir %t/new_tests
+# RUN: %coverage target-lines --output-dir %t/target_lines --baseline-output-dir %t/baseline --llvm-repo %llvm-repo --target-lines-csv %S/fixtures/target-lines-sample.csv
 
-# RUN: test -f %t/test_suite/run_config.json
-# RUN: test -f %t/test_suite/test_coverage.csv
-# RUN: test -f %t/test_suite/llc_address_line_map.csv
+# RUN: test -f %t/baseline/run_config.json
+# RUN: test -f %t/baseline/test_coverage.csv
+# RUN: test -f %t/baseline/llc_address_line_map.csv
 # RUN: test -f %t/incremental/new_coverage.csv
 # RUN: test -f %t/target_lines/commit_lines_uncovered.csv
 
 # COM: AMDGPUAlwaysInlinePass.cpp:160 is covered by the test suite slice itself,
 # COM: so it must appear in the baseline test_coverage.csv and must NOT be reported
 # COM: as a new gain by incremental in new_coverage.csv.
-# RUN: %FileCheck %s --input-file=%t/test_suite/test_coverage.csv --check-prefix=BASELINE_CSV
+# RUN: %FileCheck %s --input-file=%t/baseline/test_coverage.csv --check-prefix=BASELINE_CSV
 # BASELINE_CSV: {{.*}}/AMDGPUAlwaysInlinePass.cpp,160,
 
 # COM: These coverage gaps, uncovered by the test suite slice but covered by the external test, have been manually confirmed in LLVM rev. 40cd48fd385b.

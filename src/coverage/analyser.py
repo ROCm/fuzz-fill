@@ -11,8 +11,8 @@ class CoverageAnalyzer:
     def __init__(self, filepaths: Filepaths, mode: Literal["partial", "full"]):
         self.filepaths = filepaths
         self.mode = mode
-        self.baseline_coverage_file = filepaths.output_test_suite_dir / filepaths.joint_llc_and_opt_coverage_file
-        self.llc_address_line_map_file = filepaths.output_test_suite_dir / filepaths.llc_address_line_map_file
+        self.baseline_coverage_file = filepaths.output_baseline_dir / filepaths.joint_llc_and_opt_coverage_file
+        self.llc_address_line_map_file = filepaths.output_baseline_dir / filepaths.llc_address_line_map_file
         self.new_coverage_csv = filepaths.output_dir / filepaths.new_coverage_csv
 
     def get_incremental_coverage(self) -> None:

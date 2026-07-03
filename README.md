@@ -28,7 +28,7 @@ You need **two** builds of the **same** LLVM revision:
 
 Run `build-llvm.sh` first. The sancov build is compiled with `clang`/`clang++` from the uninstrumented `bin/`.
 
-**`python -m coverage test-suite`** patches **`<instrumented-build>/test/lit.site.cfg.py`** so LIT forwards **`UBSAN_OPTIONS`** to every test subprocess. The patch is idempotent and is re-applied if CMake regenerates that file.
+**`python -m coverage baseline`** patches **`<instrumented-build>/test/lit.site.cfg.py`** so LIT forwards **`UBSAN_OPTIONS`** to every test subprocess. The patch is idempotent and is re-applied if CMake regenerates that file.
 
 The example scripts below assume paths like:
 
@@ -48,11 +48,11 @@ Adjust these to match your trees before running.
 ### What it does
 
 ```text
-test-suite  →  new-tests  →  incremental  →  reduce
+baseline  →  new-tests  →  incremental  →  reduce
 (suite baseline)  (fuzz corpus)  (gaps filled)  (minimal LIT tests)
 ```
 
-1. **`test-suite`** — run a filtered slice of the LLVM LIT suite with SanitizerCoverage to establish baseline coverage: which source lines the existing tests already hit.
+1. **`baseline`** — run a filtered slice of the LLVM LIT suite with SanitizerCoverage to establish baseline coverage: which source lines the existing tests already hit.
 2. **`new-tests`** — run a directory of fuzz-generated tests (`.ll` / `.bc`) through instrumented `llc` and collect their coverage.
 3. **`incremental`** — compare fuzz-test coverage against the suite baseline and report which fuzz tests cover lines the suite misses — these are candidate gap-fillers.
 4. **`reduce`** — shrink promising tests into minimal cases suitable for adding to the suite (see [Reduce interesting tests](#reduce-interesting-tests) below).
@@ -76,7 +76,7 @@ Then run from the fuzz-fill repo root:
 ./scripts/test_coverage.sh
 ```
 
-By default the script runs only **`test-suite`**. Uncomment the **`new-tests`** and **`incremental`** blocks when you are ready for the full pipeline.
+By default the script runs only **`baseline`**. Uncomment the **`new-tests`** and **`incremental`** blocks when you are ready for the full pipeline.
 
 ### Key outputs
 
@@ -84,8 +84,8 @@ Under `$OUTPUT_DIR`:
 
 | Path | Contents |
 |------|----------|
-| `test_suite/test_coverage.csv` | Suite baseline: source lines the LIT run covers (joint llc + opt, full-line mode) |
-| `test_suite/processed_sancov/` | Merged, symbolized symcov files — reuse these if you re-run `incremental` with different new tests |
+| `baseline/test_coverage.csv` | Suite baseline: source lines the LIT run covers (joint llc + opt, full-line mode) |
+| `baseline/processed_sancov/` | Merged, symbolized symcov files — reuse these if you re-run `incremental` with different new tests |
 | `new_tests/raw_sancov/` | Per-test raw sancov shards |
 | `incremental/new_coverage.csv` | **Main result** — columns `test`, `file`, `line`, `covered-points`: fuzz tests that fill suite coverage gaps |
 
@@ -102,15 +102,15 @@ Under `$OUTPUT_DIR`:
 ### What it does
 
 ```text
-added-lines  →  test-suite  →  target-lines
+added-lines  →  baseline  →  target-lines
 (from git)     (baseline)      (uncovered added lines)
 ```
 
 1. **`added-lines`** — parse `git show` for a commit and list every line added on the right-hand side of the diff.
-2. **`test-suite`** — same baseline coverage run as Workflow 1 (produces symcov under `processed_sancov/`).
+2. **`baseline`** — same baseline coverage run as Workflow 1 (produces symcov under `processed_sancov/`).
 3. **`target-lines`** — for each line in the target CSV, check whether **every** SanitizerCoverage point on that line is off under the suite run. Fully uncovered lines go into the report; partially covered lines are counted but omitted from the CSV.
 
-Step 3 does **not** re-run LIT, so you can repeat it with different `added-lines.csv` inputs as long as the `test-suite` symcov artifacts are still present.
+Step 3 does **not** re-run LIT, so you can repeat it with different `added-lines.csv` inputs as long as the `baseline` symcov artifacts are still present.
 
 ### Configure and run
 
@@ -137,7 +137,7 @@ Under `$OUTPUT_DIR`:
 | Path | Contents |
 |------|----------|
 | `added-lines/added-lines.csv` | Added lines from the commit (`path`, `line_no`, `text`) |
-| `test_suite/processed_sancov/` | Baseline symcov (required by `target-lines`) |
+| `baseline/processed_sancov/` | Baseline symcov (required by `target-lines`) |
 | `commit_lines_report/commit_lines_uncovered.csv` | **Main result** — added lines where every suite point on that line is off |
 
 ---
@@ -167,7 +167,7 @@ The workflows above call these modules. Use `--help` on any command for the full
 
 | Command | Role in workflows |
 |---------|-------------------|
-| `python -m coverage test-suite` | Baseline LIT coverage (both workflows) |
+| `python -m coverage baseline` | Baseline LIT coverage (both workflows) |
 | `python -m coverage new-tests` | Coverage from a fuzz-generated test corpus (Workflow 1) |
 | `python -m coverage incremental` | Suite gaps filled by fuzz tests (Workflow 1) |
 | `python -m coverage target-lines` | Uncovered target lines vs baseline symcov (Workflow 2) |
