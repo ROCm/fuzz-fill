@@ -1,0 +1,22 @@
+# COM: Run the coverage pipeline over a single standalone test file and validate
+# COM: that every execution succeeded. With --n 1, new-tests runs the one input
+# COM: file once per entry in TEST_FLAGS (-O0/-O1/-O2/-O3), so a fully successful
+# COM: run must report all executions complete and none skipped.
+
+# RUN: rm -rf %t && mkdir -p %t/new_tests
+# RUN: %coverage new-tests --output-dir %t/new_tests --instrumented-bin "$(dirname %sancov-llc)" --new-tests-dir %S/fixtures/coverage-new-tests --n 1 | tee %t/new_tests.log
+
+# COM: The final progress line reports the tallies across all four flag runs.
+# RUN: %FileCheck %s --input-file=%t/new_tests.log --check-prefix=EXEC
+# EXEC: complete=4  skipped=0  remaining=0
+
+# COM: Every flag run must leave its own successful test directory behind (skipped
+# COM: runs are torn down), so all four per-flag output dirs must exist.
+# RUN: test -d %t/new_tests/test_0_standalone-empty-kernel.ll
+# RUN: test -d %t/new_tests/test_1_standalone-empty-kernel.ll
+# RUN: test -d %t/new_tests/test_2_standalone-empty-kernel.ll
+# RUN: test -d %t/new_tests/test_3_standalone-empty-kernel.ll
+
+# COM: Each successful run must have produced sancov coverage output.
+# RUN: ls %t/new_tests/test_0_standalone-empty-kernel.ll/*.sancov
+# RUN: ls %t/new_tests/test_3_standalone-empty-kernel.ll/*.sancov

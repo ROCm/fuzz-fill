@@ -8,8 +8,8 @@
 # COM: baseline-covered line must show up in test-suite output but not in diff/target-lines.
 
 # RUN: rm -rf %t && mkdir -p %t/test_suite %t/new_tests %t/diff %t/target_lines
-# RUN: %coverage test-suite --output-dir %t/test_suite --llvm-bin "$(dirname %FileCheck)" --instrumented-bin "$(dirname %sancov-llc)" --lit-filter CodeGen/AMDGPU/loop
-# RUN: %coverage new-tests --output-dir %t/new_tests --instrumented-bin "$(dirname %sancov-llc)" --new-tests-dir %S/fixtures/coverage-new-tests --n 1 -j1
+# RUN: %coverage test-suite --output-dir %t/test_suite --llvm-bin "$(dirname %FileCheck)" --instrumented-bin "$(dirname %sancov-llc)" --lit-filter CodeGen/AMDGPU/loop -j1
+# RUN: %coverage new-tests --output-dir %t/new_tests --instrumented-bin "$(dirname %sancov-llc)" --new-tests-dir %S/fixtures/coverage-new-tests --n 1
 # RUN: %coverage diff --output-dir %t/diff --llvm-bin "$(dirname %FileCheck)" --test-suite-output-dir %t/test_suite --new-tests-output-dir %t/new_tests
 # RUN: %coverage target-lines --output-dir %t/target_lines --test-suite-output-dir %t/test_suite --llvm-repo %llvm-repo --target-lines-csv %S/fixtures/target-lines-sample.csv
 
