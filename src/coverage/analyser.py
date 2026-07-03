@@ -40,11 +40,11 @@ class CoverageAnalyzer:
             llc_address_line_map["n_addresses_in_line"] = llc_address_line_map.groupby(["file", "line"], sort=False)["file"].transform("count")
             llc_address_line_map["file_line"] = llc_address_line_map["file"] + ":" + llc_address_line_map["line"].astype(str)
 
-            full_lines = line_coverage_summary[line_coverage_summary["coverage"] == "full"]
-            baseline_covered_lines = {
-                (file, int(line))
-                for file, line in zip(full_lines["file"], full_lines["line"])
-            }
+        uncovered_lines = line_coverage_summary[line_coverage_summary["coverage"] == "none"]
+        baseline_uncovered_lines = {
+            (file, int(line))
+            for file, line in zip(uncovered_lines["file"], uncovered_lines["line"])
+        }
 
             self.new_coverage_csv.parent.mkdir(parents=True, exist_ok=True)
             with self.new_coverage_csv.open("w", newline="", encoding="utf-8") as new_coverage_csv_f:
@@ -98,10 +98,10 @@ class CoverageAnalyzer:
                         unique_locations = unique_locations.copy()
                         unique_locations["line"] = unique_locations["line"].astype(int)
 
-                        # Compare new line coverage to baseline line coverage
-                        # It is important to do this at the line level rather than the address level
-                        # when working with full coverage
-                        is_new_vs_baseline = [key not in baseline_covered_lines for key in keys]
+                # Compare new line coverage to baseline line coverage.
+                # Only lines the suite left completely uncovered (coverage == "none") count
+                # as new; partially covered baseline lines are excluded.
+                is_new_vs_baseline = [key in baseline_uncovered_lines for key in keys]
 
                         # Compare to lines already covered by other candidate tests
                         is_new_vs_other_candidate_tests = [key not in newly_covered_lines for key in keys]
@@ -110,7 +110,7 @@ class CoverageAnalyzer:
                         mask = [a and b for a, b in zip(is_new_vs_baseline, is_new_vs_other_candidate_tests)]
                         unique_locations = unique_locations.loc[mask]
 
-                        print(f"{sum(is_new_vs_baseline)} lines are new vs baseline out of {len(keys)}")
+                        print(f"{sum(is_new_vs_baseline)} lines are uncovered in baseline out of {len(keys)}")
                         print(f"{sum(is_new_vs_other_candidate_tests)} lines are new vs other candidate tests out of {len(keys)}")
 
                         if unique_locations.empty:
