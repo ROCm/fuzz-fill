@@ -32,6 +32,8 @@ class TestRunner:
         filepaths: Filepaths,
         lit_filter: str | None = None,
         jobs: int | None = None,
+        lit_verbose: bool = False,
+        lit_allow_failures: bool = False,
         candidate_tests_limit: int | None = None,
         timeout: int = 5,
         debug: bool = False,
@@ -40,6 +42,8 @@ class TestRunner:
         self.filepaths = filepaths
         self.raw_sancov_output_dir = filepaths.output_dir / "raw_sancov"
         self.jobs = jobs
+        self.lit_verbose = lit_verbose
+        self.lit_allow_failures = lit_allow_failures
         self.debug = debug
 
         self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
@@ -119,6 +123,8 @@ class TestRunner:
         ]
         if self.jobs is not None:
             argv.append(f"-j{self.jobs}")
+        if self.lit_verbose:
+            argv.append("-vv")
         cwd = instrumented_bin.parent
         env = self.ubsan_environ_with_coverage()
         if self.debug:
@@ -128,14 +134,25 @@ class TestRunner:
             print(f"\tLit site config: {lit_site_cfg}")
             print(f"\tCoverage directory: {self.raw_sancov_output_dir}")
         else:
-            run_subprocess(
+            result = run_subprocess(
                 logger,
                 argv,
                 label="llvm-lit",
                 cwd=cwd,
                 env=env,
-                check=True,
+                check=False,
             )
+            if result.returncode != 0:
+                if self.lit_allow_failures:
+                    print(
+                        f"warning: llvm-lit exited with code {result.returncode}; "
+                        "continuing baseline coverage (--lit-allow-failures)",
+                        flush=True,
+                    )
+                else:
+                    raise subprocess.CalledProcessError(
+                        result.returncode, argv, result.stdout, result.stderr
+                    )
 
     def _print_standalone_progress(self, label: str | None = None) -> None:
         remaining = (

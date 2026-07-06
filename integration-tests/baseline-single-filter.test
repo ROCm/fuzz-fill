@@ -1,9 +1,17 @@
-# COM: Run `coverage baseline` with a filter that matches exactly one lit test
-# COM: and without -j (so no job count is forwarded and llvm-lit picks its own
-# COM: default). Validate the baseline coverage artifacts are produced.
+# COM: Run `coverage baseline` with a filter that matches exactly one lit test,
+# COM: without -j (llvm-lit picks its own default), and with --lit-verbose and
+# COM: --lit-allow-failures. Validate baseline coverage artifacts are produced.
 
 # RUN: rm -rf %t && mkdir -p %t/baseline
-# RUN: %coverage baseline --output-dir %t/baseline --llvm-bin "$(dirname %FileCheck)" --instrumented-bin "$(dirname %sancov-llc)" --lit-filter 'CodeGen/AMDGPU/loop-live-out-copy-undef-subrange\.ll$'
+# RUN: %coverage baseline --output-dir %t/baseline --llvm-bin "$(dirname %FileCheck)" --instrumented-bin "$(dirname %sancov-llc)" --lit-filter 'CodeGen/AMDGPU/loop-live-out-copy-undef-subrange\.ll$' --lit-verbose --lit-allow-failures | tee %t/baseline.log
+
+# COM: --lit-verbose forwards -vv to llvm-lit; expect per-test PASS output.
+# RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=VERBOSE
+# VERBOSE: PASS:
+
+# COM: --lit-allow-failures must not warn when llvm-lit succeeds.
+# RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=ALLOW_OK
+# ALLOW_OK-NOT: warning: llvm-lit exited with code
 
 # COM: A successful single-test suite run must emit the baseline artifacts.
 # RUN: test -f %t/baseline/run_config.json

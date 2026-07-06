@@ -53,6 +53,10 @@ def main():
         help="Prefix passed to llvm-lit as --filter=<PREFIX> (also selects symcov path scope).")
     p_baseline.add_argument("-j", "--jobs", type=int, default=None,
         help="Number of parallel jobs forwarded to llvm-lit as -j<N>. If unset, llvm-lit chooses.")
+    p_baseline.add_argument("--lit-verbose", action="store_true",
+        help="Forward -vv to llvm-lit for verbose test output.")
+    p_baseline.add_argument("--lit-allow-failures", action="store_true",
+        help="Continue baseline coverage even if llvm-lit exits non-zero.")
 
     p_candidate_test.add_argument("--instrumented-bin", type=Path, required=True, 
         help="Path to the coverage-instrumented LLVM bin directory")
@@ -120,6 +124,8 @@ def main():
                 filepaths=filepaths,
                 lit_filter=args.lit_filter,
                 jobs=args.jobs,
+                lit_verbose=args.lit_verbose,
+                lit_allow_failures=args.lit_allow_failures,
                 debug=args.debug,
             )
             test_runner.run()
