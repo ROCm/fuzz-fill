@@ -3,7 +3,7 @@
     "file": "llvm/lib/Target/AMDGPU/AMDGPUArgumentUsageInfo.cpp",
     "line": 56,
     "replacement": "",
-    "output_dir": "/work/agorzyns/local/dev/fuzz-fill/data/output/amd_multi_address",
+    "output_dir": "../../../data/output/amd_multi_address",
     "pipeline": [
         {
             "id": "llvm_reduce_ir",

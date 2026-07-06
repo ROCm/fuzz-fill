@@ -234,7 +234,9 @@ def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
 
     return ReduceConfig(
         llvm_bin=llvm_bin,
-        output_dir=Path(output_dir) if output_dir else None,
+        output_dir=(
+            _resolve_relative_to_config(config_file, output_dir) if output_dir else None
+        ),
         original_test=_resolve_relative_to_config(config_file, input_raw),
         file=file,
         line=line,
