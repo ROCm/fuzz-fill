@@ -112,4 +112,7 @@ RUN python3 -m venv /work/fuzz-fill-venv && \
 # Keep the venv outside /work/fuzz-fill so --bind-repo mounts do not hide it.
 ENV VIRTUAL_ENV=/work/fuzz-fill-venv \
     PATH="/work/fuzz-fill-venv/bin:${PATH}" \
-    PYTHON="/work/fuzz-fill-venv/bin/python"
+    PYTHON="/work/fuzz-fill-venv/bin/python" \
+    FUZZ_FILL_LLVM_BIN=/work/llvm-build-uninstrumented/bin \
+    FUZZ_FILL_LLVM_INSTRUMENTED_BIN=/work/llvm-build-sancov/bin \
+    FUZZ_FILL_LLVM_REPO=/work/llvm-project

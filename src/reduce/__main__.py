@@ -2,6 +2,7 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
+from fuzz_fill.env import FUZZ_FILL_LLVM_BIN, path_from_flag_or_env
 from fuzz_fill.log import add_log_level_argument, configure_logging
 from reduce.config import load_reduce_config, pipeline_steps_for_only_pass
 from reduce.reducer import Reducer, known_pass_ids
@@ -22,8 +23,11 @@ def main():
     parser.add_argument(
         "--llvm-bin",
         type=Path,
-        required=True,
-        help="Path to llvm-project bin directory (must contain llvm-reduce; llc for extract_*_before_pass).",
+        default=None,
+        help=(
+            f"Path to llvm-project bin directory (must contain llvm-reduce; "
+            f"llc for extract_*_before_pass; or set {FUZZ_FILL_LLVM_BIN})."
+        ),
     )
     parser.add_argument(
         "--only-pass",
@@ -35,8 +39,11 @@ def main():
     add_log_level_argument(parser)
     ns = parser.parse_args()
     configure_logging(ns.log_level)
+    llvm_bin = path_from_flag_or_env(
+        ns.llvm_bin, FUZZ_FILL_LLVM_BIN, flag_name="--llvm-bin"
+    )
     print("[main] loading config...", flush=True)
-    cfg = load_reduce_config(ns.config, ns.llvm_bin.resolve())
+    cfg = load_reduce_config(ns.config, llvm_bin)
 
     if getattr(ns, "only_pass", None) is not None:
         pipeline_steps = pipeline_steps_for_only_pass(cfg.pipeline, ns.only_pass)

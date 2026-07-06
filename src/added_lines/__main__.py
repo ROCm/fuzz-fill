@@ -8,6 +8,7 @@ from pathlib import Path
 
 from added_lines.added_lines import AddedLine, collect_added_lines
 from added_lines.constants import ADDED_LINES_FILENAME, DEFAULT_OUTPUT_DIR
+from fuzz_fill.env import FUZZ_FILL_LLVM_REPO, path_from_flag_or_env
 from fuzz_fill.log import add_log_level_argument, configure_logging
 
 
@@ -38,8 +39,8 @@ def main() -> None:
     parser.add_argument(
         "--llvm-repo",
         type=Path,
-        required=True,
-        help="Path to the llvm-project (or any) git checkout.",
+        default=None,
+        help=f"Path to the llvm-project (or any) git checkout (or set {FUZZ_FILL_LLVM_REPO}).",
     )
     parser.add_argument(
         "--commit",
@@ -58,7 +59,9 @@ def main() -> None:
     if args.debug:
         print("Debug mode enabled", flush=True)
 
-    repo = args.llvm_repo.resolve()
+    repo = path_from_flag_or_env(
+        args.llvm_repo, FUZZ_FILL_LLVM_REPO, flag_name="--llvm-repo"
+    )
     out_dir = resolve_output_dir(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 

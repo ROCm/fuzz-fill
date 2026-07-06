@@ -177,6 +177,29 @@ The workflows above call these modules. Use `--help` on any command for the full
 | `python -m added_lines` | Lines added by a git commit (Workflow 2) |
 | `python -m reduce` | Testcase reduction |
 
+### Environment variables
+
+Several commands accept LLVM paths via environment variables when the matching CLI flag is omitted. A flag on the command line always wins.
+
+| Env var | CLI flag | Commands |
+|---------|----------|----------|
+| `FUZZ_FILL_LLVM_BIN` | `--llvm-bin` | `coverage baseline`, `coverage incremental`, `reduce` |
+| `FUZZ_FILL_LLVM_INSTRUMENTED_BIN` | `--instrumented-bin` | `coverage baseline`, `coverage candidate-test` |
+| `FUZZ_FILL_LLVM_REPO` | `--llvm-repo` | `added_lines`, `coverage target-lines` |
+
+Example (paths match the [Docker test image](#docker-test-image)):
+
+```bash
+export FUZZ_FILL_LLVM_BIN=/work/llvm-build-uninstrumented/bin
+export FUZZ_FILL_LLVM_INSTRUMENTED_BIN=/work/llvm-build-sancov/bin
+export FUZZ_FILL_LLVM_REPO=/work/llvm-project
+
+python -m coverage baseline --output-dir data/baseline --lit-filter CodeGen/AMDGPU
+python -m added_lines --commit HEAD
+```
+
+Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `INSTRUMENTED_BIN_DIR`, …); only the `FUZZ_FILL_*` variables are read by the Python CLIs.
+
 ---
 
 ## Docker test image

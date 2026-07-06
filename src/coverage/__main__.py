@@ -15,6 +15,12 @@ from coverage.constants import (
 
 from coverage.analyser import CoverageAnalyzer
 from coverage.target_lines_check import run_target_lines_check
+from fuzz_fill.env import (
+    FUZZ_FILL_LLVM_BIN,
+    FUZZ_FILL_LLVM_INSTRUMENTED_BIN,
+    FUZZ_FILL_LLVM_REPO,
+    path_from_flag_or_env,
+)
 from fuzz_fill.log import add_log_level_argument, configure_logging, get_logger, log_timing
 
 logger = get_logger("coverage")
@@ -45,10 +51,21 @@ def main():
     add_shared_arguments(p_incremental)
     add_shared_arguments(p_target_lines)
 
-    p_baseline.add_argument("--llvm-bin", type=Path, required=True,
-        help="Path to the uninstrumented LLVM bin directory")
-    p_baseline.add_argument("--instrumented-bin", type=Path, required=True, 
-        help="Path to the coverage-instrumented LLVM bin directory")
+    p_baseline.add_argument(
+        "--llvm-bin",
+        type=Path,
+        default=None,
+        help=f"Path to the uninstrumented LLVM bin directory (or set {FUZZ_FILL_LLVM_BIN}).",
+    )
+    p_baseline.add_argument(
+        "--instrumented-bin",
+        type=Path,
+        default=None,
+        help=(
+            f"Path to the coverage-instrumented LLVM bin directory "
+            f"(or set {FUZZ_FILL_LLVM_INSTRUMENTED_BIN})."
+        ),
+    )
     p_baseline.add_argument("--lit-filter", type=str, default=None,
         help="Prefix passed to llvm-lit as --filter=<PREFIX> (also selects symcov path scope).")
     p_baseline.add_argument("-j", "--jobs", type=int, default=None,
@@ -58,8 +75,15 @@ def main():
     p_baseline.add_argument("--lit-allow-failures", action="store_true",
         help="Continue baseline coverage even if llvm-lit exits non-zero.")
 
-    p_candidate_test.add_argument("--instrumented-bin", type=Path, required=True, 
-        help="Path to the coverage-instrumented LLVM bin directory")
+    p_candidate_test.add_argument(
+        "--instrumented-bin",
+        type=Path,
+        default=None,
+        help=(
+            f"Path to the coverage-instrumented LLVM bin directory "
+            f"(or set {FUZZ_FILL_LLVM_INSTRUMENTED_BIN})."
+        ),
+    )
     p_candidate_test.add_argument("--candidate-tests-dir", type=Path, required=True,
         help="Directory containing the candidate tests (.ll/.bc).")
     p_candidate_test.add_argument(
@@ -79,8 +103,12 @@ def main():
         help="Per-test wall-clock timeout in seconds; the test is killed with "
              "SIGKILL (timeout -s9) when exceeded. Default: 5.")
 
-    p_incremental.add_argument("--llvm-bin", type=Path, required=True,
-        help="Path to the uninstrumented LLVM bin directory")
+    p_incremental.add_argument(
+        "--llvm-bin",
+        type=Path,
+        default=None,
+        help=f"Path to the uninstrumented LLVM bin directory (or set {FUZZ_FILL_LLVM_BIN}).",
+    )
     p_incremental.add_argument("--baseline-output-dir", type=Path, required=True,
         help="Directory containing the baseline coverage output")
     p_incremental.add_argument("--candidate-tests-output-dir", type=Path, required=True,
@@ -98,8 +126,11 @@ def main():
     p_target_lines.add_argument(
         "--llvm-repo",
         type=Path,
-        required=True,
-        help="LLVM checkout used to resolve ``path`` in the target-lines CSV (suffix match to summary paths).",
+        default=None,
+        help=(
+            "LLVM checkout used to resolve ``path`` in the target-lines CSV "
+            f"(suffix match to summary paths; or set {FUZZ_FILL_LLVM_REPO})."
+        ),
     )
     p_target_lines.add_argument(
         "--target-lines-csv",
@@ -111,12 +142,19 @@ def main():
     args = parser.parse_args()
     configure_logging(args.log_level)
 
-    filepaths = get_filepaths(args)
-
     if args.debug:
         print(f"Debug mode enabled")
 
     if args.subcmd == "baseline":
+        args.llvm_bin = path_from_flag_or_env(
+            args.llvm_bin, FUZZ_FILL_LLVM_BIN, flag_name="--llvm-bin"
+        )
+        args.instrumented_bin = path_from_flag_or_env(
+            args.instrumented_bin,
+            FUZZ_FILL_LLVM_INSTRUMENTED_BIN,
+            flag_name="--instrumented-bin",
+        )
+        filepaths = get_filepaths(args)
         print("Getting baseline coverage for the test suite")
         with log_timing(logger, "baseline"):
             test_runner = TestRunner(
@@ -131,6 +169,12 @@ def main():
             test_runner.run()
 
     elif args.subcmd == "candidate-test":
+        args.instrumented_bin = path_from_flag_or_env(
+            args.instrumented_bin,
+            FUZZ_FILL_LLVM_INSTRUMENTED_BIN,
+            flag_name="--instrumented-bin",
+        )
+        filepaths = get_filepaths(args)
         print("Getting coverage for the candidate tests")
         with log_timing(logger, "candidate-test"):
             test_runner = TestRunner(
@@ -143,6 +187,10 @@ def main():
             test_runner.run()
     
     elif args.subcmd == "incremental":
+        args.llvm_bin = path_from_flag_or_env(
+            args.llvm_bin, FUZZ_FILL_LLVM_BIN, flag_name="--llvm-bin"
+        )
+        filepaths = get_filepaths(args)
         print("Getting incremental coverage for candidate tests relative to the baseline test suite")
         with log_timing(logger, "incremental"):
             filepaths.output_baseline_dir = args.baseline_output_dir
@@ -153,6 +201,9 @@ def main():
             coverage_analyzer.get_incremental_coverage()
 
     elif args.subcmd == "target-lines":
+        args.llvm_repo = path_from_flag_or_env(
+            args.llvm_repo, FUZZ_FILL_LLVM_REPO, flag_name="--llvm-repo"
+        )
         print(
             "Checking target lines from CSV against baseline line coverage summary "
             "(no lit re-run)",

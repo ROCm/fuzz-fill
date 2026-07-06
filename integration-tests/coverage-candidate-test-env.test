@@ -1,0 +1,6 @@
+# COM: candidate-test env fallback: omit --instrumented-bin when
+# COM: FUZZ_FILL_LLVM_INSTRUMENTED_BIN is set on the RUN line.
+
+# RUN: rm -rf %t && mkdir -p %t
+# RUN: env FUZZ_FILL_LLVM_INSTRUMENTED_BIN="$(dirname %sancov-llc)" %coverage candidate-test --output-dir %t --candidate-tests-dir %S/fixtures/coverage-new-tests --n 1
+# RUN: test -d %t/test_0_standalone-empty-kernel.ll
