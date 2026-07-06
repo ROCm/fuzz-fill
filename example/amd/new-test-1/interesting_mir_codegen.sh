@@ -2,7 +2,9 @@
 # Interesting-ness for llvm-reduce -x=mir when MIR was extracted with -stop-before=<pass>.
 # Resume codegen from the snapshot (do not use -run-pass for codegen-only passes like amdgpu-isel).
 
-LLVM_BIN=/home/agorzyns/local/dev/llvm-project/build-amdgpu-bb/bin
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+LLVM_BIN="${LLVM_BIN:-${REPO_ROOT}/../llvm-project/build-amdgpu-bb/bin}"
 
 LLC=$LLVM_BIN/llc
 LLC_FLAGS="-O3"
