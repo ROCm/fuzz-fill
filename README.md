@@ -272,7 +272,24 @@ To run integration tests manually inside the container:
 
 ---
 
-## Running integration tests
+## Tests
+
+### Unit tests
+
+Python unit tests live under `tests/`. They use the stdlib `unittest` runner and do not need LLVM builds.
+
+```bash
+source venv/bin/activate
+python -m unittest discover -s tests -v
+```
+
+To run a single module:
+
+```bash
+python -m unittest tests.test_analyser -v
+```
+
+### Integration tests
 
 Integration tests need both LLVM `bin` directories (same version). Locally:
 
