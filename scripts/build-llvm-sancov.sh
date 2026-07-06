@@ -70,9 +70,9 @@ cd "$SANCOV_BUILD_DIR"
 SANCOV_FLAGS="-O0 -fno-inline -fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=bb,trace-pc-guard"
 
 # Built locally (not symlinked from the X86-only uninstrumented tree).
-BUILT_TOOLS=(llc opt llvm-config llvm-objdump llvm-mc llvm-lto2)
+BUILT_TOOLS=(llc opt llvm-config llvm-objdump llvm-mc llvm-lto2 llvm-debuginfo-analyzer)
 # Symlink everything else from the uninstrumented build except these.
-SKIP_TOOLS=(llc opt llvm-lit llvm-config llvm-objdump llvm-mc llvm-lto2)
+SKIP_TOOLS=(llc opt llvm-lit llvm-config llvm-objdump llvm-mc llvm-lto2 llvm-debuginfo-analyzer)
 
 echo "Building instrumented llc/opt and AMDGPU lit helpers..."
 echo "  Allowlist:              $ALLOWLIST"

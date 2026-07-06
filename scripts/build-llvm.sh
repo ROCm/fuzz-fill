@@ -16,12 +16,17 @@ mkdir -p "$BUILD_DIR"
 BUILD_DIR="$(realpath "$BUILD_DIR")"
 cd "$BUILD_DIR"
 
+# Skip optional compiler-rt sanitizers (hwasan, asan, tsan, …). ubsan and
+# sanitizer_common still build and are enough for -fsanitize-coverage linking.
+# Tests are off: an empty sanitizer list leaves no asan/hwasan targets for lit.
 cmake -G "Ninja" \
     -DCMAKE_C_COMPILER="$C_COMPILER" \
     -DCMAKE_CXX_COMPILER="$CXX_COMPILER" \
     -DLLVM_TARGETS_TO_BUILD="X86" \
     -DLLVM_ENABLE_PROJECTS="clang" \
     -DLLVM_ENABLE_RUNTIMES="compiler-rt" \
+    -DCOMPILER_RT_SANITIZERS_TO_BUILD="" \
+    -DCOMPILER_RT_INCLUDE_TESTS=OFF \
     -DLLVM_OPTIMIZED_TABLEGEN=ON \
     -DLLVM_ENABLE_ASSERTIONS=OFF \
     -DCMAKE_BUILD_TYPE=Release \
