@@ -1,8 +1,12 @@
 #!/bin/bash
 
-BASE=/work/agorzyns/local/dev
-FUZZFILL=$BASE/fuzz-fill
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+LLVM_REPO="${LLVM_REPO:-$(cd "${REPO_ROOT}/../llvm-project" && pwd)}"
+LLVM_BIN="${LLVM_BIN:-${LLVM_REPO}/build/bin}"
+
+cd "$REPO_ROOT"
 
 python3 -m reduce \
-    --config $FUZZFILL/example/amd/si-i1-copies/config.json \
-    --llvm-bin $BASE/llvm-project/build/bin
+    --config "$REPO_ROOT/example/amd/si-i1-copies/config.json" \
+    --llvm-bin "$LLVM_BIN"

@@ -1,14 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
-BASE=/work/agorzyns/local/dev
-FUZZFILL=$BASE/fuzz-fill
-DATA_DIR=$FUZZFILL/data
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+LLVM_REPO="${LLVM_REPO:-$(cd "${REPO_ROOT}/../llvm-project" && pwd)}"
+LLVM_BIN="${LLVM_BIN:-${LLVM_REPO}/build/bin}"
+DATA_DIR="${REPO_ROOT}/data"
 
 TESTS_TO_REDUCE=$DATA_DIR/siinstrinfo/siinstrinfo_new_coverage.csv
 CANDIDATE_TESTS_DIR=$DATA_DIR/siinstrinfo
 OUTPUT_DIR=$DATA_DIR/output/reduced_090626_siinstrinfo
-LLVM_BIN=$BASE/llvm-project/build/bin
 
 N_FILES=4
 
@@ -29,7 +30,7 @@ EXTRACT_MIR_OUTPUT=before-si-fix-sgpr-copies.mir
 
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
-cd "$FUZZFILL"
+cd "$REPO_ROOT"
 
 EXTRA_ARGS=()
 if [[ -n "${PIPELINE:-}" ]]; then
