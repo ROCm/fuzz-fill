@@ -1,8 +1,10 @@
 #!/bin/bash
 # Interesting-ness for llvm-reduce -x=mir: $1 is a candidate .mir file.
-# Adjust LLVM_BIN and llc flags to match your tree / triple.
+# Override LLVM_BIN or llc flags to match your tree / triple.
 
-LLVM_BIN=/home/agorzyns/local/dev/llvm-project/build/bin
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+LLVM_BIN="${LLVM_BIN:-${REPO_ROOT}/../llvm-project/build/bin}"
 LLC=$LLVM_BIN/llc
 
 output=$($LLC -verify-machineinstrs -mtriple=amdgcn-amd-amdhsa -run-pass=si-lower-sgpr-spills "$1" 2>&1)

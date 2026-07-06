@@ -1,6 +1,8 @@
 #!/bin/bash
 
-LLVM_BIN=/home/agorzyns/local/dev/llvm-project/build-amdgpu-bb/bin
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+LLVM_BIN="${LLVM_BIN:-${REPO_ROOT}/../llvm-project/build-amdgpu-bb/bin}"
 
 LLC=$LLVM_BIN/llc
 SANCOV=$LLVM_BIN/sancov
