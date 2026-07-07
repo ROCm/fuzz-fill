@@ -63,7 +63,7 @@ class DiffPartialBaselineTest(unittest.TestCase):
 
         new_test_dir = self.new_tests_dir / "test_0_example.ll"
         new_test_dir.mkdir()
-        (new_test_dir / "llc.1.sancov").write_bytes(b"")
+        self.new_test_dir = new_test_dir
 
         # New test hits every instrumentation point on all three lines.
         self.new_test_addresses = {
@@ -97,8 +97,14 @@ class DiffPartialBaselineTest(unittest.TestCase):
         baseline = LineCoverageIndex.from_summary_df(pd.read_csv(summary))
         self.assertEqual(baseline.classify(FILE, 20), "partial")
 
-        with patch.object(
-            Sancov, "get_covered_addresses", return_value=self.new_test_addresses
+        with (
+            patch.object(
+                Sancov, "get_covered_addresses", return_value=self.new_test_addresses
+            ),
+            patch(
+                "coverage.analyser.get_sancov_file",
+                return_value=self.new_test_dir / "llc.1.sancov",
+            ),
         ):
             CoverageAnalyzer(self.filepaths, mode="full").get_incremental_coverage()
 
