@@ -9,6 +9,27 @@ fuzz-fill supports two main workflows:
 
 See [here](#contributions) for a list of tests contributed to LLVM.
 
+## Table of Contents
+
+- [Setup](#setup)
+  - [Python environment](#python-environment)
+  - [LLVM builds](#llvm-builds)
+- [Workflow 1: Fill suite coverage gaps with fuzz-generated tests](#workflow-1-fill-suite-coverage-gaps-with-fuzz-generated-tests)
+- [Workflow 2: Uncovered lines in a commit](#workflow-2-uncovered-lines-in-a-commit)
+- [Reduce interesting tests](#reduce-interesting-tests)
+- [CLI reference](#cli-reference)
+  - [Environment variables](#environment-variables)
+- [Docker test image](#docker-test-image)
+  - [Build](#build)
+  - [Build from an LLVM pull request](#build-from-an-llvm-pull-request)
+  - [PR coverage gap detection](#pr-coverage-gap-detection)
+  - [Run integration tests](#run-integration-tests)
+  - [Run a container](#run-a-container)
+- [Running integration tests](#running-integration-tests)
+- [Contributions](#contributions)
+  - [AMDGPU](#amdgpu)
+  - [SPIR-V](#spir-v)
+
 ## Setup
 
 ### Python environment
@@ -206,7 +227,7 @@ Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `IN
 
 The Docker image bundles a pinned LLVM revision, both instrumented and uninstrumented builds, and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
 
-**Scripts:** [`scripts/build-image.sh`](scripts/build-image.sh), [`scripts/test-image.sh`](scripts/test-image.sh), [`scripts/tmp-container.sh`](scripts/tmp-container.sh)
+**Scripts:** [`scripts/build-image.sh`](scripts/build-image.sh), [`scripts/build-image-pr.sh`](scripts/build-image-pr.sh), [`scripts/pr-cov-gaps-detection.sh`](scripts/pr-cov-gaps-detection.sh), [`scripts/test-image.sh`](scripts/test-image.sh), [`scripts/tmp-container.sh`](scripts/tmp-container.sh)
 
 ### Build
 
@@ -223,25 +244,62 @@ By default the image is tagged `fuzz-fill-test:latest` and LLVM is downloaded fr
 | `--llvm-dir <path>` | Use a local `llvm-project` checkout instead of downloading LLVM |
 | `--tag <tag>` | Docker image tag (default: `latest`) |
 | `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist baked into the instrumented build (default: `amdgpu`) |
+| `-j <n>`, `--jobs <n>` | Limit ninja parallelism for both LLVM builds (default: unconstrained) |
 
 Examples:
 
 ```bash
 ./scripts/build-image.sh --llvm-dir llvm-project --tag local-llvm
 ./scripts/build-image.sh --allowlist spirv --tag spirv
+./scripts/build-image.sh -j "$(nproc)"
 ```
 
-Inside the image, LLVM and fuzz-fill live at fixed paths (required by `lit.site.cfg.py`):
+### Build from an LLVM pull request
 
-| Path | Contents |
-|------|----------|
-| `/work/llvm-project` | LLVM source checkout |
-| `/work/llvm-build-uninstrumented/bin` | Uninstrumented tools (`sancov`, …) |
-| `/work/llvm-build-sancov/bin` | SanitizerCoverage build (`llvm-lit`, `llc`, `opt`) |
-| `/work/fuzz-fill` | fuzz-fill checkout |
-| `/work/fuzz-fill-venv` | Python venv (outside the repo mount) |
-| `/work/.llvm-source` | How LLVM was sourced (`local build context` or `github <commit>`) |
-| `/work/.sancov-allowlist` | Allowlist used for the instrumented build (`amdgpu` or `spirv`) |
+[`scripts/build-image-pr.sh`](scripts/build-image-pr.sh) builds a Docker image from an LLVM PR. Pass a local `llvm-project` clone; the PR is squashed in a fuzz-fill worktree so your llvm checkout is unchanged. Requires local `gh` and Docker (BuildKit). PRs are assumed to live on **`llvm/llvm-project`** unless you pass `--github-repo`.
+
+```bash
+./scripts/build-image-pr.sh --llvm-repo /path/llvm-project --pr-id 185430 --allowlist amdgpu
+```
+
+| Option | Meaning |
+|--------|---------|
+| `--llvm-repo <path>` | Local `llvm-project` clone |
+| `--pr-id <n>` | GitHub pull request number |
+| `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist |
+| `--github-repo <owner/repo>` | GitHub repo hosting the PR (default: `llvm/llvm-project`) |
+| `-j <n>`, `--jobs <n>` | Limit ninja parallelism for both LLVM builds (default: unconstrained) |
+
+For the full coverage-gap workflow (build + detect), use [`pr-cov-gaps-detection.sh --build-image`](#pr-coverage-gap-detection) instead.
+
+### PR coverage gap detection
+
+[`scripts/pr-cov-gaps-detection.sh`](scripts/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. The LIT filter defaults to the image's `/work/.sancov-allowlist` (set at build time via `--backend-tests`); override with `--lit-filter` if needed.
+
+```bash
+./scripts/pr-cov-gaps-detection.sh \
+  --build-image \
+  --llvm-repo /path/llvm-project \
+  --pr-id 203468 \
+  --backend-tests amdgpu \
+  --output-dir /path/pr-cov-gaps-203468 \
+  -j "$(nproc)"
+```
+
+| Option | Meaning |
+|--------|---------|
+| `--build-image` | Build PR image first via `build-image-pr.sh` |
+| `--llvm-repo <path>` | Required with `--build-image` |
+| `--backend-tests amdgpu\|spirv` | Required with `--build-image` |
+| `--pr-id <n>` | PR number (image tag `llvm-pr-<n>`) |
+| `--output-dir <path>` | Host output directory |
+| `-j <n>`, `--jobs <n>` | Parallel jobs (ninja when building, llvm-lit when detecting) |
+| `--lit-filter <prefix>` | Optional LIT filter override |
+| `--github-repo <owner/repo>` | Optional; default `llvm/llvm-project` when building |
+
+If the image `fuzz-fill-test:llvm-pr-<n>` already exists, omit `--build-image` to run detection only.
+
+Main output: `<output-dir>/commit_lines_report/commit_lines_uncovered.csv`. See [Workflow 2](#workflow-2-uncovered-lines-in-a-commit) for report semantics.
 
 ### Run integration tests
 
