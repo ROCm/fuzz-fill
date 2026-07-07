@@ -83,7 +83,13 @@ class DiffPartialBaselineTest(unittest.TestCase):
 
             with (diff / DEFAULT_NEW_COVERAGE_CSV).open(newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
-            self.assertEqual({int(r["line"]) for r in rows}, {30})
+
+            # Core check: only baseline ``none`` lines count as new coverage.
+            # Line 20 is fully hit by the new test but was ``partial`` in the suite, so skip it.
+            reported_lines = {int(row["line"]) for row in rows}
+            self.assertEqual(reported_lines, {30})
+            self.assertNotIn(20, reported_lines)
+
             self.assertEqual(rows[0]["covered-points"], "0x3001")
 
 
