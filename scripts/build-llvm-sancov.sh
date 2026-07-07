@@ -4,19 +4,20 @@ set -euo pipefail
 
 usage() {
     cat <<EOF
-Usage: $0 <allowlist> <llvm_dir> <uninstrumented_build_dir> <sancov_build_dir>
+Usage: $0 <allowlist> <llvm_dir> <uninstrumented_build_dir> <sancov_build_dir> [ninja_jobs]
 
   allowlist                 Sanitizer coverage allowlist file
   llvm_dir                  LLVM source tree (directory containing llvm/)
   uninstrumented_build_dir  Prior build from build-llvm.sh; helper tools are symlinked from its bin/
   sancov_build_dir          Output directory for instrumented llc/opt and this tree's llvm-lit/llvm-config
+  ninja_jobs                Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
 
 Run build-llvm.sh first. The sancov build is compiled with clang/clang++ from the uninstrumented build's bin/.
 Lit helpers that need AMDGPU (llvm-objdump, llvm-mc, llvm-lto2) are built in this tree; other helpers are symlinked from the uninstrumented bin/.
 EOF
 }
 
-if [[ $# -ne 4 ]]; then
+if [[ $# -lt 4 || $# -gt 5 ]]; then
     usage >&2
     exit 1
 fi
@@ -25,6 +26,7 @@ ALLOWLIST="$1"
 LLVM_DIR="$2"
 UNINSTRUMENTED_BUILD_DIR="$3"
 SANCOV_BUILD_DIR="$4"
+NINJA_JOBS="${5:-}"
 
 if [[ ! -f "$ALLOWLIST" ]]; then
     echo "Error: allowlist file not found: $ALLOWLIST" >&2
@@ -82,6 +84,9 @@ echo "  Sancov build:           $SANCOV_BUILD_DIR"
 echo "  C compiler:             $C_COMPILER"
 echo "  C++ compiler:           $CXX_COMPILER"
 echo "  Native tools:           $HELPER_BIN"
+if [[ -n "$NINJA_JOBS" ]]; then
+    echo "  Ninja jobs:             $NINJA_JOBS"
+fi
 echo
 
 cmake -G Ninja \
@@ -99,7 +104,11 @@ cmake -G Ninja \
     "$LLVM_DIR/llvm"
 
 # llvm-lit is generated into bin/ during cmake; llvm-config must be built.
-ninja "${BUILT_TOOLS[@]}"
+ninja_args=()
+if [[ -n "$NINJA_JOBS" ]]; then
+    ninja_args=(-j "$NINJA_JOBS")
+fi
+ninja "${ninja_args[@]}" "${BUILT_TOOLS[@]}"
 
 for tool in "${BUILT_TOOLS[@]}"; do
     if [[ ! -x "$SANCOV_BIN/$tool" ]]; then

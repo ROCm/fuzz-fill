@@ -9,10 +9,11 @@ IMAGE_NAME="${IMAGE_NAME:-fuzz-fill-test}"
 llvm_dir=""
 image_tag="${IMAGE_TAG:-latest}"
 allowlist="amdgpu"
+ninja_jobs=""
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [--llvm-dir <path>] [--tag <tag>] [--allowlist <target>] [--help]
+Usage: $(basename "$0") [--llvm-dir <path>] [--tag <tag>] [--allowlist <target>] [options]
 
 Build the fuzz-fill Docker test image.
 
@@ -23,6 +24,7 @@ Options:
   --tag <tag>            Docker image tag (default: latest)
   --allowlist <target>   SanitizerCoverage allowlist target: amdgpu or spirv
                          (default: amdgpu)
+  -j <n>, --jobs <n>     Parallel jobs for ninja when building LLVM (default: unconstrained)
 
 Environment:
   IMAGE_NAME             Docker image name (default: fuzz-fill-test)
@@ -32,7 +34,15 @@ Examples:
   $(basename "$0") --llvm-dir llvm-project
   $(basename "$0") --llvm-dir /path/to/llvm-project --tag local-llvm
   $(basename "$0") --allowlist spirv --tag spirv
+  $(basename "$0") -j "\$(nproc)"
 EOF
+}
+
+validate_ninja_jobs() {
+    if [[ -n "$ninja_jobs" ]] && { [[ ! "$ninja_jobs" =~ ^[0-9]+$ ]] || [[ "$ninja_jobs" -eq 0 ]]; }; then
+        echo "error: -j/--jobs must be a positive integer: ${ninja_jobs}" >&2
+        exit 1
+    fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -59,6 +69,14 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             allowlist="$2"
+            shift 2
+            ;;
+        -j|--jobs)
+            if [[ $# -lt 2 ]]; then
+                echo "error: $1 requires a value" >&2
+                exit 1
+            fi
+            ninja_jobs="$2"
             shift 2
             ;;
         --help|-h)
@@ -90,6 +108,8 @@ case "$allowlist" in
         ;;
 esac
 
+validate_ninja_jobs
+
 llvm_context=""
 llvm_context_tmp=""
 cleanup() {
@@ -111,12 +131,19 @@ else
     llvm_context="$llvm_context_tmp"
 fi
 
+docker_build_args=(
+    --build-context "llvm=${llvm_context}"
+    --build-arg SANCOV_ALLOWLIST="${allowlist}"
+    --build-arg UID="$(id -u)"
+    --build-arg GID="$(id -g)"
+    --build-arg USERNAME="$(id -un)"
+)
+if [[ -n "$ninja_jobs" ]]; then
+    docker_build_args+=(--build-arg NINJA_JOBS="${ninja_jobs}")
+fi
+
 docker build \
-    --build-context "llvm=${llvm_context}" \
-    --build-arg SANCOV_ALLOWLIST="${allowlist}" \
-    --build-arg UID="$(id -u)" \
-    --build-arg GID="$(id -g)" \
-    --build-arg USERNAME="$(id -un)" \
+    "${docker_build_args[@]}" \
     -f "${REPO_ROOT}/Dockerfile" \
     -t "${IMAGE_NAME}:${image_tag}" \
     "${REPO_ROOT}"

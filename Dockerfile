@@ -5,6 +5,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # Parent commit before the first fuzz-fill contribution: https://github.com/llvm/llvm-project/pull/185430.
 ARG LLVM_COMMIT=40cd48fd385b57855a104a4192c4d4468889d22d
 ARG SANCOV_ALLOWLIST=amdgpu
+ARG NINJA_JOBS=""
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -45,7 +46,8 @@ RUN /usr/local/bin/build-llvm.sh \
     /usr/bin/clang \
     /usr/bin/clang++ \
     /work/llvm-project \
-    /work/llvm-build-uninstrumented
+    /work/llvm-build-uninstrumented \
+    "${NINJA_JOBS}"
 
 COPY scripts/build-llvm-sancov.sh /usr/local/bin/
 COPY scripts/allowlist-amdgpu.txt /work/allowlist-amdgpu.txt
@@ -53,6 +55,7 @@ COPY scripts/allowlist-spirv.txt /work/allowlist-spirv.txt
 RUN chmod +x /usr/local/bin/build-llvm-sancov.sh
 
 ARG SANCOV_ALLOWLIST=amdgpu
+ARG NINJA_JOBS=""
 RUN case "${SANCOV_ALLOWLIST}" in \
         amdgpu) allowlist=/work/allowlist-amdgpu.txt ;; \
         spirv) allowlist=/work/allowlist-spirv.txt ;; \
@@ -64,7 +67,8 @@ RUN case "${SANCOV_ALLOWLIST}" in \
         "${allowlist}" \
         /work/llvm-project \
         /work/llvm-build-uninstrumented \
-        /work/llvm-build-sancov
+        /work/llvm-build-sancov \
+        "${NINJA_JOBS}"
 
 FROM ubuntu:24.04 AS final
 

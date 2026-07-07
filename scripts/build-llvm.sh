@@ -2,8 +2,8 @@
 
 set -e
 
-if [ "$#" -ne 4 ]; then
-    echo "Usage: $0 <c-compiler> <cxx-compiler> <llvm_dir> <build_dir>"
+if [ "$#" -lt 4 ] || [ "$#" -gt 5 ]; then
+    echo "Usage: $0 <c-compiler> <cxx-compiler> <llvm_dir> <build_dir> [ninja_jobs]"
     exit 1
 fi
 
@@ -11,6 +11,7 @@ C_COMPILER="$1"
 CXX_COMPILER="$2"
 LLVM_DIR="$(realpath "$3")"
 BUILD_DIR="$(realpath -m "$4")"
+NINJA_JOBS="${5:-}"
 
 mkdir -p "$BUILD_DIR"
 BUILD_DIR="$(realpath "$BUILD_DIR")"
@@ -37,4 +38,8 @@ cmake -G "Ninja" \
     -DBUILD_SHARED_LIBS=OFF \
     "$LLVM_DIR/llvm"
 
-ninja
+ninja_args=()
+if [ -n "$NINJA_JOBS" ]; then
+    ninja_args=(-j "$NINJA_JOBS")
+fi
+ninja "${ninja_args[@]}"
