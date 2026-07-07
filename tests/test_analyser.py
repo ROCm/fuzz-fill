@@ -54,11 +54,11 @@ class DiffPartialBaselineTest(unittest.TestCase):
                 suite / DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
                 [
                     ["file", "line", "point_llc"],
-                    [FILE, 10, "1001"],
-                    [FILE, 10, "1002"],
-                    [FILE, 20, "2001"],
-                    [FILE, 20, "2002"],
-                    [FILE, 30, "3001"],
+                    [FILE, 10, "0x1001"],
+                    [FILE, 10, "0x1002"],
+                    [FILE, 20, "0x2001"],
+                    [FILE, 20, "0x2002"],
+                    [FILE, 30, "0x3001"],
                 ],
             )
 
