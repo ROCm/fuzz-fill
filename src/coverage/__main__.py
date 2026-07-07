@@ -15,7 +15,6 @@ from coverage.constants import (
 
 from coverage.analyser import CoverageAnalyzer
 from coverage.target_lines_check import run_target_lines_check
-from coverage.run_config import load_run_config
 from fuzz_fill.log import add_log_level_argument, configure_logging, get_logger, log_timing
 
 logger = get_logger("coverage")
@@ -156,12 +155,10 @@ def main():
         with log_timing(logger, "target-lines"):
             args.output_dir.mkdir(parents=True, exist_ok=True)
             report_path = args.output_dir / DEFAULT_TARGET_LINES_REPORT
-            run_config = load_run_config(args.baseline_output_dir.resolve())
             run_target_lines_check(
                 baseline_output_dir=args.baseline_output_dir.resolve(),
                 llvm_repo=args.llvm_repo,
                 target_lines_csv=args.target_lines_csv.resolve(),
-                path_filter=run_config["path_filter"],
                 report_path=report_path,
             )
 

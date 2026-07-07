@@ -94,11 +94,11 @@ def run_target_lines_check(
                 ) from e
             text = row.get("text", "")
 
-        sym_file = _match_symcov_file(rel, summary_files)
-        if sym_file is None:
-            cand = (llvm_repo / rel).resolve()
-            if str(cand) in summary_files:
-                sym_file = str(cand)
+            sym_file = _match_symcov_file(rel, summary_files)
+            if sym_file is None:
+                cand = (llvm_repo / rel).resolve()
+                if str(cand) in summary_files:
+                    sym_file = str(cand)
 
             if sym_file is None:
                 stats["unknown_file"] += 1
