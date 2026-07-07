@@ -36,15 +36,16 @@ class DiffPartialBaselineTest(unittest.TestCase):
         self.new_tests_dir.mkdir()
         self.diff_dir.mkdir()
 
-        # Line 10: fully covered by the suite.
-        # Line 20: partially covered by the suite (0x2001 hit, 0x2002 not).
+        # Line 10: fully covered by the suite (0x1001 and 0x1002 both hit).
+        # Line 20: partially covered (0x2001 hit, 0x2002 not); point_addresses lists
+        # every instrumentation point on the line, as in line_coverage_summary.csv.
         # Line 30: completely uncovered by the suite.
         self._write_csv(
             self.test_suite_dir / DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
             [
                 ["file", "line", "coverage", "point_addresses"],
-                [FILE, 10, "full", ""],
-                [FILE, 20, "partial", "0x2002"],
+                [FILE, 10, "full", "0x1001;0x1002"],
+                [FILE, 20, "partial", "0x2001;0x2002"],
                 [FILE, 30, "none", "0x3001"],
             ],
         )
