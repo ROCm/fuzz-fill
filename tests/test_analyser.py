@@ -64,8 +64,8 @@ class DiffPartialBaselineTest(unittest.TestCase):
 
             filepaths = Filepaths(
                 output_dir=diff,
-                output_test_suite_dir=suite,
-                output_new_tests_dir=new_tests,
+                output_baseline_dir=suite,
+                output_candidate_tests_dir=new_tests,
                 llvm_bin=Path("/unused"),
                 llc_address_line_map_file=DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
                 line_coverage_summary_file=DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
