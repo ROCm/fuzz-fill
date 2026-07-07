@@ -75,6 +75,7 @@ ARG USERNAME=developer
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     creduce \
+    git \
     libgcc-s1 \
     libstdc++6 \
     libtinfo6 \

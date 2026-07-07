@@ -27,7 +27,7 @@
 
 # COM: These lines are uncovered by the test suite slice (none in line_coverage_summary.csv)
 # COM: but covered by the external test — manually confirmed at LLVM rev. 40cd48fd385b.
-# RUN: %FileCheck %s --input-file=%t/test_suite/line_coverage_summary.csv --check-prefix=SUMMARY_NONE
+# RUN: %FileCheck %s --input-file=%t/baseline/line_coverage_summary.csv --check-prefix=SUMMARY_NONE
 # SUMMARY_NONE-DAG: {{.*}}AMDGPUAsmPrinter.cpp,211,none,
 # SUMMARY_NONE-DAG: {{.*}}AMDGPUAsmPrinter.cpp,588,none,
 # SUMMARY_NONE-DAG: {{.*}}AMDGPUAsmPrinter.cpp,596,none,
