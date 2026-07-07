@@ -17,9 +17,13 @@ mkdir -p "$BUILD_DIR"
 BUILD_DIR="$(realpath "$BUILD_DIR")"
 cd "$BUILD_DIR"
 
-# Skip optional compiler-rt sanitizers (hwasan, asan, tsan, …). ubsan and
-# sanitizer_common still build and are enough for -fsanitize-coverage linking.
-# Tests are off: an empty sanitizer list leaves no asan/hwasan targets for lit.
+# compiler-rt minimal build for -fsanitize-coverage=bb,trace-pc-guard (with
+# allowlist). Clang links libclang_rt.ubsan_standalone for any coverage build;
+# that archive pulls in sanitizer_common (coverage + symbolizer) and
+# interception. COMPILER_RT_BUILD_SANITIZERS must stay ON, but an empty
+# SANITIZERS_TO_BUILD skips asan/tsan/hwasan/… while still building the ubsan
+# object libs above. stats/lsan subdirs also build (CMake always adds them when
+# BUILD_SANITIZERS is on) but are not linked for coverage-only use.
 cmake -G "Ninja" \
     -DCMAKE_C_COMPILER="$C_COMPILER" \
     -DCMAKE_CXX_COMPILER="$CXX_COMPILER" \
@@ -28,10 +32,15 @@ cmake -G "Ninja" \
     -DLLVM_ENABLE_RUNTIMES="compiler-rt" \
     -DCOMPILER_RT_SANITIZERS_TO_BUILD="" \
     -DCOMPILER_RT_INCLUDE_TESTS=OFF \
+    -DCOMPILER_RT_BUILD_BUILTINS=OFF \
     -DCOMPILER_RT_BUILD_LIBFUZZER=OFF \
     -DCOMPILER_RT_BUILD_MEMPROF=OFF \
     -DCOMPILER_RT_BUILD_ORC=OFF \
     -DCOMPILER_RT_BUILD_XRAY=OFF \
+    -DCOMPILER_RT_BUILD_PROFILE=OFF \
+    -DCOMPILER_RT_BUILD_PROFILE_ROCM=OFF \
+    -DCOMPILER_RT_BUILD_CTX_PROFILE=OFF \
+    -DCOMPILER_RT_BUILD_GWP_ASAN=OFF \
     -DLLVM_OPTIMIZED_TABLEGEN=ON \
     -DLLVM_ENABLE_ASSERTIONS=OFF \
     -DCMAKE_BUILD_TYPE=Release \
