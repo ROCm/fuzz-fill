@@ -21,6 +21,24 @@ from fuzz_fill.log import get_logger, log_timing, run_subprocess
 
 logger = get_logger("coverage.test_runner")
 
+
+def _merge_and_symbolize_sancov(sancov: Sancov, raw_sancov_output_dir: Path) -> None:
+    if sancov.has_raw_files():
+        sancov.merge()
+        sancov.symbolize(
+            sancov.get_merged_sancov_path(),
+            sancov.get_merged_symcov_path(),
+        )
+    else:
+        print(
+            f"warning: no {sancov.suffix} sancov files in {raw_sancov_output_dir}; "
+            f"the selected tests produced no {sancov.suffix} coverage. "
+            f"Treating {sancov.suffix} as empty.",
+            flush=True,
+        )
+        sancov.write_empty_symcov()
+
+
 class TestRunner:
     """
     Executes tests using an instrumented LLVM build.
@@ -57,6 +75,7 @@ class TestRunner:
             self._path_filter = run_config["path_filter"]
             write_run_config(self.filepaths.output_dir, lit_filter=lit_filter)
             self.raw_sancov_output_dir.mkdir(parents=True, exist_ok=True)
+            self._symbolize_jobs = min(jobs, 2) if jobs is not None else 2
 
         elif self.mode == "standalone":
             self._candidate_tests_limit = candidate_tests_limit
@@ -279,18 +298,13 @@ class TestRunner:
                 "opt",
             )
 
-            for sancov in (llc_sancov, opt_sancov):
-                if sancov.has_raw_files():
-                    sancov.merge()
-                    sancov.symbolize(sancov.get_merged_sancov_path(), sancov.get_merged_symcov_path())
-                else:
-                    print(
-                        f"warning: no {sancov.suffix} sancov files in {self.raw_sancov_output_dir}; "
-                        f"the selected tests produced no {sancov.suffix} coverage. "
-                        f"Treating {sancov.suffix} as empty.",
-                        flush=True,
-                    )
-                    sancov.write_empty_symcov()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self._symbolize_jobs) as pool:
+                futures = [
+                    pool.submit(_merge_and_symbolize_sancov, s, self.raw_sancov_output_dir)
+                    for s in (llc_sancov, opt_sancov)
+                ]
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
 
         llc_address_line_map, line_coverage_summary = llc_sancov.get_joint_coverage(
             opt_sancov, self._path_filter

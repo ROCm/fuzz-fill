@@ -8,7 +8,7 @@
 # COM: baseline-covered line must show up in baseline output but not in incremental/target-lines.
 
 # RUN: rm -rf %t && mkdir -p %t/baseline %t/candidate_tests %t/incremental %t/target_lines
-# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter CodeGen/AMDGPU/loop -j1
+# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter CodeGen/AMDGPU/loop -j2
 # RUN: %coverage candidate-test --output-dir %t/candidate_tests --llc %sancov-llc --candidate-tests-dir %S/fixtures/coverage-new-tests --n 1
 # RUN: %coverage incremental --output-dir %t/incremental --sancov %sancov --baseline-output-dir %t/baseline --candidate-tests-output-dir %t/candidate_tests
 # RUN: %coverage target-lines --output-dir %t/target_lines --baseline-output-dir %t/baseline --llvm-repo %llvm-repo --target-lines-csv %S/fixtures/target-lines-sample.csv

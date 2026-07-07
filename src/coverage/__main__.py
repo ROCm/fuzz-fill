@@ -87,7 +87,8 @@ def main():
     p_baseline.add_argument("-j", "--jobs", type=int, default=None,
         help=(
             "Number of parallel jobs forwarded to llvm-lit as -j<N>. "
-            "If unset, uses the system core count (capped at 384)."
+            "If unset, uses the system core count (capped at 384). "
+            "llc/opt symbolization uses min(-j, 2) (defaults to 2 when unset)."
         ))
     p_baseline.add_argument("--lit-verbose", action="store_true",
         help="Forward -vv to llvm-lit for verbose test output.")
