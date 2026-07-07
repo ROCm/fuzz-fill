@@ -6,6 +6,7 @@ logs/*
 coverage_output/*
 **/__pycache__/*
 integration-tests/Output/*
+.fuzz-fill-llvm-pr-worktrees/
 *.lit_test_times.txt
 *.sancov
 *.egg-info/
