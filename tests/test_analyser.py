@@ -93,6 +93,11 @@ class DiffPartialBaselineTest(unittest.TestCase):
             csv.writer(f).writerows(rows)
 
     def test_partial_baseline_line_fully_covered_by_new_test_is_not_reported(self) -> None:
+        """Incremental diff reports only baseline gaps (``none``), not partial lines.
+
+        Even when a new test hits every instrumentation point on a line the suite
+        only partially covered, that line must not appear in ``new_coverage.csv``.
+        """
         summary = self.test_suite_dir / DEFAULT_LINE_COVERAGE_SUMMARY_FILE
         baseline = LineCoverageIndex.from_summary_df(pd.read_csv(summary))
         self.assertEqual(baseline.classify(FILE, 20), "partial")
