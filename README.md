@@ -299,7 +299,7 @@ For the full coverage-gap workflow (build + detect), use [`pr-cov-gaps-detection
 
 If the image `fuzz-fill-test:llvm-pr-<n>` already exists, omit `--build-image` to run detection only.
 
-Main output: `<output-dir>/commit_lines_report/commit_lines_uncovered.csv`. See [Workflow 2](#workflow-2-uncovered-lines-in-a-commit) for report semantics.
+Main output: `<output-dir>/commit_lines_report/target_lines_uncovered.csv`. See [Workflow 2](#workflow-2-uncovered-lines-in-a-commit) for report semantics.
 
 ### Run integration tests
 

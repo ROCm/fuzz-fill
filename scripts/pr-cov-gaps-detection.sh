@@ -309,7 +309,7 @@ python -m coverage target-lines \
     --target-lines-csv /mounted-output/added-lines/added-lines.csv
 '
 
-report="${output_dir}/commit_lines_report/commit_lines_uncovered.csv"
+report="${output_dir}/commit_lines_report/target_lines_uncovered.csv"
 echo "Wrote ${report}"
 echo "Image: ${image_ref}"
 echo "LIT filter: ${lit_filter}"
