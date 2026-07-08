@@ -4,7 +4,13 @@ from pathlib import Path
 
 from fuzz_fill.env import FUZZ_FILL_LLC, FUZZ_FILL_LLVM_DIS, FUZZ_FILL_LLVM_REDUCE
 from fuzz_fill.llvm_tools import reduce_tools_from_args
-from fuzz_fill.log import add_log_level_argument, configure_logging
+from fuzz_fill.log import (
+    add_log_level_argument,
+    add_log_to_file_argument,
+    configure_logging,
+    disable_log_file,
+    enable_log_file,
+)
 from reduce.config import load_reduce_config, pipeline_steps_for_only_pass
 from reduce.reducer import Reducer, known_pass_ids
 from reduce.test import Test
@@ -50,6 +56,7 @@ def main():
         help="Run a single pass by id (input is config input; use .mir for llvm_reduce_mir).",
     )
     add_log_level_argument(parser)
+    add_log_to_file_argument(parser)
     ns = parser.parse_args()
     configure_logging(ns.log_level)
     tools = reduce_tools_from_args(
@@ -78,18 +85,28 @@ def main():
     output_dir = cfg.output_dir or default_output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    pass_ids = [s.id for s in pipeline_steps]
-    print(
-        f"[main] reduce ({len(pass_ids)} pass(es): {', '.join(pass_ids)})",
-        flush=True,
-    )
-    reducer = Reducer(
-        tools,
-        output_dir,
-        test,
-        pipeline_steps=pipeline_steps,
-    )
-    reducer.reduce()
+    if ns.log_to_file:
+        try:
+            enable_log_file(output_dir)
+            configure_logging(ns.log_level)
+            print("[main] loading config...", flush=True)
+
+            pass_ids = [s.id for s in pipeline_steps]
+            print(
+                f"[main] reduce ({len(pass_ids)} pass(es): {', '.join(pass_ids)})",
+                flush=True,
+            )
+            reducer = Reducer(
+                cfg.llvm_bin,
+                output_dir,
+                test,
+                pipeline_steps=pipeline_steps,
+            )   
+            reducer.reduce()
+
+        finally:
+            if ns.log_to_file:
+                disable_log_file()
 
 
 if __name__ == "__main__":

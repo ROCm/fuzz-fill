@@ -186,13 +186,13 @@ def main():
             print(f"Debug mode enabled")
 
         if args.subcmd == "baseline":
-        tools = baseline_tools_from_args(
-            sancov=args.sancov,
-            llvm_lit=args.llvm_lit,
-            llc=args.llc,
-            opt=args.opt,
-        )
-        filepaths = get_filepaths(args, tools=tools)
+            tools = baseline_tools_from_args(
+                sancov=args.sancov,
+                llvm_lit=args.llvm_lit,
+                llc=args.llc,
+                opt=args.opt,
+            )
+            filepaths = get_filepaths(args, tools=tools)
             print("Getting baseline coverage for the test suite")
             with log_timing(logger, "baseline"):
                 test_runner = TestRunner(
@@ -208,8 +208,8 @@ def main():
                 test_runner.run()
 
         elif args.subcmd == "candidate-test":
-        tools = candidate_test_tools_from_args(llc=args.llc)
-        filepaths = get_filepaths(args, tools=tools)
+            tools = candidate_test_tools_from_args(llc=args.llc)
+            filepaths = get_filepaths(args, tools=tools)
             print("Getting coverage for the candidate tests")
             with log_timing(logger, "candidate-test"):
                 test_runner = TestRunner(
@@ -222,8 +222,8 @@ def main():
                 test_runner.run()
 
         elif args.subcmd == "incremental":
-        tools = incremental_tools_from_args(sancov=args.sancov)
-        filepaths = get_filepaths(args, tools=tools)
+            tools = incremental_tools_from_args(sancov=args.sancov)
+            filepaths = get_filepaths(args, tools=tools)
             print("Getting incremental coverage for candidate tests relative to the baseline test suite")
             with log_timing(logger, "incremental"):
                 filepaths.output_baseline_dir = args.baseline_output_dir
@@ -234,9 +234,9 @@ def main():
                 coverage_analyzer.get_incremental_coverage()
 
         elif args.subcmd == "target-lines":
-        args.llvm_repo = path_from_flag_or_env(
-            args.llvm_repo, FUZZ_FILL_LLVM_REPO, flag_name="--llvm-repo"
-        )
+            args.llvm_repo = path_from_flag_or_env(
+                args.llvm_repo, FUZZ_FILL_LLVM_REPO, flag_name="--llvm-repo"
+            )
             print(
                 "Checking target lines from CSV against baseline line coverage summary "
                 "(no lit re-run)",
