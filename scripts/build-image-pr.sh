@@ -11,14 +11,14 @@ github_repo=""
 image_tag=""
 allowlist=""
 ninja_jobs=""
-keep_worktree=0
+keep_clone=0
 
 usage() {
     cat <<EOF
 Usage: $(basename "$0") --llvm-repo <path> --pr-id <n> --allowlist <target> [options]
 
-Fetch an LLVM pull request, squash it into a single commit in an isolated git
-worktree, and build the fuzz-fill Docker test image from that tree.
+Fetch an LLVM pull request, squash it into a single commit in a standalone
+llvm-project clone, and build the fuzz-fill Docker test image from that tree.
 
 Required:
   --llvm-repo <path>     Local llvm-project git clone (must contain llvm/)
@@ -30,24 +30,22 @@ Options:
                          GitHub repo hosting the PR (default: llvm/llvm-project)
   --tag <tag>            Docker image tag (default: llvm-pr-<pr-id>)
   -j <n>, --jobs <n>     Parallel jobs for ninja when building LLVM (default: unconstrained)
-  --keep-worktree        Keep this run's worktree, branch, and Docker build
-                         clone after a successful build (default: remove them)
+  --keep-clone           Keep this run's llvm-project clone after a successful
+                         build (default: remove it)
+  --keep-worktree        Alias for --keep-clone
   --help, -h             Show this help
 
-Worktrees are created at:
+Standalone llvm-project clones are created at:
   <fuzz-fill>/.fuzz-fill-llvm-pr-worktrees/pr-<id>-<timestamp>/
 
-A standalone llvm-project clone for the Docker build context is created at:
-  <fuzz-fill>/.fuzz-fill-llvm-pr-worktrees/.docker-llvm/pr-<id>-<timestamp>/
-
-Branches are named:
+Squash branches are named:
   fuzz-fill/pr-<id>-squash-<timestamp>
 
 Requires: git, gh, docker (BuildKit), and scripts/build-image.sh.
 
 Examples:
   $(basename "$0") --llvm-repo ../llvm-project --pr-id 185430 --allowlist amdgpu
-  $(basename "$0") --llvm-repo ../llvm-project --pr-id 185430 --allowlist spirv --keep-worktree
+  $(basename "$0") --llvm-repo ../llvm-project --pr-id 185430 --allowlist spirv --keep-clone
   $(basename "$0") --llvm-repo ../llvm-project --pr-id 42 --allowlist amdgpu --tag llvm-pr-42 -j 8
 EOF
 }
@@ -72,6 +70,14 @@ require_command() {
     if ! command -v "$1" >/dev/null 2>&1; then
         echo "error: required command not found: $1" >&2
         exit 1
+    fi
+}
+
+dissociate_clone() {
+    local repo="$1"
+    if [[ -f "${repo}/.git/objects/info/alternates" ]]; then
+        git -C "$repo" repack -a -d
+        rm -f "${repo}/.git/objects/info/alternates"
     fi
 }
 
@@ -125,8 +131,8 @@ while [[ $# -gt 0 ]]; do
             ninja_jobs="$2"
             shift 2
             ;;
-        --keep-worktree)
-            keep_worktree=1
+        --keep-clone|--keep-worktree)
+            keep_clone=1
             shift
             ;;
         --help|-h)
@@ -234,42 +240,43 @@ if origin_url="$(git -C "$llvm_repo" remote get-url origin 2>/dev/null)"; then
     origin_repo="$(parse_github_repo_from_remote "$origin_url" || true)"
 fi
 
+ts="$(date -u +%Y%m%dT%H%M%SZ)"
+branch="fuzz-fill/pr-${pr_id}-squash-${ts}"
+pr_build_root="${REPO_ROOT}/.fuzz-fill-llvm-pr-worktrees"
+docker_llvm_path="${pr_build_root}/pr-${pr_id}-${ts}"
+
+mkdir -p "$pr_build_root"
+rm -rf "$docker_llvm_path"
+
+echo "Creating standalone llvm-project clone at ${docker_llvm_path}"
+git clone --reference "$llvm_repo" -n "file://${llvm_repo}" "$docker_llvm_path"
+
+echo "Checking out PR base ${base_ref_oid} on branch ${branch}"
+git -C "$docker_llvm_path" checkout -b "$branch" "$base_ref_oid"
+
 if [[ "$origin_repo" == "$github_repo" ]]; then
     echo "Fetching PR head via origin (${origin_url})"
-    git -C "$llvm_repo" fetch origin "pull/${pr_id}/head:${pr_head_ref}"
+    if git -C "$docker_llvm_path" remote get-url origin >/dev/null 2>&1; then
+        git -C "$docker_llvm_path" remote set-url origin "$origin_url"
+    else
+        git -C "$docker_llvm_path" remote add origin "$origin_url"
+    fi
+    git -C "$docker_llvm_path" fetch origin "pull/${pr_id}/head:${pr_head_ref}"
 else
     fetch_url="https://github.com/${github_repo}.git"
     echo "Fetching PR head via ${fetch_url}"
-    git -C "$llvm_repo" fetch "$fetch_url" "pull/${pr_id}/head:${pr_head_ref}"
+    git -C "$docker_llvm_path" fetch "$fetch_url" "pull/${pr_id}/head:${pr_head_ref}"
 fi
 
-ts="$(date -u +%Y%m%dT%H%M%SZ)"
-branch="fuzz-fill/pr-${pr_id}-squash-${ts}"
-worktree_root="${REPO_ROOT}/.fuzz-fill-llvm-pr-worktrees"
-worktree_path="${worktree_root}/pr-${pr_id}-${ts}"
-
-mkdir -p "$worktree_root"
-
-echo "Creating worktree ${worktree_path} on branch ${branch}"
-git -C "$llvm_repo" worktree add -B "$branch" "$worktree_path" "$base_ref_oid"
-
 echo "Squashing PR changes into a single commit"
-git -C "$worktree_path" merge --squash "$pr_head_ref"
-if ! git -C "$worktree_path" commit -m "Squash ${github_repo}#${pr_id} for fuzz-fill image build (${ts})"; then
+git -C "$docker_llvm_path" merge --squash "$pr_head_ref"
+if ! git -C "$docker_llvm_path" commit -m "Squash ${github_repo}#${pr_id} for fuzz-fill image build (${ts})"; then
     echo "error: squash commit failed (is the PR empty?): ${github_repo}#${pr_id}" >&2
     exit 1
 fi
 
-# Worktrees store .git as a gitdir: pointer to the main repo on the host; Docker
-# copies that file verbatim, so git commands fail inside the image. Clone a
-# self-contained repo for the build context so git-related fuzz-fill commands
-# (e.g. added_lines) work in the container. Depth 2 is enough for git show
-# --first-parent on HEAD (squash commit + its parent).
-docker_llvm_path="${worktree_root}/.docker-llvm/pr-${pr_id}-${ts}"
-echo "Creating standalone llvm-project clone for Docker build at ${docker_llvm_path}"
-rm -rf "$docker_llvm_path"
-mkdir -p "$(dirname "$docker_llvm_path")"
-git clone --depth 2 --no-local "file://${worktree_path}" "$docker_llvm_path"
+echo "Making clone self-contained for Docker build"
+dissociate_clone "$docker_llvm_path"
 if ! git -C "$docker_llvm_path" rev-parse HEAD >/dev/null 2>&1; then
     echo "error: failed to create standalone llvm-project clone for Docker build" >&2
     exit 1
@@ -283,11 +290,8 @@ fi
 echo "Building Docker image ${IMAGE_NAME:-fuzz-fill-test}:${image_tag}"
 "${SCRIPT_DIR}/build-image.sh" "${build_args[@]}"
 
-if [[ "$keep_worktree" -eq 0 ]]; then
-    echo "Removing worktree ${worktree_path}"
-    git -C "$llvm_repo" worktree remove --force "$worktree_path"
-    git -C "$llvm_repo" branch -D "$branch" || true
-    echo "Removing Docker build clone ${docker_llvm_path}"
+if [[ "$keep_clone" -eq 0 ]]; then
+    echo "Removing llvm-project clone ${docker_llvm_path}"
     rm -rf "$docker_llvm_path"
 fi
 
