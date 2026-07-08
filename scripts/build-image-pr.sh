@@ -57,15 +57,6 @@ validate_ninja_jobs() {
     fi
 }
 
-parse_github_repo_from_remote() {
-    local url="$1"
-    if [[ "$url" =~ github\.com[:/]([^/]+)/([^/.]+)(\.git)?/?$ ]]; then
-        echo "${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
-        return 0
-    fi
-    return 1
-}
-
 require_command() {
     if ! command -v "$1" >/dev/null 2>&1; then
         echo "error: required command not found: $1" >&2
@@ -78,6 +69,31 @@ dissociate_clone() {
     if [[ -f "${repo}/.git/objects/info/alternates" ]]; then
         git -C "$repo" repack -a -d
         rm -f "${repo}/.git/objects/info/alternates"
+    fi
+}
+
+commit_available() {
+    local repo="$1"
+    local sha="$2"
+    git -C "$repo" rev-parse --verify "${sha}^{commit}" >/dev/null 2>&1
+}
+
+ensure_commit_available() {
+    local repo="$1"
+    local sha="$2"
+    local label="$3"
+    local fetch_url="$4"
+
+    if commit_available "$repo" "$sha"; then
+        return 0
+    fi
+
+    echo "${label} ${sha} not in local object store; fetching from ${fetch_url}"
+    git -C "$repo" fetch "$fetch_url" "${sha}"
+    if ! commit_available "$repo" "$sha"; then
+        echo "error: could not resolve ${label} ${sha} from --llvm-repo or ${fetch_url}" >&2
+        echo "hint: check --github-repo, network access, and that the PR still exists" >&2
+        exit 1
     fi
 }
 
@@ -234,11 +250,7 @@ echo "Preparing ${github_repo}#${pr_id}: ${pr_title}"
 echo "  base: ${base_ref_oid}"
 
 pr_head_ref="refs/fuzz-fill/pr-${pr_id}/head"
-origin_repo=""
-origin_url=""
-if origin_url="$(git -C "$llvm_repo" remote get-url origin 2>/dev/null)"; then
-    origin_repo="$(parse_github_repo_from_remote "$origin_url" || true)"
-fi
+pr_fetch_url="https://github.com/${github_repo}.git"
 
 ts="$(date -u +%Y%m%dT%H%M%SZ)"
 branch="fuzz-fill/pr-${pr_id}-squash-${ts}"
@@ -251,22 +263,13 @@ rm -rf "$docker_llvm_path"
 echo "Creating standalone llvm-project clone at ${docker_llvm_path}"
 git clone --reference "$llvm_repo" -n "file://${llvm_repo}" "$docker_llvm_path"
 
+ensure_commit_available "$docker_llvm_path" "$base_ref_oid" "PR base commit" "$pr_fetch_url"
+
 echo "Checking out PR base ${base_ref_oid} on branch ${branch}"
 git -C "$docker_llvm_path" checkout -b "$branch" "$base_ref_oid"
 
-if [[ "$origin_repo" == "$github_repo" ]]; then
-    echo "Fetching PR head via origin (${origin_url})"
-    if git -C "$docker_llvm_path" remote get-url origin >/dev/null 2>&1; then
-        git -C "$docker_llvm_path" remote set-url origin "$origin_url"
-    else
-        git -C "$docker_llvm_path" remote add origin "$origin_url"
-    fi
-    git -C "$docker_llvm_path" fetch origin "pull/${pr_id}/head:${pr_head_ref}"
-else
-    fetch_url="https://github.com/${github_repo}.git"
-    echo "Fetching PR head via ${fetch_url}"
-    git -C "$docker_llvm_path" fetch "$fetch_url" "pull/${pr_id}/head:${pr_head_ref}"
-fi
+echo "Fetching PR head via ${pr_fetch_url}"
+git -C "$docker_llvm_path" fetch "$pr_fetch_url" "pull/${pr_id}/head:${pr_head_ref}"
 
 echo "Squashing PR changes into a single commit"
 git -C "$docker_llvm_path" merge --squash "$pr_head_ref"
