@@ -40,23 +40,22 @@ source venv/bin/activate
 pip install -e .
 ```
 
-### LLVM builds
+### LLVM build
 
-You need **two** builds of the **same** LLVM revision:
+You need an official **LLVM GitHub release** as bootstrap and one **SanitizerCoverage** build of llvm-project at the matching tag:
 
-| Build | Purpose | How |
-|-------|---------|-----|
-| **Uninstrumented** | `sancov` merge/symbolize, `llvm-reduce`, LIT helper tools | `./scripts/build-llvm.sh /path/to/clang /path/to/clang++ llvm-project llvm-project/build-uninstrumented` |
-| **SanitizerCoverage** | Run `llvm-lit`, instrumented `llc`/`opt` | `./scripts/build-llvm-sancov.sh ./scripts/allowlist-amdgpu.txt llvm-project llvm-project/build-uninstrumented llvm-project/build-sancov` |
+| Component | Purpose | How |
+|-----------|---------|-----|
+| **Release bootstrap** | `clang`, `clang++` for compiling LLVM | Download [LLVM release](https://github.com/llvm/llvm-project/releases) (e.g. `LLVM-22.1.8-Linux-X64.tar.xz`) |
+| **SanitizerCoverage** | Unified build tree: instrumented `llc`/`opt`, Release LIT helpers, `llvm-lit`, `sancov` | `./scripts/build-llvm-sancov.sh ./scripts/allowlist-amdgpu.txt llvm-project llvm-project/build-sancov --bootstrap-bin /path/to/LLVM-22.1.8/bin` |
 
-Run `build-llvm.sh` first. The sancov build is compiled with `clang`/`clang++` from the uninstrumented `bin/`.
+`build-llvm-sancov.sh` runs two partial builds from the same source: **`llvm-tblgen` is built from the source tree first**, then a **Release** tree for target-agnostic LIT helpers plus **`sancov`**, and a **Debug** SanitizerCoverage tree for **`llc`**, **`opt`**, and target-linked helpers (`llvm-mc`, `llvm-objdump`, …). Release tools are copied into the instrumented tree's `bin/`; `llvm-lit` is generated there by cmake. The bootstrap release supplies **clang/clang++ only** (TableGen must match the source).
 
 **`python -m coverage baseline`** patches **`<instrumented-build>/test/lit.site.cfg.py`** so LIT forwards **`UBSAN_OPTIONS`** to every test subprocess. The patch is idempotent and is re-applied if CMake regenerates that file.
 
 The example scripts below assume paths like:
 
-- `$LLVM/build/bin` — uninstrumented tools (including `sancov`)
-- `$LLVM/build-amdgpu-bb/bin` — instrumented `llvm-lit`, `llc`, and `opt`
+- `$LLVM/build-sancov/bin` — unified build (`llvm-lit`, instrumented `llc`/`opt` + target helpers, Release `sancov`/other LIT helpers)
 
 Adjust these to match your trees before running.
 
@@ -211,7 +210,7 @@ Several commands accept LLVM paths via environment variables when the matching C
 Example (paths match the [Docker test image](#docker-test-image)):
 
 ```bash
-export FUZZ_FILL_LLVM_BIN=/work/llvm-build-uninstrumented/bin
+export FUZZ_FILL_LLVM_BIN=/work/llvm-build-sancov/bin
 export FUZZ_FILL_LLVM_INSTRUMENTED_BIN=/work/llvm-build-sancov/bin
 export FUZZ_FILL_LLVM_REPO=/work/llvm-project
 
@@ -225,7 +224,7 @@ Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `IN
 
 ## Docker test image
 
-The Docker image bundles a pinned LLVM revision, both instrumented and uninstrumented builds, and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
+The Docker image bundles an official LLVM release bootstrap, a dual-build SanitizerCoverage LLVM tree (instrumented `llc`/`opt` plus Release helpers), and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
 
 **Scripts:** [`scripts/build-image.sh`](scripts/build-image.sh), [`scripts/build-image-pr.sh`](scripts/build-image-pr.sh), [`scripts/pr-cov-gaps-detection.sh`](scripts/pr-cov-gaps-detection.sh), [`scripts/test-image.sh`](scripts/test-image.sh), [`scripts/tmp-container.sh`](scripts/tmp-container.sh)
 
@@ -237,14 +236,15 @@ From the repo root (first build compiles LLVM and can take a while):
 ./scripts/build-image.sh
 ```
 
-By default the image is tagged `fuzz-fill-test:latest` and LLVM is downloaded from GitHub at a pinned revision.
+By default the image is tagged `fuzz-fill-test:latest`. LLVM source is downloaded at tag `llvmorg-22.1.8` and bootstrapped from the matching GitHub release.
 
 | Option | Meaning |
 |--------|---------|
-| `--llvm-dir <path>` | Use a local `llvm-project` checkout instead of downloading LLVM |
+| `--llvm-dir <path>` | Use a local `llvm-project` checkout instead of downloading tagged source |
+| `--llvm-release-version <ver>` | Official LLVM release for bootstrap toolchain (default: `22.1.8`) |
 | `--tag <tag>` | Docker image tag (default: `latest`) |
 | `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist baked into the instrumented build (default: `amdgpu`) |
-| `-j <n>`, `--jobs <n>` | Limit ninja parallelism for both LLVM builds (default: unconstrained) |
+| `-j <n>`, `--jobs <n>` | Limit ninja parallelism for the sancov build (default: unconstrained) |
 
 Examples:
 
@@ -256,7 +256,7 @@ Examples:
 
 ### Build from an LLVM pull request
 
-[`scripts/build-image-pr.sh`](scripts/build-image-pr.sh) builds a Docker image from an LLVM PR. Pass a local `llvm-project` clone; the PR is squashed in a fuzz-fill worktree so your llvm checkout is unchanged. Requires local `gh` and Docker (BuildKit). PRs are assumed to live on **`llvm/llvm-project`** unless you pass `--github-repo`.
+[`scripts/build-image-pr.sh`](scripts/build-image-pr.sh) builds a Docker image from an LLVM PR. Pass a local `llvm-project` clone; the PR is squashed in a standalone fuzz-fill clone so your llvm checkout is unchanged. Requires local `gh` and Docker (BuildKit). PRs are assumed to live on **`llvm/llvm-project`** unless you pass `--github-repo`.
 
 ```bash
 ./scripts/build-image-pr.sh --llvm-repo /path/llvm-project --pr-id 185430 --allowlist amdgpu
@@ -345,7 +345,7 @@ To run integration tests manually inside the container:
 ```bash
 ./scripts/tmp-container.sh ./integration-tests/test.sh \
   --venv /work/fuzz-fill-venv \
-  --llvm-build /work/llvm-build-uninstrumented/bin \
+  --llvm-build /work/llvm-build-sancov/bin \
   --llvm-sancov-build /work/llvm-build-sancov/bin \
   --llvm-src /work/llvm-project \
   -v integration-tests/
@@ -372,12 +372,12 @@ python -m unittest tests.test_analyser -v
 
 ### Integration tests
 
-Integration tests need both LLVM `bin` directories (same version). Locally:
+Integration tests need the SanitizerCoverage LLVM `bin` directory and llvm-project source. Locally:
 
 ```bash
 ./integration-tests/test.sh \
   --venv ./venv/ \
-  --llvm-build llvm-project/build-uninstrumented/bin/ \
+  --llvm-build llvm-project/build-sancov/bin/ \
   --llvm-sancov-build llvm-project/build-sancov/bin/ \
   --llvm-src llvm-project/ \
   integration-tests/
@@ -385,7 +385,7 @@ Integration tests need both LLVM `bin` directories (same version). Locally:
 
 Or use [`scripts/test-image.sh`](scripts/test-image.sh) with the [Docker test image](#docker-test-image).
 
-`--llvm-build` is the uninstrumented tree; `--llvm-sancov-build` is the SanitizerCoverage build; `--llvm-src` is the llvm-project checkout root (used as `%llvm-repo` in tests).
+Both `--llvm-build` and `--llvm-sancov-build` point at the same SanitizerCoverage tree; `--llvm-src` is the llvm-project checkout root (used as `%llvm-repo` in tests).
 
 ---
 

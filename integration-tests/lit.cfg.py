@@ -33,7 +33,7 @@ def _require_dir(env_var: str, human_label: str) -> str:
 
 _llvm_bin_dir = _require_dir(
     "FUZZ_FILL_LLVM_BIN_DIR",
-    "uninstrumented LLVM build bin directory (FileCheck, sancov)",
+    "LLVM build bin directory (FileCheck, sancov)",
 )
 _llvm_sancov_bin_dir = _require_dir(
     "FUZZ_FILL_LLVM_SANCOV_BIN_DIR",

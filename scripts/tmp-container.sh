@@ -36,7 +36,7 @@ Examples:
   $(basename "$0")
   $(basename "$0") --bind-repo
   $(basename "$0") ./integration-tests/test.sh --venv ${CONTAINER_VENV} \\
-      --llvm-build /work/llvm-build-uninstrumented/bin \\
+      --llvm-build /work/llvm-build-sancov/bin \\
       --llvm-sancov-build /work/llvm-build-sancov/bin \\
       --llvm-src /work/llvm-project -v integration-tests/
 EOF
