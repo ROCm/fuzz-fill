@@ -9,7 +9,13 @@ from pathlib import Path
 from added_lines.added_lines import AddedLine, collect_added_lines
 from added_lines.constants import ADDED_LINES_FILENAME, DEFAULT_OUTPUT_DIR
 from fuzz_fill.env import FUZZ_FILL_LLVM_REPO, path_from_flag_or_env
-from fuzz_fill.log import add_log_level_argument, configure_logging
+from fuzz_fill.log import (
+    add_log_level_argument,
+    add_log_to_file_argument,
+    configure_logging,
+    disable_log_file,
+    enable_log_file,
+)
 
 
 def resolve_output_dir(path: Path) -> Path:
@@ -52,29 +58,37 @@ def main() -> None:
         ),
     )
     add_log_level_argument(parser)
+    add_log_to_file_argument(parser)
 
     args = parser.parse_args()
-    configure_logging(args.log_level)
+    out_dir = resolve_output_dir(args.output_dir)
 
-    if args.debug:
-        print("Debug mode enabled", flush=True)
+    if args.log_to_file:
+        enable_log_file(out_dir)
+    try:
+        configure_logging(args.log_level)
 
-    repo = path_from_flag_or_env(
+        if args.debug:
+            print("Debug mode enabled", flush=True)
+
+        repo = path_from_flag_or_env(
         args.llvm_repo, FUZZ_FILL_LLVM_REPO, flag_name="--llvm-repo"
     )
-    out_dir = resolve_output_dir(args.output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-    rows = collect_added_lines(repo, args.commit)
-    csv_text = format_added_lines_csv(rows)
+        rows = collect_added_lines(repo, args.commit)
+        csv_text = format_added_lines_csv(rows)
 
-    out_file = out_dir / ADDED_LINES_FILENAME
-    out_file.write_text(csv_text, encoding="utf-8")
+        out_file = out_dir / ADDED_LINES_FILENAME
+        out_file.write_text(csv_text, encoding="utf-8")
 
-    if args.debug:
-        print(f"Wrote {len(rows)} added lines to {out_file}", flush=True)
+        if args.debug:
+            print(f"Wrote {len(rows)} added lines to {out_file}", flush=True)
 
-    print(csv_text, end="")
+        print(csv_text, end="")
+    finally:
+        if args.log_to_file:
+            disable_log_file()
 
 
 if __name__ == "__main__":
