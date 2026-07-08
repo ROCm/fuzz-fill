@@ -93,6 +93,15 @@ def main():
         help="Forward -vv to llvm-lit for verbose test output.")
     p_baseline.add_argument("--lit-allow-failures", action="store_true",
         help="Continue baseline coverage even if llvm-lit exits non-zero.")
+    p_baseline.add_argument(
+        "--require-sancov",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Exit with an error when the lit run produces no raw .sancov files "
+            "(default: enabled). Use --no-require-sancov to allow an empty baseline."
+        ),
+    )
 
     p_candidate_test.add_argument(
         "--llc",
@@ -178,6 +187,7 @@ def main():
                 jobs=args.jobs,
                 lit_verbose=args.lit_verbose,
                 lit_allow_failures=args.lit_allow_failures,
+                require_sancov=args.require_sancov,
                 debug=args.debug,
             )
             test_runner.run()

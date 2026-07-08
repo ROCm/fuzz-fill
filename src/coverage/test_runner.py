@@ -35,6 +35,7 @@ class TestRunner:
         jobs: int | None = None,
         lit_verbose: bool = False,
         lit_allow_failures: bool = False,
+        require_sancov: bool = True,
         candidate_tests_limit: int | None = None,
         timeout: int = 5,
         debug: bool = False,
@@ -45,6 +46,7 @@ class TestRunner:
         self.jobs = jobs
         self.lit_verbose = lit_verbose
         self.lit_allow_failures = lit_allow_failures
+        self.require_sancov = require_sancov
         self.debug = debug
 
         self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
@@ -256,6 +258,13 @@ class TestRunner:
     def get_aggregate_coverage(self) -> None:
         """Get the aggregate coverage for the test suite."""
         with log_timing(logger, "aggregate coverage"):
+            if self.require_sancov and not any(self.raw_sancov_output_dir.glob("*.sancov")):
+                raise SystemExit(
+                    f"error: no sancov files found in {self.raw_sancov_output_dir}; "
+                    "the selected tests produced no coverage. "
+                    "Use --no-require-sancov to allow an empty baseline."
+                )
+
             llc_sancov = Sancov(
                 self.filepaths.sancov,
                 self.filepaths.llc,
