@@ -32,15 +32,15 @@ class Sancov:
 
     def __init__(
         self,
-        bin_dir: Path,
-        instrumented_bin: Path | None = None,
+        sancov: Path,
+        symbolize_target: Path | None = None,
         raw_sancov_dir: Path | None = None,
         suffix: str | None = None,
         coverage_mode: Literal["partial", "full"] = "full",
         union_batch: int = 200,
     ) -> None:
-        self.sancov_bin = Path(bin_dir, "sancov")
-        self.instrumented_bin = instrumented_bin
+        self.sancov_bin = sancov
+        self.symbolize_target = symbolize_target
         self.union_batch = union_batch
         self.raw_sancov_dir = raw_sancov_dir
         self.suffix = suffix
@@ -345,9 +345,14 @@ class Sancov:
                 )
                 return
 
-            logger.info("Symbolizing %s with %s", sancov_path, self.instrumented_bin)
+            logger.info("Symbolizing %s with %s", sancov_path, self.symbolize_target)
 
-            cmd = [str(self.sancov_bin), "-symbolize", str(sancov_path), str(self.instrumented_bin)]
+            cmd = [
+                str(self.sancov_bin),
+                "-symbolize",
+                str(sancov_path),
+                str(self.symbolize_target),
+            ]
 
             with symcov_path.open("w") as f:
                 run_subprocess(logger, cmd, check=True, stdout=f, stderr=subprocess.STDOUT)

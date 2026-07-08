@@ -120,6 +120,9 @@ export FUZZ_FILL_LLVM_BIN_DIR="$llvm_build"
 export FUZZ_FILL_LLVM_SANCOV_BIN_DIR="$llvm_sancov_build"
 export FUZZ_FILL_LLVM_SRC_DIR="$llvm_src"
 
+unset FUZZ_FILL_SANCOV FUZZ_FILL_LLVM_LIT FUZZ_FILL_LLC FUZZ_FILL_OPT \
+      FUZZ_FILL_LLVM_REDUCE FUZZ_FILL_LLVM_DIS
+
 if [[ ${#lit_args[@]} -eq 0 ]]; then
     lit_args=(.)
 fi

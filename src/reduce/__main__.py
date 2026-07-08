@@ -2,7 +2,8 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
-from fuzz_fill.env import FUZZ_FILL_LLVM_BIN, path_from_flag_or_env
+from fuzz_fill.env import FUZZ_FILL_LLC, FUZZ_FILL_LLVM_DIS, FUZZ_FILL_LLVM_REDUCE
+from fuzz_fill.llvm_tools import reduce_tools_from_args
 from fuzz_fill.log import add_log_level_argument, configure_logging
 from reduce.config import load_reduce_config, pipeline_steps_for_only_pass
 from reduce.reducer import Reducer, known_pass_ids
@@ -21,12 +22,24 @@ def main():
         help='Path to config.json (includes "pipeline": pass ids, plus input/file/line, ...).',
     )
     parser.add_argument(
-        "--llvm-bin",
+        "--llc",
+        type=Path,
+        default=None,
+        help=f"Path to the llc executable (or set {FUZZ_FILL_LLC}).",
+    )
+    parser.add_argument(
+        "--llvm-reduce",
+        type=Path,
+        default=None,
+        help=f"Path to the llvm-reduce executable (or set {FUZZ_FILL_LLVM_REDUCE}).",
+    )
+    parser.add_argument(
+        "--llvm-dis",
         type=Path,
         default=None,
         help=(
-            f"Path to llvm-project bin directory (must contain llvm-reduce; "
-            f"llc for extract_*_before_pass; or set {FUZZ_FILL_LLVM_BIN})."
+            f"Path to the llvm-dis executable (or set {FUZZ_FILL_LLVM_DIS}); "
+            "required when reducing .bc input with llvm_reduce_ir."
         ),
     )
     parser.add_argument(
@@ -39,11 +52,13 @@ def main():
     add_log_level_argument(parser)
     ns = parser.parse_args()
     configure_logging(ns.log_level)
-    llvm_bin = path_from_flag_or_env(
-        ns.llvm_bin, FUZZ_FILL_LLVM_BIN, flag_name="--llvm-bin"
+    tools = reduce_tools_from_args(
+        llc=ns.llc,
+        llvm_reduce=ns.llvm_reduce,
+        llvm_dis=ns.llvm_dis,
     )
     print("[main] loading config...", flush=True)
-    cfg = load_reduce_config(ns.config, llvm_bin)
+    cfg = load_reduce_config(ns.config)
 
     if getattr(ns, "only_pass", None) is not None:
         pipeline_steps = pipeline_steps_for_only_pass(cfg.pipeline, ns.only_pass)
@@ -69,7 +84,7 @@ def main():
         flush=True,
     )
     reducer = Reducer(
-        cfg.llvm_bin,
+        tools,
         output_dir,
         test,
         pipeline_steps=pipeline_steps,

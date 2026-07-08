@@ -146,6 +146,10 @@ RUN python3 -m venv /work/fuzz-fill-venv && \
 ENV VIRTUAL_ENV=/work/fuzz-fill-venv \
     PATH="/work/fuzz-fill-venv/bin:${PATH}" \
     PYTHON="/work/fuzz-fill-venv/bin/python" \
-    FUZZ_FILL_LLVM_BIN=/work/llvm-build-sancov/bin \
-    FUZZ_FILL_LLVM_INSTRUMENTED_BIN=/work/llvm-build-sancov/bin \
+    FUZZ_FILL_SANCOV=/work/llvm-build-sancov/bin/sancov \
+    FUZZ_FILL_LLVM_LIT=/work/llvm-build-sancov/bin/llvm-lit \
+    FUZZ_FILL_LLC=/work/llvm-build-sancov/bin/llc \
+    FUZZ_FILL_OPT=/work/llvm-build-sancov/bin/opt \
+    FUZZ_FILL_LLVM_REDUCE=/work/llvm-build-sancov/bin/llvm-reduce \
+    FUZZ_FILL_LLVM_DIS=/work/llvm-build-sancov/bin/llvm-dis \
     FUZZ_FILL_LLVM_REPO=/work/llvm-project

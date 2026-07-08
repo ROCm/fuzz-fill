@@ -60,7 +60,7 @@ class TestRunner:
             self._jobs = jobs if jobs is not None else (os.cpu_count() or 1)
             self._jobs = max(1, self._jobs)
             self._timeout = timeout
-            self.instrumented_llc = filepaths.instrumented_bin / "llc"
+            self.llc = filepaths.llc
             self.standalone_test_id = 0
             self.standalone_total_tests = 0
             self.standalone_tests_complete = 0
@@ -104,9 +104,9 @@ class TestRunner:
             print(f"Sancov files already exist in {self.raw_sancov_output_dir}, skipping lit tests")
             return
 
-        instrumented_bin = self.filepaths.instrumented_bin
-        lit_site_cfg = ensure_lit_sancov_env_forwarding(instrumented_bin)
-        lit_suite = lit_test_suite_path(instrumented_bin)
+        llvm_lit = self.filepaths.llvm_lit
+        lit_site_cfg = ensure_lit_sancov_env_forwarding(llvm_lit)
+        lit_suite = lit_test_suite_path(llvm_lit)
         if not lit_suite.is_dir():
             raise FileNotFoundError(
                 f"LLVM lit test suite not found at {lit_suite}. "
@@ -114,7 +114,6 @@ class TestRunner:
                 "in-tree test suite (same layout as `ninja check-llvm`)."
             )
 
-        llvm_lit = instrumented_bin / "llvm-lit"
         argv = [
             sys.executable,
             str(llvm_lit),
@@ -125,7 +124,7 @@ class TestRunner:
             argv.append(f"-j{self.jobs}")
         if self.lit_verbose:
             argv.append("-vv")
-        cwd = instrumented_bin.parent
+        cwd = llvm_lit.parent.parent
         env = self.ubsan_environ_with_coverage()
         if self.debug:
             print(f"\tRunning: {argv})")
@@ -222,7 +221,7 @@ class TestRunner:
             f.write(
                 f"export UBSAN_OPTIONS={self.ubsan_environ_with_coverage(out_dir=test_dir)['UBSAN_OPTIONS']}\n"
             )
-            f.write(f"timeout -s9 {self._timeout} {self.instrumented_llc} {flag} {test_path} -o /dev/null\n")
+            f.write(f"timeout -s9 {self._timeout} {self.llc} {flag} {test_path} -o /dev/null\n")
         script.chmod(0o755)
 
     def run_standalone_test(self, test_dir: Path) -> str:
@@ -256,15 +255,19 @@ class TestRunner:
     def get_aggregate_coverage(self) -> None:
         """Get the aggregate coverage for the test suite."""
         with log_timing(logger, "aggregate coverage"):
-            llc_sancov = Sancov(self.filepaths.llvm_bin, 
-                                self.filepaths.instrumented_bin / "llc", 
-                                self.raw_sancov_output_dir, 
-                                "llc")
+            llc_sancov = Sancov(
+                self.filepaths.sancov,
+                self.filepaths.llc,
+                self.raw_sancov_output_dir,
+                "llc",
+            )
 
-            opt_sancov = Sancov(self.filepaths.llvm_bin, 
-                                self.filepaths.instrumented_bin / "opt", 
-                                self.raw_sancov_output_dir, 
-                                "opt")
+            opt_sancov = Sancov(
+                self.filepaths.sancov,
+                self.filepaths.opt,
+                self.raw_sancov_output_dir,
+                "opt",
+            )
 
             for sancov in (llc_sancov, opt_sancov):
                 if sancov.has_raw_files():

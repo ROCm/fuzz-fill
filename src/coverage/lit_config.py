@@ -20,32 +20,32 @@ for _fuzz_fill_name in ("UBSAN_OPTIONS",):
 """
 
 
-def llvm_build_root(instrumented_bin: Path) -> Path:
+def llvm_build_root(llvm_lit: Path) -> Path:
     """Top of the instrumented LLVM build tree (parent of ``bin/``)."""
-    return instrumented_bin.resolve().parent
+    return llvm_lit.resolve().parent.parent
 
 
-def lit_site_config_path(instrumented_bin: Path) -> Path:
+def lit_site_config_path(llvm_lit: Path) -> Path:
     """``test/lit.site.cfg.py`` for the instrumented LLVM build."""
-    return llvm_build_root(instrumented_bin) / LIT_SITE_CONFIG_REL
+    return llvm_build_root(llvm_lit) / LIT_SITE_CONFIG_REL
 
 
-def lit_test_suite_path(instrumented_bin: Path) -> Path:
+def lit_test_suite_path(llvm_lit: Path) -> Path:
     """Build-tree test suite entry point (same path ``check-llvm`` passes to llvm-lit)."""
-    return llvm_build_root(instrumented_bin) / "test"
+    return llvm_build_root(llvm_lit) / "test"
 
 
-def ensure_lit_sancov_env_forwarding(instrumented_bin: Path) -> Path:
+def ensure_lit_sancov_env_forwarding(llvm_lit: Path) -> Path:
     """Append fuzz-fill's lit env forwarding hook to the build site config.
 
     The patch is idempotent and is re-applied if CMake regenerates the file.
     """
-    path = lit_site_config_path(instrumented_bin)
+    path = lit_site_config_path(llvm_lit)
     if not path.is_file():
         raise FileNotFoundError(
             f"LLVM lit site config not found at {path}. "
             "Expected an instrumented LLVM build containing "
-            f"{LIT_SITE_CONFIG_REL} (instrumented-bin={instrumented_bin})."
+            f"{LIT_SITE_CONFIG_REL} (--llvm-lit={llvm_lit})."
         )
 
     text = path.read_text(encoding="utf-8")

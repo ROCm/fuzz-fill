@@ -9,4 +9,5 @@ cd "$REPO_ROOT"
 
 python3 -m reduce \
     --config "$REPO_ROOT/example/amd/si-sgpr-spills/config.json" \
-    --llvm-bin "$LLVM_BIN"
+    --llc "$LLVM_BIN/llc" \
+    --llvm-reduce "$LLVM_BIN/llvm-reduce"

@@ -123,7 +123,6 @@ class PipelineStep:
 class ReduceConfig:
     """One reduction job: IR input and an ordered pass pipeline."""
 
-    llvm_bin: Path
     output_dir: Path | None
     original_test: Path
     file: str
@@ -190,7 +189,7 @@ def _parse_pipeline(config_file: Path, raw: dict) -> tuple[PipelineStep, ...]:
     return _parse_structured_pipeline(config_file, pl)
 
 
-def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
+def load_reduce_config(path: Path) -> ReduceConfig:
     config_file = path.expanduser()
 
     with open(config_file, encoding="utf-8") as f:
@@ -233,7 +232,6 @@ def load_reduce_config(path: Path, llvm_bin: Path) -> ReduceConfig:
         raise SystemExit(f'{config_file}: "replacement" must be a string or omitted.')
 
     return ReduceConfig(
-        llvm_bin=llvm_bin,
         output_dir=(
             _resolve_relative_to_config(config_file, output_dir) if output_dir else None
         ),

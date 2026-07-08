@@ -16,10 +16,17 @@ from coverage.constants import (
 from coverage.analyser import CoverageAnalyzer
 from coverage.target_lines_check import run_target_lines_check
 from fuzz_fill.env import (
-    FUZZ_FILL_LLVM_BIN,
-    FUZZ_FILL_LLVM_INSTRUMENTED_BIN,
+    FUZZ_FILL_LLC,
+    FUZZ_FILL_LLVM_LIT,
     FUZZ_FILL_LLVM_REPO,
+    FUZZ_FILL_OPT,
+    FUZZ_FILL_SANCOV,
     path_from_flag_or_env,
+)
+from fuzz_fill.llvm_tools import (
+    baseline_tools_from_args,
+    candidate_test_tools_from_args,
+    incremental_tools_from_args,
 )
 from fuzz_fill.log import add_log_level_argument, configure_logging, get_logger, log_timing
 
@@ -52,19 +59,28 @@ def main():
     add_shared_arguments(p_target_lines)
 
     p_baseline.add_argument(
-        "--llvm-bin",
+        "--sancov",
         type=Path,
         default=None,
-        help=f"Path to the uninstrumented LLVM bin directory (or set {FUZZ_FILL_LLVM_BIN}).",
+        help=f"Path to the sancov executable (or set {FUZZ_FILL_SANCOV}).",
     )
     p_baseline.add_argument(
-        "--instrumented-bin",
+        "--llvm-lit",
         type=Path,
         default=None,
-        help=(
-            f"Path to the coverage-instrumented LLVM bin directory "
-            f"(or set {FUZZ_FILL_LLVM_INSTRUMENTED_BIN})."
-        ),
+        help=f"Path to the llvm-lit executable (or set {FUZZ_FILL_LLVM_LIT}).",
+    )
+    p_baseline.add_argument(
+        "--llc",
+        type=Path,
+        default=None,
+        help=f"Path to the instrumented llc executable (or set {FUZZ_FILL_LLC}).",
+    )
+    p_baseline.add_argument(
+        "--opt",
+        type=Path,
+        default=None,
+        help=f"Path to the instrumented opt executable (or set {FUZZ_FILL_OPT}).",
     )
     p_baseline.add_argument("--lit-filter", type=str, default=None,
         help="Prefix passed to llvm-lit as --filter=<PREFIX> (also selects symcov path scope).")
@@ -76,13 +92,10 @@ def main():
         help="Continue baseline coverage even if llvm-lit exits non-zero.")
 
     p_candidate_test.add_argument(
-        "--instrumented-bin",
+        "--llc",
         type=Path,
         default=None,
-        help=(
-            f"Path to the coverage-instrumented LLVM bin directory "
-            f"(or set {FUZZ_FILL_LLVM_INSTRUMENTED_BIN})."
-        ),
+        help=f"Path to the instrumented llc executable (or set {FUZZ_FILL_LLC}).",
     )
     p_candidate_test.add_argument("--candidate-tests-dir", type=Path, required=True,
         help="Directory containing the candidate tests (.ll/.bc).")
@@ -104,10 +117,10 @@ def main():
              "SIGKILL (timeout -s9) when exceeded. Default: 5.")
 
     p_incremental.add_argument(
-        "--llvm-bin",
+        "--sancov",
         type=Path,
         default=None,
-        help=f"Path to the uninstrumented LLVM bin directory (or set {FUZZ_FILL_LLVM_BIN}).",
+        help=f"Path to the sancov executable (or set {FUZZ_FILL_SANCOV}).",
     )
     p_incremental.add_argument("--baseline-output-dir", type=Path, required=True,
         help="Directory containing the baseline coverage output")
@@ -146,15 +159,13 @@ def main():
         print(f"Debug mode enabled")
 
     if args.subcmd == "baseline":
-        args.llvm_bin = path_from_flag_or_env(
-            args.llvm_bin, FUZZ_FILL_LLVM_BIN, flag_name="--llvm-bin"
+        tools = baseline_tools_from_args(
+            sancov=args.sancov,
+            llvm_lit=args.llvm_lit,
+            llc=args.llc,
+            opt=args.opt,
         )
-        args.instrumented_bin = path_from_flag_or_env(
-            args.instrumented_bin,
-            FUZZ_FILL_LLVM_INSTRUMENTED_BIN,
-            flag_name="--instrumented-bin",
-        )
-        filepaths = get_filepaths(args)
+        filepaths = get_filepaths(args, tools=tools)
         print("Getting baseline coverage for the test suite")
         with log_timing(logger, "baseline"):
             test_runner = TestRunner(
@@ -169,12 +180,8 @@ def main():
             test_runner.run()
 
     elif args.subcmd == "candidate-test":
-        args.instrumented_bin = path_from_flag_or_env(
-            args.instrumented_bin,
-            FUZZ_FILL_LLVM_INSTRUMENTED_BIN,
-            flag_name="--instrumented-bin",
-        )
-        filepaths = get_filepaths(args)
+        tools = candidate_test_tools_from_args(llc=args.llc)
+        filepaths = get_filepaths(args, tools=tools)
         print("Getting coverage for the candidate tests")
         with log_timing(logger, "candidate-test"):
             test_runner = TestRunner(
@@ -187,10 +194,8 @@ def main():
             test_runner.run()
     
     elif args.subcmd == "incremental":
-        args.llvm_bin = path_from_flag_or_env(
-            args.llvm_bin, FUZZ_FILL_LLVM_BIN, flag_name="--llvm-bin"
-        )
-        filepaths = get_filepaths(args)
+        tools = incremental_tools_from_args(sancov=args.sancov)
+        filepaths = get_filepaths(args, tools=tools)
         print("Getting incremental coverage for candidate tests relative to the baseline test suite")
         with log_timing(logger, "incremental"):
             filepaths.output_baseline_dir = args.baseline_output_dir
@@ -228,11 +233,23 @@ def add_shared_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--debug", action="store_true", default=False)
     add_log_level_argument(parser)
 
-def get_filepaths(args: argparse.Namespace) -> Filepaths:
+def get_filepaths(
+    args: argparse.Namespace,
+    *,
+    tools: object | None = None,
+) -> Filepaths:
+    sancov = llvm_lit = llc = opt = None
+    if tools is not None:
+        sancov = getattr(tools, "sancov", None)
+        llvm_lit = getattr(tools, "llvm_lit", None)
+        llc = getattr(tools, "llc", None)
+        opt = getattr(tools, "opt", None)
     return Filepaths(
         output_dir=args.output_dir,
-        llvm_bin=getattr(args, "llvm_bin", None),
-        instrumented_bin=getattr(args, "instrumented_bin", None),
+        sancov=sancov,
+        llvm_lit=llvm_lit,
+        llc=llc,
+        opt=opt,
         candidate_tests_dir=getattr(args, "candidate_tests_dir", None),
         output_baseline_dir=getattr(args, "baseline_output_dir", None),
         output_candidate_tests_dir=getattr(args, "candidate_tests_output_dir", None),

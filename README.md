@@ -177,7 +177,9 @@ Examples:
 - [`scripts/reduce_amd_coverage_based.sh`](scripts/reduce_amd_coverage_based.sh), [`scripts/batch_reduce_using_coverage.sh`](scripts/batch_reduce_using_coverage.sh) — batch reduction from a coverage CSV
 
 ```bash
-python -m reduce --config example/amd/new-test-1/config.json --llvm-bin "$LLVM/build/bin"
+python -m reduce --config example/amd/new-test-1/config.json \
+  --llc "$LLVM/build-sancov/bin/llc" \
+  --llvm-reduce "$LLVM/build-sancov/bin/llvm-reduce"
 ```
 
 See `python -m reduce --help` and the checked-in `example/*/config.json` files for pipeline options.
@@ -199,19 +201,27 @@ The workflows above call these modules. Use `--help` on any command for the full
 
 ### Environment variables
 
-Several commands accept LLVM paths via environment variables when the matching CLI flag is omitted. A flag on the command line always wins.
+Several commands accept LLVM tool paths via environment variables when the matching CLI flag is omitted. A flag on the command line always wins.
 
 | Env var | CLI flag | Commands |
 |---------|----------|----------|
-| `FUZZ_FILL_LLVM_BIN` | `--llvm-bin` | `coverage baseline`, `coverage incremental`, `reduce` |
-| `FUZZ_FILL_LLVM_INSTRUMENTED_BIN` | `--instrumented-bin` | `coverage baseline`, `coverage candidate-test` |
+| `FUZZ_FILL_SANCOV` | `--sancov` | `coverage baseline`, `coverage incremental` |
+| `FUZZ_FILL_LLVM_LIT` | `--llvm-lit` | `coverage baseline` |
+| `FUZZ_FILL_LLC` | `--llc` | `coverage baseline`, `coverage candidate-test`, `reduce` |
+| `FUZZ_FILL_OPT` | `--opt` | `coverage baseline` |
+| `FUZZ_FILL_LLVM_REDUCE` | `--llvm-reduce` | `reduce` |
+| `FUZZ_FILL_LLVM_DIS` | `--llvm-dis` | `reduce` (required for `.bc` input with `llvm_reduce_ir`) |
 | `FUZZ_FILL_LLVM_REPO` | `--llvm-repo` | `added_lines`, `coverage target-lines` |
 
-Example (paths match the [Docker test image](#docker-test-image)):
+The [Docker test image](#docker-test-image) sets these per-tool defaults so interactive container use can omit tool flags. Integration tests use explicit CLI flags instead (see [Integration tests](#integration-tests)).
+
+Example (paths match the Docker test image):
 
 ```bash
-export FUZZ_FILL_LLVM_BIN=/work/llvm-build-sancov/bin
-export FUZZ_FILL_LLVM_INSTRUMENTED_BIN=/work/llvm-build-sancov/bin
+export FUZZ_FILL_SANCOV=/work/llvm-build-sancov/bin/sancov
+export FUZZ_FILL_LLVM_LIT=/work/llvm-build-sancov/bin/llvm-lit
+export FUZZ_FILL_LLC=/work/llvm-build-sancov/bin/llc
+export FUZZ_FILL_OPT=/work/llvm-build-sancov/bin/opt
 export FUZZ_FILL_LLVM_REPO=/work/llvm-project
 
 python -m coverage baseline --output-dir data/baseline --lit-filter CodeGen/AMDGPU

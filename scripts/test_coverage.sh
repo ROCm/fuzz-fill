@@ -24,20 +24,20 @@ cd "$REPO_ROOT"
 
 python -m coverage baseline \
     --output-dir $BASELINE_OUTPUT_DIR \
-    --llvm-bin $LLVM_BIN \
-    --instrumented-bin $INSTRUMENTED_BIN_DIR \
+    --sancov "$LLVM_BIN/sancov" \
+    --llvm-lit "$INSTRUMENTED_BIN_DIR/llvm-lit" \
+    --llc "$INSTRUMENTED_BIN_DIR/llc" \
+    --opt "$INSTRUMENTED_BIN_DIR/opt" \
     --lit-filter $FILTER 
 
 python -m coverage candidate-test \
     --output-dir $CANDIDATE_TESTS_OUTPUT_DIR \
-    --instrumented-bin $INSTRUMENTED_BIN_DIR \
+    --llc "$INSTRUMENTED_BIN_DIR/llc" \
     --candidate-tests-dir $TESTS_DIR \
     --n 1000
 
 python -m coverage incremental \
     --output-dir $INCREMENTAL_OUTPUT_DIR \
-    --llvm-bin $LLVM_BIN \
+    --sancov "$LLVM_BIN/sancov" \
     --baseline-output-dir $BASELINE_OUTPUT_DIR \
-    --candidate-tests-output-dir $CANDIDATE_TESTS_OUTPUT_DIR}
-
-
+    --candidate-tests-output-dir $CANDIDATE_TESTS_OUTPUT_DIR
