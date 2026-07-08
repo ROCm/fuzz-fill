@@ -85,7 +85,10 @@ def main():
     p_baseline.add_argument("--lit-filter", type=str, default=None,
         help="Prefix passed to llvm-lit as --filter=<PREFIX> (also selects symcov path scope).")
     p_baseline.add_argument("-j", "--jobs", type=int, default=None,
-        help="Number of parallel jobs forwarded to llvm-lit as -j<N>. If unset, llvm-lit chooses.")
+        help=(
+            "Number of parallel jobs forwarded to llvm-lit as -j<N>. "
+            "If unset, uses the system core count (capped at 384)."
+        ))
     p_baseline.add_argument("--lit-verbose", action="store_true",
         help="Forward -vv to llvm-lit for verbose test output.")
     p_baseline.add_argument("--lit-allow-failures", action="store_true",

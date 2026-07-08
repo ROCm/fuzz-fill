@@ -18,5 +18,8 @@ DEFAULT_TARGET_LINES_REPORT = "target_lines_uncovered.csv"
 # Sancov constants
 UNION_BATCH_SIZE = 200
 
+# llvm-lit parallelism cap (workaround for high core-count Docker hosts)
+MAX_LIT_JOBS = 384
+
 # New test flags
 TEST_FLAGS = ["-O0", "-O1", "-O2", "-O3"]

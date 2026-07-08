@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+from coverage.constants import MAX_LIT_JOBS
 
 LIT_SITE_CONFIG_REL = Path("test/lit.site.cfg.py")
 PATCH_MARKER = "# fuzz-fill: SanitizerCoverage env forwarding"
@@ -56,3 +59,25 @@ def ensure_lit_sancov_env_forwarding(llvm_lit: Path) -> Path:
         text += "\n"
     path.write_text(text + PATCH_SNIPPET, encoding="utf-8")
     return path
+
+
+def default_lit_job_count() -> int:
+    """Match llvm-lit's default worker count (``lit.util.usable_core_count``)."""
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        return os.cpu_count() or 1
+
+
+def resolve_lit_job_count(requested: int | None, *, max_jobs: int = MAX_LIT_JOBS) -> int:
+    """Resolve llvm-lit ``-j`` value, capping at *max_jobs* when needed."""
+    effective = requested if requested is not None else default_lit_job_count()
+    effective = max(1, effective)
+    if effective > max_jobs:
+        print(
+            f"warning: capping llvm-lit -j from {effective} to {max_jobs} "
+            "to work around high core-count issues in Docker",
+            flush=True,
+        )
+        return max_jobs
+    return effective

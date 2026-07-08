@@ -13,6 +13,7 @@ from coverage.filepaths import Filepaths
 from coverage.lit_config import (
     ensure_lit_sancov_env_forwarding,
     lit_test_suite_path,
+    resolve_lit_job_count,
 )
 from coverage.run_config import build_run_config, resolved_lit_filter, write_run_config
 from coverage.sancov import Sancov
@@ -114,14 +115,14 @@ class TestRunner:
                 "in-tree test suite (same layout as `ninja check-llvm`)."
             )
 
+        lit_jobs = resolve_lit_job_count(self.jobs)
         argv = [
             sys.executable,
             str(llvm_lit),
             str(lit_suite),
             f"--filter={self._lit_filter}",
+            f"-j{lit_jobs}",
         ]
-        if self.jobs is not None:
-            argv.append(f"-j{self.jobs}")
         if self.lit_verbose:
             argv.append("-vv")
         cwd = llvm_lit.parent.parent
