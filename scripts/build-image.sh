@@ -9,6 +9,7 @@ IMAGE_NAME="${IMAGE_NAME:-fuzz-fill-test}"
 llvm_dir=""
 image_tag="${IMAGE_TAG:-latest}"
 allowlist="amdgpu"
+llvm_release_version="22.1.8"
 ninja_jobs=""
 
 usage() {
@@ -18,23 +19,25 @@ Usage: $(basename "$0") [--llvm-dir <path>] [--tag <tag>] [--allowlist <target>]
 Build the fuzz-fill Docker test image.
 
 Options:
-  --llvm-dir <path>      Use a local llvm-project checkout instead of downloading
-                         the pinned LLVM revision from GitHub. The path must
-                         contain an llvm/ subdirectory.
-  --tag <tag>            Docker image tag (default: latest)
-  --allowlist <target>   SanitizerCoverage allowlist target: amdgpu or spirv
-                         (default: amdgpu)
-  -j <n>, --jobs <n>     Parallel jobs for ninja when building LLVM (default: unconstrained)
+  --llvm-dir <path>              Use a local llvm-project checkout instead of downloading
+                                 the tagged LLVM source from GitHub. The path must
+                                 contain an llvm/ subdirectory.
+  --llvm-release-version <ver>   Official LLVM GitHub release for bootstrap toolchain
+                                 (default: 22.1.8)
+  --tag <tag>                    Docker image tag (default: latest)
+  --allowlist <target>           SanitizerCoverage allowlist target: amdgpu or spirv
+                                 (default: amdgpu)
+  -j <n>, --jobs <n>             Parallel jobs for ninja when building LLVM (default: unconstrained)
 
 Environment:
-  IMAGE_NAME             Docker image name (default: fuzz-fill-test)
+  IMAGE_NAME                     Docker image name (default: fuzz-fill-test)
 
 Examples:
   $(basename "$0")
   $(basename "$0") --llvm-dir llvm-project
   $(basename "$0") --llvm-dir /path/to/llvm-project --tag local-llvm
   $(basename "$0") --allowlist spirv --tag spirv
-  $(basename "$0") -j "\$(nproc)"
+  $(basename "$0") --llvm-release-version 22.1.8 -j "\$(nproc)"
 EOF
 }
 
@@ -69,6 +72,14 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             allowlist="$2"
+            shift 2
+            ;;
+        --llvm-release-version)
+            if [[ $# -lt 2 ]]; then
+                echo "error: --llvm-release-version requires a value" >&2
+                exit 1
+            fi
+            llvm_release_version="$2"
             shift 2
             ;;
         -j|--jobs)
@@ -126,6 +137,7 @@ if [[ -n "$llvm_dir" ]]; then
     fi
     llvm_context="$(realpath "${llvm_dir}")"
     echo "Using local llvm-project: ${llvm_context}"
+    echo "warning: bootstrap clang/clang++ should be new enough to compile this LLVM source" >&2
 else
     llvm_context_tmp="$(mktemp -d -p /tmp)"
     llvm_context="$llvm_context_tmp"
@@ -133,6 +145,7 @@ fi
 
 docker_build_args=(
     --build-context "llvm=${llvm_context}"
+    --build-arg LLVM_RELEASE_VERSION="${llvm_release_version}"
     --build-arg SANCOV_ALLOWLIST="${allowlist}"
     --build-arg UID="$(id -u)"
     --build-arg GID="$(id -g)"

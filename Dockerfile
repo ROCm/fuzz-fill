@@ -1,16 +1,58 @@
 # syntax=docker/dockerfile:1
+
+FROM ubuntu:24.04 AS llvm-release
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG LLVM_RELEASE_VERSION=22.1.8
+ARG LLVM_TARBALL=LLVM-${LLVM_RELEASE_VERSION}-Linux-X64.tar.xz
+ARG LLVM_URL=https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_RELEASE_VERSION}/${LLVM_TARBALL}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN --mount=type=cache,target=/root/.cache/llvm-releases,sharing=locked \
+    set -eux; \
+    if [ ! -f "/root/.cache/llvm-releases/${LLVM_TARBALL}" ]; then \
+      curl -fsSL "${LLVM_URL}" -o "/root/.cache/llvm-releases/${LLVM_TARBALL}.partial"; \
+      mv "/root/.cache/llvm-releases/${LLVM_TARBALL}.partial" "/root/.cache/llvm-releases/${LLVM_TARBALL}"; \
+    fi; \
+    mkdir -p /opt/llvm-release; \
+    tar -xJf "/root/.cache/llvm-releases/${LLVM_TARBALL}" -C /opt/llvm-release --strip-components=1
+
+FROM ubuntu:24.04 AS llvm-source
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG LLVM_RELEASE_VERSION=22.1.8
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN --mount=type=cache,target=/root/.cache/llvm-sources,sharing=locked \
+    set -eux; \
+    TARBALL="llvm-project-${LLVM_RELEASE_VERSION}.tar.gz"; \
+    if [ ! -f "/root/.cache/llvm-sources/${TARBALL}" ]; then \
+      curl -fsSL "https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-${LLVM_RELEASE_VERSION}.tar.gz" \
+        -o "/root/.cache/llvm-sources/${TARBALL}.partial"; \
+      mv "/root/.cache/llvm-sources/${TARBALL}.partial" "/root/.cache/llvm-sources/${TARBALL}"; \
+    fi; \
+    mkdir -p /opt/llvm-project; \
+    tar -xzf "/root/.cache/llvm-sources/${TARBALL}" -C /opt/llvm-project --strip-components=1
+
 FROM ubuntu:24.04 AS llvm-builder
 
 ARG DEBIAN_FRONTEND=noninteractive
-# Parent commit before the first fuzz-fill contribution: https://github.com/llvm/llvm-project/pull/185430.
-ARG LLVM_COMMIT=40cd48fd385b57855a104a4192c4d4468889d22d
+ARG LLVM_RELEASE_VERSION=22.1.8
 ARG SANCOV_ALLOWLIST=amdgpu
 ARG NINJA_JOBS=""
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
-    clang \
     cmake \
     curl \
     file \
@@ -21,33 +63,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /work
 
+COPY --from=llvm-release /opt/llvm-release /work/llvm-release
+COPY --from=llvm-source /opt/llvm-project /work/llvm-project-default
+
 # Optional local llvm-project: pass a named build context when invoking docker build,
 # e.g.  docker build --build-context llvm=/path/to/llvm-project ...
-# scripts/build-image.sh sets this from --llvm-dir; an empty context falls back to LLVM_COMMIT.
+# scripts/build-image.sh sets this from --llvm-dir; an empty context falls back to the tagged source.
 RUN --mount=type=bind,from=llvm,source=.,target=/llvm-src,ro \
     if [ -d /llvm-src/llvm ]; then \
-        echo "local build context" > /work/.llvm-source; \
+        echo "local build context (release ${LLVM_RELEASE_VERSION} bootstrap)" > /work/.llvm-source; \
         echo "=== fuzz-fill: LLVM source = local llvm-project (build context) ==="; \
         cp -a /llvm-src /work/llvm-project; \
     else \
-        echo "github ${LLVM_COMMIT}" > /work/.llvm-source; \
-        echo "=== fuzz-fill: LLVM source = GitHub tarball (${LLVM_COMMIT}) ==="; \
-        curl -fsSL "https://github.com/llvm/llvm-project/archive/${LLVM_COMMIT}.tar.gz" \
-            | tar -xz -C /work \
-         && mv "/work/llvm-project-${LLVM_COMMIT}" /work/llvm-project; \
+        echo "release ${LLVM_RELEASE_VERSION}" > /work/.llvm-source; \
+        echo "=== fuzz-fill: LLVM source = GitHub tag llvmorg-${LLVM_RELEASE_VERSION} ==="; \
+        cp -a /work/llvm-project-default /work/llvm-project; \
     fi \
  && echo "=== fuzz-fill: LLVM source recorded as: $(cat /work/.llvm-source) ==="
-
-# Copy scripts after fetching LLVM so script changes do not invalidate that step.
-COPY scripts/build-llvm.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/build-llvm.sh
-
-RUN /usr/local/bin/build-llvm.sh \
-    /usr/bin/clang \
-    /usr/bin/clang++ \
-    /work/llvm-project \
-    /work/llvm-build-uninstrumented \
-    "${NINJA_JOBS}"
 
 COPY scripts/build-llvm-sancov.sh /usr/local/bin/
 COPY scripts/allowlist-amdgpu.txt /work/allowlist-amdgpu.txt
@@ -66,8 +98,8 @@ RUN case "${SANCOV_ALLOWLIST}" in \
  && /usr/local/bin/build-llvm-sancov.sh \
         "${allowlist}" \
         /work/llvm-project \
-        /work/llvm-build-uninstrumented \
         /work/llvm-build-sancov \
+        --bootstrap-bin /work/llvm-release/bin \
         "${NINJA_JOBS}"
 
 FROM ubuntu:24.04 AS final
@@ -92,11 +124,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && groupadd -g "${GID}" "${USERNAME}" \
     && useradd -l -m -u "${UID}" -g "${GID}" -s /bin/bash "${USERNAME}"
 
-# Preserve exact paths from the builder stage (required by lit.site.cfg.py).
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.llvm-source /work/.llvm-source
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.sancov-allowlist /work/.sancov-allowlist
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-project /work/llvm-project
-COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-build-uninstrumented /work/llvm-build-uninstrumented
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-build-sancov /work/llvm-build-sancov
 
 COPY --chown=${UID}:${GID} pyproject.toml LICENCE.txt README.md /work/fuzz-fill/
@@ -113,10 +143,9 @@ RUN python3 -m venv /work/fuzz-fill-venv && \
     /work/fuzz-fill-venv/bin/pip install --no-cache-dir -e /work/fuzz-fill && \
     echo 'source /work/fuzz-fill-venv/bin/activate' >> ~/.bashrc
 
-# Keep the venv outside /work/fuzz-fill so --bind-repo mounts do not hide it.
 ENV VIRTUAL_ENV=/work/fuzz-fill-venv \
     PATH="/work/fuzz-fill-venv/bin:${PATH}" \
     PYTHON="/work/fuzz-fill-venv/bin/python" \
-    FUZZ_FILL_LLVM_BIN=/work/llvm-build-uninstrumented/bin \
+    FUZZ_FILL_LLVM_BIN=/work/llvm-build-sancov/bin \
     FUZZ_FILL_LLVM_INSTRUMENTED_BIN=/work/llvm-build-sancov/bin \
     FUZZ_FILL_LLVM_REPO=/work/llvm-project
