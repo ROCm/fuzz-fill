@@ -75,6 +75,7 @@ ARG USERNAME=developer
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     creduce \
+    git \
     libgcc-s1 \
     libstdc++6 \
     libtinfo6 \
@@ -96,6 +97,7 @@ COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-build-sancov /work/llv
 
 COPY --chown=${UID}:${GID} pyproject.toml LICENCE.txt README.md /work/fuzz-fill/
 COPY --chown=${UID}:${GID} src /work/fuzz-fill/src
+COPY --chown=${UID}:${GID} tests /work/fuzz-fill/tests
 COPY --chown=${UID}:${GID} integration-tests /work/fuzz-fill/integration-tests
 
 RUN echo "=== fuzz-fill image LLVM source: $(cat /work/.llvm-source) ===" \

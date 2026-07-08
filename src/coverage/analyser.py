@@ -5,6 +5,11 @@ from pathlib import Path
 from typing import Literal
 
 from coverage.filepaths import Filepaths
+from coverage.line_rules import (
+    LineCoverageIndex,
+    fully_covered_line_keys_from_address_map,
+    normalize_llc_address_line_map,
+)
 from coverage.sancov import Sancov
 from fuzz_fill.log import get_logger, log_timing
 
@@ -14,7 +19,9 @@ class CoverageAnalyzer:
     def __init__(self, filepaths: Filepaths, mode: Literal["partial", "full"]):
         self.filepaths = filepaths
         self.mode = mode
-        self.baseline_coverage_file = filepaths.output_baseline_dir / filepaths.joint_llc_and_opt_coverage_file
+        self.line_coverage_summary_file = (
+            filepaths.output_baseline_dir / filepaths.line_coverage_summary_file
+        )
         self.llc_address_line_map_file = filepaths.output_baseline_dir / filepaths.llc_address_line_map_file
         self.new_coverage_csv = filepaths.output_dir / filepaths.new_coverage_csv
 
@@ -28,20 +35,11 @@ class CoverageAnalyzer:
 
     def get_full_incremental_coverage(self) -> None:
         with log_timing(logger, "incremental coverage analysis"):
-            baseline_coverage = pd.read_csv(self.baseline_coverage_file)
-            llc_address_line_map = pd.read_csv(self.llc_address_line_map_file)
-            
-            llc_address_line_map["line"] = llc_address_line_map["line"].astype(int)
-            llc_address_line_map["point_llc"] = llc_address_line_map["point_llc"].map(
-                lambda x: Sancov.format_hex_address(x) if pd.notna(x) else x
+            line_coverage_summary = pd.read_csv(self.line_coverage_summary_file)
+            baseline_index = LineCoverageIndex.from_summary_df(line_coverage_summary)
+            llc_address_line_map = normalize_llc_address_line_map(
+                pd.read_csv(self.llc_address_line_map_file)
             )
-            llc_address_line_map["n_addresses_in_line"] = llc_address_line_map.groupby(["file", "line"], sort=False)["file"].transform("count")
-            llc_address_line_map["file_line"] = llc_address_line_map["file"] + ":" + llc_address_line_map["line"].astype(str)
-
-            baseline_covered_lines = {
-                (file, int(line))
-                for file, line in zip(baseline_coverage["file"], baseline_coverage["line"])
-            }
 
             self.new_coverage_csv.parent.mkdir(parents=True, exist_ok=True)
             with self.new_coverage_csv.open("w", newline="", encoding="utf-8") as new_coverage_csv_f:
@@ -57,7 +55,6 @@ class CoverageAnalyzer:
 
             for candidate_test_dir in self.filepaths.output_candidate_tests_dir.iterdir():
                 with log_timing(logger, f"candidate test {candidate_test_dir.name}"):
-                    # Check whether any new addresses are covered
                     test_name = candidate_test_dir.name
 
                     sancov_file = get_sancov_file(candidate_test_dir)
@@ -67,58 +64,68 @@ class CoverageAnalyzer:
 
                     new_test_covered_addresses: set[str] = sancov.get_covered_addresses(sancov_file)
 
-                    # Match newly covered addresses to llc line-address mapping to check
-                    # whether they are in files that we are interested in
-                    new_coverage_df = llc_address_line_map[llc_address_line_map['point_llc'].isin(new_test_covered_addresses)].copy()
+                    matched_addresses = llc_address_line_map[
+                        llc_address_line_map["point_llc"].isin(new_test_covered_addresses)
+                    ]
 
-                    if len(new_coverage_df) == 0:
-                        print(f"Candidate test {test_name} has no covered addresses in files that we are interested in")
+                    if len(matched_addresses) == 0:
+                        print(
+                            f"Candidate test {test_name} has no covered addresses "
+                            "in files that we are interested in"
+                        )
                         continue
-                    
-                    print(f"Candidate test {test_name} has {len(new_coverage_df)} new covered addresses in target files")
 
-                    # Check whether the newly covered addresses constitute a new line
-                    new_coverage_df["n_covered_addresses_in_line"] = new_coverage_df.groupby(["file", "line"], sort=False)["file"].transform("count")
+                    print(
+                        f"Candidate test {test_name} has {len(matched_addresses)} "
+                        "new covered addresses in target files"
+                    )
 
-                    new_test_covered_lines = new_coverage_df[new_coverage_df['n_covered_addresses_in_line'] == new_coverage_df['n_addresses_in_line']]
+                    fully_covered_keys = fully_covered_line_keys_from_address_map(
+                        llc_address_line_map, new_test_covered_addresses
+                    )
 
-                    if len(new_test_covered_lines) > 0:
-
+                    if fully_covered_keys:
                         per_test_csv = test_name
-                        unique_locations = new_test_covered_lines[["file", "line"]].drop_duplicates()
-                        
-                        print(f"Candidate test {test_name} has {len(unique_locations)} covered lines in target files")
-                        keys = [
-                            (file, int(line))
-                            for file, line in zip(unique_locations["file"], unique_locations["line"])
-                        ]
-                        unique_locations = unique_locations.copy()
-                        unique_locations["line"] = unique_locations["line"].astype(int)
+                        keys = sorted(fully_covered_keys)
 
-                        # Compare new line coverage to baseline line coverage
-                        # It is important to do this at the line level rather than the address level
-                        # when working with full coverage
-                        is_new_vs_baseline = [key not in baseline_covered_lines for key in keys]
-
-                        # Compare to lines already covered by other candidate tests
-                        is_new_vs_other_candidate_tests = [key not in newly_covered_lines for key in keys]
-
-                        # Keep only lines that are new vs baseline and new vs other candidate tests
-                        mask = [a and b for a, b in zip(is_new_vs_baseline, is_new_vs_other_candidate_tests)]
-                        unique_locations = unique_locations.loc[mask]
-
-                        print(f"{sum(is_new_vs_baseline)} lines are new vs baseline out of {len(keys)}")
-                        print(f"{sum(is_new_vs_other_candidate_tests)} lines are new vs other candidate tests out of {len(keys)}")
-
-                        if unique_locations.empty:
-                            continue
-
-                        newly_covered_lines.update(
-                            zip(unique_locations["file"], unique_locations["line"])
+                        print(
+                            f"Candidate test {test_name} has {len(keys)} "
+                            "covered lines in target files"
                         )
 
+                        # Only lines the suite left completely uncovered count as new;
+                        # partially covered baseline lines are excluded.
+                        is_new_vs_baseline = [
+                            baseline_index.is_baseline_gap(file, line) for file, line in keys
+                        ]
+
+                        is_new_vs_other_candidate_tests = [
+                            (file, line) not in newly_covered_lines for file, line in keys
+                        ]
+
+                        mask = [
+                            a and b
+                            for a, b in zip(is_new_vs_baseline, is_new_vs_other_candidate_tests)
+                        ]
+                        accepted_keys = [key for key, keep in zip(keys, mask) if keep]
+
+                        print(
+                            f"{sum(is_new_vs_baseline)} lines are uncovered in baseline "
+                            f"out of {len(keys)}"
+                        )
+                        print(
+                            f"{sum(is_new_vs_other_candidate_tests)} lines are new vs other "
+                            f"candidate tests out of {len(keys)}"
+                        )
+
+                        if not accepted_keys:
+                            continue
+
+                        newly_covered_lines.update(accepted_keys)
+                        unique_locations = pd.DataFrame(accepted_keys, columns=["file", "line"])
+
                         keys_df = unique_locations[["file", "line"]]
-                        sub = new_test_covered_lines.merge(keys_df, on=["file", "line"], how="inner")
+                        sub = matched_addresses.merge(keys_df, on=["file", "line"], how="inner")
                         addr_by_line = sub.groupby(["file", "line"], sort=False)["point_llc"].agg(
                             lambda s: ";".join(sorted(s.dropna().astype(str).unique()))
                         )

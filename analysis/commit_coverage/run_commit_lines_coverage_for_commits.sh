@@ -125,7 +125,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 	OUT="${OUTPUT_ROOT_BASE}/bb_coverage_commit_lines_${SHORT}"
 	BASELINE_OUTPUT_DIR="${OUT}/baseline"
 	ADDED_LINES_DIR="${OUT}/added-lines"
-	COMMIT_LINES_REPORT_DIR="${OUT}/commit_lines_report"
+	TARGET_LINES_REPORT_DIR="${OUT}/target_lines_report"
 	RESOURCE_CSV="${OUT}/resource_stats.csv"
 
 	mkdir -p "${OUT}"
@@ -163,7 +163,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 		echo "SKIP_BUILD=1 — not running ${BUILD_SCRIPT_DISPLAY}"
 	fi
 
-	mkdir -p "${ADDED_LINES_DIR}" "${COMMIT_LINES_REPORT_DIR}"
+	mkdir -p "${ADDED_LINES_DIR}" "${TARGET_LINES_REPORT_DIR}"
 
 	cd "${FUZZ_FILL_ROOT}"
 
@@ -188,7 +188,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 
 	echo "Computing target-lines report ..."
 	python -m coverage target-lines \
-		--output-dir "${COMMIT_LINES_REPORT_DIR}" \
+		--output-dir "${TARGET_LINES_REPORT_DIR}" \
 		--baseline-output-dir "${BASELINE_OUTPUT_DIR}" \
 		--llvm-repo "${LLVM_REPO}" \
 		--target-lines-csv "${ADDED_LINES_DIR}/added-lines.csv"
@@ -204,7 +204,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 			"${TS_WALL}" "${TS_USER}" "${TS_SYS}" "${TS_RSS}"
 	} >"${RESOURCE_CSV}"
 
-	echo "Done ${SHORT}: ${COMMIT_LINES_REPORT_DIR}/commit_lines_uncovered.csv"
+	echo "Done ${SHORT}: ${TARGET_LINES_REPORT_DIR}/target_lines_uncovered.csv"
 	echo "Resource stats: ${RESOURCE_CSV}"
 done
 

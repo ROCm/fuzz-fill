@@ -13,7 +13,7 @@ INSTRUMENTED_BIN_DIR="${INSTRUMENTED_BIN_DIR:-${LLVM_REPO}/build-amdgpu-bb/bin}"
 OUTPUT_DIR="${REPO_ROOT}/data/coverage_output/bb_coverage_commit_lines_170626"
 BASELINE_OUTPUT_DIR=$OUTPUT_DIR/baseline
 ADDED_LINES_DIR=$OUTPUT_DIR/added-lines
-COMMIT_LINES_REPORT_DIR=$OUTPUT_DIR/commit_lines_report
+TARGET_LINES_REPORT_DIR=$OUTPUT_DIR/target_lines_report
 
 #FILTER="CodeGen/AMDGPU/loop"
 FILTER="CodeGen/AMDGPU"
@@ -23,7 +23,7 @@ COMMIT=b01fe4e
 cd "$REPO_ROOT"
 
 #rm -rf "$BASELINE_OUTPUT_DIR"
-mkdir -p "$ADDED_LINES_DIR" "$COMMIT_LINES_REPORT_DIR"
+mkdir -p "$ADDED_LINES_DIR" "$TARGET_LINES_REPORT_DIR"
 
 # 1) Lines added in COMMIT (same tree as --llvm-repo)
 python -m added_lines \
@@ -38,11 +38,11 @@ python -m coverage baseline \
     --instrumented-bin "$INSTRUMENTED_BIN_DIR" \
     --lit-filter "$FILTER"
 
-# 3) Target lines not fully covered by the suite (commit_lines_uncovered.csv)
+# 3) Target lines not fully covered by the suite (target_lines_uncovered.csv)
 python -m coverage target-lines \
-    --output-dir "$COMMIT_LINES_REPORT_DIR" \
+    --output-dir "$TARGET_LINES_REPORT_DIR" \
     --baseline-output-dir "$BASELINE_OUTPUT_DIR" \
     --llvm-repo "$LLVM_REPO" \
     --target-lines-csv "$ADDED_LINES_DIR/added-lines.csv"
 
-echo "Uncovered added lines: $COMMIT_LINES_REPORT_DIR/commit_lines_uncovered.csv"
+echo "Uncovered target lines: $TARGET_LINES_REPORT_DIR/target_lines_uncovered.csv"

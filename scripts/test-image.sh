@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run fuzz-fill integration tests in the Docker test image.
+# Run fuzz-fill unit and integration tests in the Docker test image.
 #
 #   test-image.sh
 #   test-image.sh --bind-repo
@@ -17,7 +17,7 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [options] [lit args...]
 
-Run integration tests inside the fuzz-fill Docker test image.
+Run unit tests, then integration tests, inside the fuzz-fill Docker test image.
 
 Options:
   --bind-repo            Mount the local fuzz-fill checkout over /work/fuzz-fill.
@@ -80,9 +80,16 @@ if [[ "${bind_repo}" -eq 1 ]]; then
     tmp_container_args+=(--bind-repo)
 fi
 
-exec env IMAGE_NAME="${image_name}" IMAGE_TAG="${image_tag}" \
-    "${SCRIPT_DIR}/tmp-container.sh" "${tmp_container_args[@]}" \
-    ./integration-tests/test.sh \
+run_in_container() {
+    env IMAGE_NAME="${image_name}" IMAGE_TAG="${image_tag}" \
+        "${SCRIPT_DIR}/tmp-container.sh" "${tmp_container_args[@]}" "$@"
+}
+
+echo "=== unit tests ==="
+run_in_container python -m unittest discover -s tests -v
+
+echo "=== integration tests ==="
+run_in_container ./integration-tests/test.sh \
     --venv /work/fuzz-fill-venv \
     --llvm-build /work/llvm-build-uninstrumented/bin \
     --llvm-sancov-build /work/llvm-build-sancov/bin \

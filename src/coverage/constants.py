@@ -11,9 +11,9 @@ DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "coverage_output" / f"cov_<timestamp>"
 # CSV file names
 CSV_FILE_NAME_COVERED = "covered_by_opt_or_llc.csv"
 DEFAULT_LLC_ADDRESS_LINE_MAP_FILE = "llc_address_line_map.csv"
-DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE = "test_coverage.csv"
+DEFAULT_LINE_COVERAGE_SUMMARY_FILE = "line_coverage_summary.csv"
 DEFAULT_NEW_COVERAGE_CSV = "new_coverage.csv"
-DEFAULT_COMMIT_LINES_REPORT = "commit_lines_uncovered.csv"
+DEFAULT_TARGET_LINES_REPORT = "target_lines_uncovered.csv"
 
 # Sancov constants
 UNION_BATCH_SIZE = 200

@@ -7,15 +7,14 @@ from coverage.filepaths import Filepaths
 from coverage.test_runner import TestRunner
 from coverage.constants import (
     DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
-    DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE,
+    DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_NEW_COVERAGE_CSV,
-    DEFAULT_COMMIT_LINES_REPORT,
+    DEFAULT_TARGET_LINES_REPORT,
 )
 
 from coverage.analyser import CoverageAnalyzer
-from coverage.commit_lines_check import run_commit_lines_check
-from coverage.run_config import load_run_config
+from coverage.target_lines_check import run_target_lines_check
 from fuzz_fill.log import add_log_level_argument, configure_logging, get_logger, log_timing
 
 logger = get_logger("coverage")
@@ -35,9 +34,9 @@ def main():
     p_target_lines = sub.add_parser(
         "target-lines",
         help=(
-            "List target-lines CSV rows where every symcov point on that line is uncovered "
-            "by the suite (expects ``coverage baseline`` output and a lines CSV; "
-            "no lit re-run)."
+            "List target-lines CSV rows where every instrumentation point on that line is "
+            "uncovered by the suite (expects ``line_coverage_summary.csv`` from "
+            "``coverage baseline``; no lit re-run)."
         ),
     )
 
@@ -89,15 +88,14 @@ def main():
         required=True,
         help=(
             "Same directory passed as ``--output-dir`` to ``coverage baseline`` "
-            "(must contain ``processed_sancov/llc.0.symcov``, ``opt.0.symcov``, and "
-            "``run_config.json``)."
+            "(must contain ``line_coverage_summary.csv``)."
         ),
     )
     p_target_lines.add_argument(
         "--llvm-repo",
         type=Path,
         required=True,
-        help="LLVM checkout used to resolve ``path`` in the target-lines CSV (suffix match to symcov paths).",
+        help="LLVM checkout used to resolve ``path`` in the target-lines CSV (suffix match to summary paths).",
     )
     p_target_lines.add_argument(
         "--target-lines-csv",
@@ -150,19 +148,17 @@ def main():
 
     elif args.subcmd == "target-lines":
         print(
-            "Checking target lines from CSV against baseline llc/opt symcov "
+            "Checking target lines from CSV against baseline line coverage summary "
             "(no lit re-run)",
             flush=True,
         )
         with log_timing(logger, "target-lines"):
             args.output_dir.mkdir(parents=True, exist_ok=True)
-            report_path = args.output_dir / DEFAULT_COMMIT_LINES_REPORT
-            run_config = load_run_config(args.baseline_output_dir.resolve())
-            run_commit_lines_check(
+            report_path = args.output_dir / DEFAULT_TARGET_LINES_REPORT
+            run_target_lines_check(
                 baseline_output_dir=args.baseline_output_dir.resolve(),
                 llvm_repo=args.llvm_repo,
-                added_lines_csv=args.target_lines_csv.resolve(),
-                path_filter=run_config["path_filter"],
+                target_lines_csv=args.target_lines_csv.resolve(),
                 report_path=report_path,
             )
 
@@ -184,7 +180,7 @@ def get_filepaths(args: argparse.Namespace) -> Filepaths:
         output_baseline_dir=getattr(args, "baseline_output_dir", None),
         output_candidate_tests_dir=getattr(args, "candidate_tests_output_dir", None),
         llc_address_line_map_file=DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
-        joint_llc_and_opt_coverage_file=DEFAULT_JOINT_LLC_AND_OPT_COVERAGE_FILE,
+        line_coverage_summary_file=DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
         new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,
     )
 if __name__ == "__main__":

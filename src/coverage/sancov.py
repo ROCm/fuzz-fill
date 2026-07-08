@@ -209,23 +209,46 @@ class Sancov:
         return out
 
     @staticmethod
-    def get_coverage_summary_df(df: pd.DataFrame) -> pd.DataFrame:
-        """Get the coverage summary dataframe."""
+    def build_line_coverage_summary(merged: pd.DataFrame) -> pd.DataFrame:
+        """Per-(file, line) summary from merged llc/opt coverage.
+
+        Returns columns ``file``, ``line``, ``coverage`` (``full`` | ``partial`` | ``none``),
+        and ``point_addresses`` (all ``point_this`` / ``point_other`` ids on the line,
+        semicolon-separated).
+        """
+        m = merged.copy()
+        m["line"] = m["line"].astype(int)
         agg = (
-            df.groupby(["file", "line"], as_index=False)
+            m.groupby(["file", "line"], as_index=False)
             .agg(n_covered=("covered_either", "sum"), n_points=("covered_either", "count"))
         )
-
         agg["coverage"] = np.where(
             agg["n_covered"] == 0,
             "none",
             np.where(agg["n_covered"] == agg["n_points"], "full", "partial"),
         )
+        line_keys = set(zip(agg["file"], agg["line"]))
+        addr_map = Sancov.all_uncovered_line_point_addresses(m, line_keys)
+        agg["point_addresses"] = [
+            ";".join(addr_map.get((f, ln), []))
+            for f, ln in zip(agg["file"], agg["line"])
+        ]
+        return agg[["file", "line", "coverage", "point_addresses"]]
 
-        agg = agg.drop(columns=["n_covered", "n_points"])
-        cov_df = agg.merge(df, on=["file", "line"], how="left")
-        return cov_df[["file", "line", "coverage", "point_this"]]
-    
+    @staticmethod
+    def _load_llc_opt_coverage_dfs(
+        this_symcov_path: Path,
+        other_symcov_path: Path,
+        path_filter: str,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        with this_symcov_path.open(encoding="utf-8") as f:
+            this_symcov = json.load(f)
+        with other_symcov_path.open(encoding="utf-8") as f:
+            other_symcov = json.load(f)
+        this_df = Sancov.get_coverage_df(this_symcov, path_filter)
+        other_df = Sancov.get_coverage_df(other_symcov, path_filter)
+        return this_df, other_df
+
     def get_merged_sancov_path(self) -> Path:
         return self.output_dir / f"{self.suffix}.0.sancov"
 
@@ -335,29 +358,27 @@ class Sancov:
         path_filter: str | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Build the LLC address map and baseline covered lines for *this* (llc) vs *other* (opt).
+        Build the LLC address map and per-line summary for *this* (llc) vs *other* (opt).
 
-        A baseline line is one where every instrumentation point on that line is covered
+        A fully covered line is one where every instrumentation point on that line is covered
         by llc and/or opt. Points are matched on ``(file, line, col)``; when both tools
         instrument the same site, either tool hitting it counts. Ll-only and opt-only
         points on the line are included as well.
 
-        Returns ``(llc_address_line_map, baseline_coverage)`` with columns
-        ``file``, ``line``, ``point_<suffix>`` on the map and ``file``, ``line``,
-        ``point_<suffix>`` on baseline rows (one row per instrumented point).
+        Returns ``(llc_address_line_map, line_coverage_summary)``.
+        The map uses columns ``file``, ``line``, ``point_<suffix>``.
+        The summary has ``file``, ``line``, ``coverage``, ``point_addresses``.
         """
+
         with log_timing(logger, f"joint coverage ({self.suffix})"):
-            with self.get_merged_symcov_path().open(encoding="utf-8") as f:
-                this_symcov = json.load(f)
-
-            with other.get_merged_symcov_path().open(encoding="utf-8") as f:
-                other_symcov = json.load(f)
-
             if path_filter is None:
                 path_filter = path_filter_from_lit_filter(DEFAULT_LIT_FILTER)
 
-            this_df = self.get_coverage_df(this_symcov, path_filter)
-            other_df = self.get_coverage_df(other_symcov, path_filter)
+            this_df, other_df = Sancov._load_llc_opt_coverage_dfs(
+                self.get_merged_symcov_path(),
+                other.get_merged_symcov_path(),
+                path_filter,
+            )
 
             this_address_line_map = this_df[["file", "line", "point"]].copy()
             this_address_line_map["line"] = this_address_line_map["line"].astype(int)
@@ -365,42 +386,8 @@ class Sancov:
 
             if self.coverage_mode == "full":
                 merged_cov = Sancov.merged_llc_opt_coverage_df(this_df, other_df)
-                baseline_lines = Sancov.jointly_fully_covered_line_keys_from_merged(
-                    merged_cov
-                )
-
-                baseline_lines_df = pd.DataFrame(
-                    list(baseline_lines), columns=["file", "line"]
-                )
-
-                this_df_merge = this_df.copy()
-                this_df_merge["line"] = this_df_merge["line"].astype(int)
-                other_df_merge = other_df.copy()
-                other_df_merge["line"] = other_df_merge["line"].astype(int)
-
-                llc_baseline = this_df_merge.merge(
-                    baseline_lines_df, on=["file", "line"], how="inner"
-                )
-                llc_instrumented_lines = set(zip(this_df_merge["file"], this_df_merge["line"]))
-                opt_only_lines = baseline_lines - llc_instrumented_lines
-                opt_only_df = pd.DataFrame(list(opt_only_lines), columns=["file", "line"])
-                opt_baseline = other_df_merge.merge(
-                    opt_only_df, on=["file", "line"], how="inner"
-                )
-
-                point_col = f"point_{self.suffix}"
-                baseline_coverage = pd.concat(
-                    [
-                        llc_baseline[["file", "line", "point"]].rename(
-                            columns={"point": point_col}
-                        ),
-                        opt_baseline[["file", "line", "point"]].rename(
-                            columns={"point": point_col}
-                        ),
-                    ],
-                    ignore_index=True,
-                )
-                return (this_address_line_map, baseline_coverage)
+                line_coverage_summary = Sancov.build_line_coverage_summary(merged_cov)
+                return (this_address_line_map, line_coverage_summary)
 
             elif self.coverage_mode == "partial":
                 raise NotImplementedError(f"Coverage mode {self.coverage_mode} not implemented")

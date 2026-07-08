@@ -86,7 +86,7 @@ Under `$OUTPUT_DIR`:
 
 | Path | Contents |
 |------|----------|
-| `baseline/test_coverage.csv` | Suite baseline: source lines the LIT run covers (joint llc + opt, full-line mode) |
+| `baseline/line_coverage_summary.csv` | Per-line baseline coverage (joint llc + opt): `full`, `partial`, or `none` |
 | `baseline/processed_sancov/` | Merged, symbolized symcov files — reuse these if you re-run `incremental` with different candidate tests |
 | `candidate_tests/raw_sancov/` | Per-test raw sancov shards |
 | `incremental/new_coverage.csv` | **Main result** — columns `test`, `file`, `line`, `covered-points`: fuzz tests that fill suite coverage gaps |
@@ -109,7 +109,7 @@ added-lines  →  baseline  →  target-lines
 ```
 
 1. **`added-lines`** — parse `git show` for a commit and list every line added on the right-hand side of the diff.
-2. **`baseline`** — same baseline coverage run as Workflow 1 (produces symcov under `processed_sancov/`).
+2. **`baseline`** — same baseline coverage run as Workflow 1 (produces `line_coverage_summary.csv` and related CSVs).
 3. **`target-lines`** — for each line in the target CSV, check whether **every** SanitizerCoverage point on that line is off under the suite run. Fully uncovered lines go into the report; partially covered lines are counted but omitted from the CSV.
 
 Step 3 does **not** re-run LIT, so you can repeat it with different `added-lines.csv` inputs as long as the `baseline` symcov artifacts are still present.
@@ -139,8 +139,9 @@ Under `$OUTPUT_DIR`:
 | Path | Contents |
 |------|----------|
 | `added-lines/added-lines.csv` | Added lines from the commit (`path`, `line_no`, `text`) |
-| `baseline/processed_sancov/` | Baseline symcov (required by `target-lines`) |
-| `commit_lines_report/commit_lines_uncovered.csv` | **Main result** — added lines where every suite point on that line is off |
+| `test_suite/line_coverage_summary.csv` | Per-line baseline coverage (`full` / `partial` / `none`) — **required by `target-lines`** |
+| `baseline/processed_sancov/` | Merged symcov (still produced for debugging; not read by `target-lines`) |
+| `target_lines_report/target_lines_uncovered.csv` | **Main result** — added lines where every suite point on that line is off |
 
 ---
 
@@ -172,7 +173,7 @@ The workflows above call these modules. Use `--help` on any command for the full
 | `python -m coverage baseline` | Baseline LIT coverage (both workflows) |
 | `python -m coverage candidate-test` | Coverage from a fuzz-generated test corpus (Workflow 1) |
 | `python -m coverage incremental` | Suite gaps filled by fuzz tests (Workflow 1) |
-| `python -m coverage target-lines` | Uncovered target lines vs baseline symcov (Workflow 2) |
+| `python -m coverage target-lines` | Uncovered target lines vs `line_coverage_summary.csv` (Workflow 2) |
 | `python -m added_lines` | Lines added by a git commit (Workflow 2) |
 | `python -m reduce` | Testcase reduction |
 
@@ -271,7 +272,24 @@ To run integration tests manually inside the container:
 
 ---
 
-## Running integration tests
+## Tests
+
+### Unit tests
+
+Python unit tests live under `tests/`. They use the stdlib `unittest` runner and do not need LLVM builds.
+
+```bash
+source venv/bin/activate
+python -m unittest discover -s tests -v
+```
+
+To run a single module:
+
+```bash
+python -m unittest tests.test_analyser -v
+```
+
+### Integration tests
 
 Integration tests need both LLVM `bin` directories (same version). Locally:
 
