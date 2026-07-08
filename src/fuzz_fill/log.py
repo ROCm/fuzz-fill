@@ -7,7 +7,10 @@ import sys
 import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from typing import Any
+from pathlib import Path
+from typing import Any, TextIO
+
+DEFAULT_LOG_FILENAME = "fuzz_fill.log"
 
 _LOG_LEVELS = {
     "error": logging.ERROR,
@@ -40,6 +43,71 @@ def add_log_level_argument(parser: argparse.ArgumentParser) -> None:
         choices=sorted(_LOG_LEVELS),
         help="Logging verbosity (default: info).",
     )
+
+
+def add_log_to_file_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--log-to-file",
+        action="store_true",
+        help=f"Also write stdout/stderr to <output-dir>/{DEFAULT_LOG_FILENAME}.",
+    )
+
+
+class _Tee(TextIO):
+    """Write to a terminal stream and a log file."""
+
+    def __init__(self, terminal: TextIO, log_file: TextIO) -> None:
+        self._terminal = terminal
+        self._log_file = log_file
+
+    def write(self, data: str) -> int:
+        self._terminal.write(data)
+        self._log_file.write(data)
+        return len(data)
+
+    def flush(self) -> None:
+        self._terminal.flush()
+        self._log_file.flush()
+
+    def fileno(self) -> int:
+        return self._terminal.fileno()
+
+
+_log_file_handle: TextIO | None = None
+_original_stdout: TextIO | None = None
+_original_stderr: TextIO | None = None
+
+
+def enable_log_file(output_dir: Path) -> Path:
+    """Tee stdout/stderr to output_dir/fuzz_fill.log. Call before configure_logging()."""
+    global _log_file_handle, _original_stdout, _original_stderr
+
+    if _log_file_handle is not None:
+        raise RuntimeError("log file tee is already enabled")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    log_path = output_dir / DEFAULT_LOG_FILENAME
+    _log_file_handle = log_path.open("w", encoding="utf-8")
+    _original_stdout = sys.stdout
+    _original_stderr = sys.stderr
+    sys.stdout = _Tee(_original_stdout, _log_file_handle)
+    sys.stderr = _Tee(_original_stderr, _log_file_handle)
+    return log_path
+
+
+def disable_log_file() -> None:
+    """Restore original stdout/stderr and close the log file."""
+    global _log_file_handle, _original_stdout, _original_stderr
+
+    if _log_file_handle is None:
+        return
+
+    sys.stdout = _original_stdout
+    sys.stderr = _original_stderr
+    _log_file_handle.close()
+    _log_file_handle = None
+    _original_stdout = None
+    _original_stderr = None
 
 
 @contextmanager
