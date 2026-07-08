@@ -5,7 +5,7 @@
 # RUN: rm -rf %t && mkdir -p %t/{baseline,candidate,incremental}
 # RUN: env FUZZ_FILL_LLVM_BIN="$(dirname %FileCheck)" FUZZ_FILL_LLVM_INSTRUMENTED_BIN="$(dirname %sancov-llc)" %coverage baseline --output-dir %t/baseline --lit-filter 'CodeGen/AMDGPU/loop-live-out-copy-undef-subrange\.ll$' -j1
 # RUN: test -f %t/baseline/run_config.json
-# RUN: test -f %t/baseline/test_coverage.csv
+# RUN: test -f %t/baseline/line_coverage_summary.csv
 # RUN: %coverage candidate-test --output-dir %t/candidate --instrumented-bin "$(dirname %sancov-llc)" --candidate-tests-dir %S/fixtures/coverage-new-tests --n 1
 # RUN: env FUZZ_FILL_LLVM_BIN="$(dirname %FileCheck)" %coverage incremental --output-dir %t/incremental --baseline-output-dir %t/baseline --candidate-tests-output-dir %t/candidate
 # RUN: test -f %t/incremental/new_coverage.csv
