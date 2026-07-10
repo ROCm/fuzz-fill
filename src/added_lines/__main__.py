@@ -13,9 +13,11 @@ from fuzz_fill.log import (
     add_log_level_argument,
     add_log_to_file_argument,
     configure_logging,
-    disable_log_file,
-    enable_log_file,
+    get_logger,
+    resolve_log_file,
 )
+
+logger = get_logger("added_lines")
 
 
 def resolve_output_dir(path: Path) -> Path:
@@ -62,33 +64,29 @@ def main() -> None:
 
     args = parser.parse_args()
     out_dir = resolve_output_dir(args.output_dir)
-
-    if args.log_to_file:
-        enable_log_file(out_dir)
-    try:
-        configure_logging(args.log_level)
-
-        if args.debug:
-            print("Debug mode enabled", flush=True)
-
-        repo = path_from_flag_or_env(
-        args.llvm_repo, FUZZ_FILL_LLVM_REPO, flag_name="--llvm-repo"
+    configure_logging(
+        args.log_level,
+        log_file=resolve_log_file(out_dir, args.log_to_file),
     )
-        out_dir.mkdir(parents=True, exist_ok=True)
 
-        rows = collect_added_lines(repo, args.commit)
-        csv_text = format_added_lines_csv(rows)
+    if args.debug:
+        logger.debug("debug mode enabled")
 
-        out_file = out_dir / ADDED_LINES_FILENAME
-        out_file.write_text(csv_text, encoding="utf-8")
+    repo = path_from_flag_or_env(
+    args.llvm_repo, FUZZ_FILL_LLVM_REPO, flag_name="--llvm-repo"
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-        if args.debug:
-            print(f"Wrote {len(rows)} added lines to {out_file}", flush=True)
+    rows = collect_added_lines(repo, args.commit)
+    csv_text = format_added_lines_csv(rows)
 
-        print(csv_text, end="")
-    finally:
-        if args.log_to_file:
-            disable_log_file()
+    out_file = out_dir / ADDED_LINES_FILENAME
+    out_file.write_text(csv_text, encoding="utf-8")
+
+    if args.debug:
+        logger.debug("wrote %d added lines to %s", len(rows), out_file)
+
+    print(csv_text, end="")
 
 
 if __name__ == "__main__":

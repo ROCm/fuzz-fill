@@ -8,12 +8,14 @@ from fuzz_fill.log import (
     add_log_level_argument,
     add_log_to_file_argument,
     configure_logging,
-    disable_log_file,
-    enable_log_file,
+    get_logger,
+    resolve_log_file,
 )
 from reduce.config import load_reduce_config, pipeline_steps_for_only_pass
 from reduce.reducer import Reducer, known_pass_ids
 from reduce.test import Test
+
+logger = get_logger("reduce")
 
 
 def main():
@@ -85,28 +87,20 @@ def main():
     output_dir = cfg.output_dir or default_output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if ns.log_to_file:
-        try:
-            enable_log_file(output_dir)
-            configure_logging(ns.log_level)
-            print("[main] loading config...", flush=True)
+    configure_logging(
+        ns.log_level,
+        log_file=resolve_log_file(output_dir, ns.log_to_file),
+    )
 
-            pass_ids = [s.id for s in pipeline_steps]
-            print(
-                f"[main] reduce ({len(pass_ids)} pass(es): {', '.join(pass_ids)})",
-                flush=True,
-            )
-            reducer = Reducer(
-                cfg.llvm_bin,
-                output_dir,
-                test,
-                pipeline_steps=pipeline_steps,
-            )   
-            reducer.reduce()
-
-        finally:
-            if ns.log_to_file:
-                disable_log_file()
+    pass_ids = [s.id for s in pipeline_steps]
+    logger.info("reduce (%d pass(es): %s)", len(pass_ids), ", ".join(pass_ids))
+    reducer = Reducer(
+        cfg.llvm_bin,
+        output_dir,
+        test,
+        pipeline_steps=pipeline_steps,
+    )
+    reducer.reduce()
 
 
 if __name__ == "__main__":

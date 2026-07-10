@@ -106,7 +106,7 @@ class Reducer:
         test = self.test
         n = len(self._passes_list)
         for step, (pass_id, p) in enumerate(zip(self._pass_ids, self._passes_list)):
-            print(f"[reduce] pass {step + 1}/{n}: {pass_id}", flush=True)
+            logger.info("pass %d/%d: %s", step + 1, n, pass_id)
             ctx = ReduceContext(
                 llc=self.tools.llc,
                 llvm_reduce=self.tools.llvm_reduce,
@@ -122,16 +122,13 @@ class Reducer:
         final_name = "reduced.ll" if suffix == ".ll" else f"reduced{suffix}"
         final_path = self.output_dir / final_name
         shutil.copy2(test.test_path, final_path)
-        print(f"[reduce] wrote {final_path}", flush=True)
+        logger.info("wrote %s", final_path)
 
         interesting = _interesting_script_for_final_check(self._pipeline_steps)
         if interesting is not None:
-            print(
-                f"[reduce] verifying final interesting-ness ({interesting})...",
-                flush=True,
-            )
+            logger.info("verifying final interesting-ness (%s)...", interesting)
             with log_timing(logger, "final interesting-ness check"):
                 _verify_final_interesting(interesting, final_path)
-            print("[reduce] final interesting-ness check passed", flush=True)
+            logger.info("final interesting-ness check passed")
 
         return Test(final_path, test.interesting, test.file, test.line)

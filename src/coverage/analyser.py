@@ -69,15 +69,17 @@ class CoverageAnalyzer:
                     ]
 
                     if len(matched_addresses) == 0:
-                        print(
-                            f"Candidate test {test_name} has no covered addresses "
-                            "in files that we are interested in"
+                        logger.info(
+                            "candidate test %s has no covered addresses "
+                            "in files that we are interested in",
+                            test_name,
                         )
                         continue
 
-                    print(
-                        f"Candidate test {test_name} has {len(matched_addresses)} "
-                        "new covered addresses in target files"
+                    logger.info(
+                        "candidate test %s has %d new covered addresses in target files",
+                        test_name,
+                        len(matched_addresses),
                     )
 
                     fully_covered_keys = fully_covered_line_keys_from_address_map(
@@ -88,9 +90,10 @@ class CoverageAnalyzer:
                         per_test_csv = test_name
                         keys = sorted(fully_covered_keys)
 
-                        print(
-                            f"Candidate test {test_name} has {len(keys)} "
-                            "covered lines in target files"
+                        logger.info(
+                            "candidate test %s has %d covered lines in target files",
+                            test_name,
+                            len(keys),
                         )
 
                         # Only lines the suite left completely uncovered count as new;
@@ -109,13 +112,15 @@ class CoverageAnalyzer:
                         ]
                         accepted_keys = [key for key, keep in zip(keys, mask) if keep]
 
-                        print(
-                            f"{sum(is_new_vs_baseline)} lines are uncovered in baseline "
-                            f"out of {len(keys)}"
+                        logger.info(
+                            "%d lines are uncovered in baseline out of %d",
+                            sum(is_new_vs_baseline),
+                            len(keys),
                         )
-                        print(
-                            f"{sum(is_new_vs_other_candidate_tests)} lines are new vs other "
-                            f"candidate tests out of {len(keys)}"
+                        logger.info(
+                            "%d lines are new vs other candidate tests out of %d",
+                            sum(is_new_vs_other_candidate_tests),
+                            len(keys),
                         )
 
                         if not accepted_keys:
@@ -140,6 +145,6 @@ def get_sancov_file(new_test_dir: Path) -> Path | None:
     """Get the llc sancov file for a new test. Checks that there is only one sancov file and throws an error if there are multiple."""
     sancov_files = list(new_test_dir.rglob('llc.*.sancov'))
     if len(sancov_files) != 1:
-        print(f"Expected 1 sancov file, got {len(sancov_files)}")
+        logger.warning("expected 1 sancov file, got %d", len(sancov_files))
         return None
     return list(new_test_dir.rglob('*sancov'))[0]

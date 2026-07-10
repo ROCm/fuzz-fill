@@ -20,14 +20,17 @@ _LOG_LEVELS = {
     "debug": logging.DEBUG,
 }
 
-_staged_log_file: Path | None = None
+
+def resolve_log_file(output_dir: Path, log_to_file: bool) -> Path | None:
+    if not log_to_file:
+        return None
+    return output_dir / DEFAULT_LOG_FILENAME
 
 
 def configure_logging(level: str, *, log_file: Path | None = None) -> None:
     """Configure fuzz-fill logging to stderr and optionally to a log file."""
     numeric_level = _LOG_LEVELS[level.lower()]
     formatter = logging.Formatter(_LOG_FORMAT)
-    effective_log_file = log_file if log_file is not None else _staged_log_file
 
     root = logging.getLogger("fuzz_fill")
     root.handlers.clear()
@@ -36,9 +39,9 @@ def configure_logging(level: str, *, log_file: Path | None = None) -> None:
     console.setFormatter(formatter)
     root.addHandler(console)
 
-    if effective_log_file is not None:
-        effective_log_file.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(effective_log_file, encoding="utf-8")
+    if log_file is not None:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
         file_handler.setFormatter(formatter)
         root.addHandler(file_handler)
 
@@ -68,33 +71,6 @@ def add_log_to_file_argument(parser: argparse.ArgumentParser) -> None:
             "(same --log-level as the terminal)."
         ),
     )
-
-
-def enable_log_file(output_dir: Path) -> Path:
-    """Stage a log file path for the next configure_logging() call.
-
-    Deprecated: pass ``log_file=`` to configure_logging() directly instead.
-    """
-    global _staged_log_file
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    _staged_log_file = output_dir / DEFAULT_LOG_FILENAME
-    return _staged_log_file
-
-
-def disable_log_file() -> None:
-    """Clear staged log file path and remove any file handler.
-
-    Deprecated: configure_logging() replaces handlers on each call.
-    """
-    global _staged_log_file
-
-    _staged_log_file = None
-    root = logging.getLogger("fuzz_fill")
-    for handler in list(root.handlers):
-        if isinstance(handler, logging.FileHandler):
-            handler.close()
-            root.removeHandler(handler)
 
 
 @contextmanager
