@@ -1,0 +1,7 @@
+# COM: --log-to-file writes fuzz_fill.log under --output-dir with log messages.
+
+# RUN: rm -rf %t && mkdir -p %t/out
+# RUN: %added-lines --llvm-repo %llvm-repo --commit HEAD --output-dir %t/out --log-to-file --log-level info > %t/added-lines.csv
+# RUN: test -f %t/out/fuzz_fill.log
+# RUN: %FileCheck %s --input-file=%t/out/fuzz_fill.log
+# CHECK: collect added lines
