@@ -103,5 +103,6 @@ config.substitutions.extend(
         ("%venv", _venv_cmd),
         ("%coverage", f"{_venv_python} -m coverage"),
         ("%reduce", f"{_venv_python} -m reduce"),
+        ("%added-lines", f"{_venv_cmd} && python -m added_lines"),
     ]
 )

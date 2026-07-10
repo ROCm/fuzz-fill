@@ -28,7 +28,14 @@ from fuzz_fill.llvm_tools import (
     candidate_test_tools_from_args,
     incremental_tools_from_args,
 )
-from fuzz_fill.log import add_log_level_argument, configure_logging, get_logger, log_timing
+from fuzz_fill.log import (
+    add_log_level_argument,
+    add_log_to_file_argument,
+    configure_logging,
+    get_logger,
+    log_timing,
+    resolve_log_file,
+)
 
 logger = get_logger("coverage")
 
@@ -166,10 +173,15 @@ def main():
     )
 
     args = parser.parse_args()
-    configure_logging(args.log_level)
+    configure_logging(
+        args.log_level,
+        log_file=resolve_log_file(args.output_dir, args.log_to_file),
+    )
+
+    filepaths = get_filepaths(args)
 
     if args.debug:
-        print(f"Debug mode enabled")
+        logger.debug("debug mode enabled")
 
     if args.subcmd == "baseline":
         tools = baseline_tools_from_args(
@@ -179,7 +191,7 @@ def main():
             opt=args.opt,
         )
         filepaths = get_filepaths(args, tools=tools)
-        print("Getting baseline coverage for the test suite")
+        logger.info("getting baseline coverage for the test suite")
         with log_timing(logger, "baseline"):
             test_runner = TestRunner(
                 mode="lit",
@@ -196,7 +208,7 @@ def main():
     elif args.subcmd == "candidate-test":
         tools = candidate_test_tools_from_args(llc=args.llc)
         filepaths = get_filepaths(args, tools=tools)
-        print("Getting coverage for the candidate tests")
+        logger.info("getting coverage for the candidate tests")
         with log_timing(logger, "candidate-test"):
             test_runner = TestRunner(
                 mode="standalone",
@@ -206,11 +218,13 @@ def main():
                 timeout=args.timeout,
             )
             test_runner.run()
-    
+
     elif args.subcmd == "incremental":
         tools = incremental_tools_from_args(sancov=args.sancov)
         filepaths = get_filepaths(args, tools=tools)
-        print("Getting incremental coverage for candidate tests relative to the baseline test suite")
+        logger.info(
+            "getting incremental coverage for candidate tests relative to the baseline test suite",
+        )
         with log_timing(logger, "incremental"):
             filepaths.output_baseline_dir = args.baseline_output_dir
             filepaths.output_candidate_tests_dir = args.candidate_tests_output_dir
@@ -223,10 +237,9 @@ def main():
         args.llvm_repo = path_from_flag_or_env(
             args.llvm_repo, FUZZ_FILL_LLVM_REPO, flag_name="--llvm-repo"
         )
-        print(
-            "Checking target lines from CSV against baseline line coverage summary "
-            "(no lit re-run)",
-            flush=True,
+        logger.info(
+            "checking target lines from CSV against baseline line coverage summary "
+            "(no lit re-run)"
         )
         with log_timing(logger, "target-lines"):
             args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -239,13 +252,14 @@ def main():
             )
 
     else:
-        print(f"Unknown subcommand: {args.subcmd}")
+        logger.error("unknown subcommand: %s", args.subcmd)
         return 1
 
 def add_shared_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--debug", action="store_true", default=False)
     add_log_level_argument(parser)
+    add_log_to_file_argument(parser)
 
 def get_filepaths(
     args: argparse.Namespace,

@@ -9,6 +9,9 @@ import pandas as pd
 
 from coverage.constants import DEFAULT_LINE_COVERAGE_SUMMARY_FILE
 from coverage.line_rules import LineCoverageIndex
+from fuzz_fill.log import get_logger
+
+logger = get_logger("coverage.target_lines")
 
 
 def _match_symcov_file(rel_path: str, summary_files: set[str]) -> str | None:
@@ -125,9 +128,15 @@ def run_target_lines_check(
         w.writerows(uncovered_rows)
 
     total_in = sum(stats.values())
-    print(
-        f"Wrote {report_path} ({len(uncovered_rows)} all-points-uncovered rows of {total_in} target lines). "
-        f"covered={stats['covered']} all_uncovered={stats['all_uncovered']} partial={stats['partial']} "
-        f"not_instrumented={stats['not_instrumented']} unknown_file={stats['unknown_file']}",
-        flush=True,
+    logger.info(
+        "wrote %s (%d all-points-uncovered rows of %d target lines). "
+        "covered=%d all_uncovered=%d partial=%d not_instrumented=%d unknown_file=%d",
+        report_path,
+        len(uncovered_rows),
+        total_in,
+        stats["covered"],
+        stats["all_uncovered"],
+        stats["partial"],
+        stats["not_instrumented"],
+        stats["unknown_file"],
     )

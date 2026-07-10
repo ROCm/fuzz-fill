@@ -9,7 +9,15 @@ from pathlib import Path
 from added_lines.added_lines import AddedLine, collect_added_lines
 from added_lines.constants import ADDED_LINES_FILENAME, DEFAULT_OUTPUT_DIR
 from fuzz_fill.env import FUZZ_FILL_LLVM_REPO, path_from_flag_or_env
-from fuzz_fill.log import add_log_level_argument, configure_logging
+from fuzz_fill.log import (
+    add_log_level_argument,
+    add_log_to_file_argument,
+    configure_logging,
+    get_logger,
+    resolve_log_file,
+)
+
+logger = get_logger("added_lines")
 
 
 def resolve_output_dir(path: Path) -> Path:
@@ -52,17 +60,21 @@ def main() -> None:
         ),
     )
     add_log_level_argument(parser)
+    add_log_to_file_argument(parser)
 
     args = parser.parse_args()
-    configure_logging(args.log_level)
+    out_dir = resolve_output_dir(args.output_dir)
+    configure_logging(
+        args.log_level,
+        log_file=resolve_log_file(out_dir, args.log_to_file),
+    )
 
     if args.debug:
-        print("Debug mode enabled", flush=True)
+        logger.debug("debug mode enabled")
 
     repo = path_from_flag_or_env(
-        args.llvm_repo, FUZZ_FILL_LLVM_REPO, flag_name="--llvm-repo"
+    args.llvm_repo, FUZZ_FILL_LLVM_REPO, flag_name="--llvm-repo"
     )
-    out_dir = resolve_output_dir(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows = collect_added_lines(repo, args.commit)
@@ -72,7 +84,7 @@ def main() -> None:
     out_file.write_text(csv_text, encoding="utf-8")
 
     if args.debug:
-        print(f"Wrote {len(rows)} added lines to {out_file}", flush=True)
+        logger.debug("wrote %d added lines to %s", len(rows), out_file)
 
     print(csv_text, end="")
 

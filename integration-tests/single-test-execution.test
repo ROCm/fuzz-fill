@@ -4,7 +4,7 @@
 # COM: run must report all executions complete and none skipped.
 
 # RUN: rm -rf %t && mkdir -p %t/candidate_tests
-# RUN: %coverage candidate-test --output-dir %t/candidate_tests --llc %sancov-llc --candidate-tests-dir %S/fixtures/coverage-new-tests --n 1 | tee %t/candidate_tests.log
+# RUN: %coverage candidate-test --output-dir %t/candidate_tests --llc %sancov-llc --candidate-tests-dir %S/fixtures/coverage-new-tests --n 1 2>&1 | tee %t/candidate_tests.log
 
 # COM: The final progress line reports the tallies across all four flag runs.
 # RUN: %FileCheck %s --input-file=%t/candidate_tests.log --check-prefix=EXEC
