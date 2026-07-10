@@ -22,7 +22,7 @@ See [here](#contributions) for a list of tests contributed to LLVM.
 - [Docker test image](#docker-test-image)
   - [Build](#build)
   - [Build from an LLVM pull request](#build-from-an-llvm-pull-request)
-  - [PR coverage gap detection](#pr-coverage-gap-detection)
+  - [Workflow 2: PR coverage gap detection](#pr-coverage-gap-detection)
   - [Run integration tests](#run-integration-tests)
   - [Run a container](#run-a-container)
 - [Running integration tests](#running-integration-tests)
@@ -282,7 +282,7 @@ Examples:
 
 For the full coverage-gap workflow (build + detect), use [`pr-cov-gaps-detection.sh --build-image`](#pr-coverage-gap-detection) instead.
 
-### PR coverage gap detection
+### Workflow 2: PR coverage gap detection
 
 [`scripts/pr-cov-gaps-detection.sh`](scripts/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. The LIT filter defaults to the image's `/work/.sancov-allowlist` (set at build time via `--backend-tests`); override with `--lit-filter` if needed.
 
