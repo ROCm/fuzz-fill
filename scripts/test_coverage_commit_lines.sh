@@ -34,8 +34,10 @@ python -m added_lines \
 # 2) Baseline suite coverage (required symcov under BASELINE_OUTPUT_DIR/processed_sancov/)
 python -m coverage baseline \
     --output-dir "$BASELINE_OUTPUT_DIR" \
-    --llvm-bin "$LLVM_BIN" \
-    --instrumented-bin "$INSTRUMENTED_BIN_DIR" \
+    --sancov "$LLVM_BIN/sancov" \
+    --llvm-lit "$INSTRUMENTED_BIN_DIR/llvm-lit" \
+    --llc "$INSTRUMENTED_BIN_DIR/llc" \
+    --opt "$INSTRUMENTED_BIN_DIR/opt" \
     --lit-filter "$FILTER"
 
 # 3) Target lines not fully covered by the suite (target_lines_uncovered.csv)

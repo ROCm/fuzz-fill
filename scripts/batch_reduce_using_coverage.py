@@ -19,7 +19,7 @@ lowest hex among addresses for that row.
 Each config.json sets output_dir to a reduced subdirectory next to it so
 reduction artifacts stay inside the case directory.
 
-With --llvm-bin, runs python -m reduce --config <case>/config.json for each case.
+With --llc and --llvm-reduce, runs python -m reduce --config <case>/config.json for each case.
 
 Use --n to process only the first N data rows of the CSV (after the header).
 
@@ -74,7 +74,7 @@ def _reduce_subprocess_env() -> dict[str, str]:
     return env
 
 
-def run_reduce(*, case_dir: Path, llvm_bin: Path) -> None:
+def run_reduce(*, case_dir: Path, llc: Path, llvm_reduce: Path) -> None:
     """Run reduce for one prepared case directory."""
     config = case_dir / "config.json"
     subprocess.run(
@@ -84,8 +84,10 @@ def run_reduce(*, case_dir: Path, llvm_bin: Path) -> None:
             "reduce",
             "--config",
             str(config),
-            "--llvm-bin",
-            str(llvm_bin.resolve()),
+            "--llc",
+            str(llc.resolve()),
+            "--llvm-reduce",
+            str(llvm_reduce.resolve()),
         ],
         cwd=case_dir,
         env=_reduce_subprocess_env(),
@@ -679,10 +681,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional extract_ir_before_output basename for extract_ir_before_pass.",
     )
     p.add_argument(
-        "--llvm-bin",
+        "--llc",
         type=Path,
         default=None,
-        help="If set, run python -m reduce for each prepared case directory.",
+        help="Path to llc; with --llvm-reduce, run python -m reduce for each prepared case.",
+    )
+    p.add_argument(
+        "--llvm-reduce",
+        type=Path,
+        default=None,
+        help="Path to llvm-reduce; with --llc, run python -m reduce for each prepared case.",
     )
     p.add_argument(
         "--n",
@@ -698,7 +706,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     candidate_tests = args.candidate_tests.resolve()
-    llvm_bin = args.llvm_bin.resolve() if args.llvm_bin is not None else None
+    llc = args.llc.resolve() if args.llc is not None else None
+    llvm_reduce = args.llvm_reduce.resolve() if args.llvm_reduce is not None else None
+    if (llc is None) ^ (llvm_reduce is None):
+        print("Pass both --llc and --llvm-reduce to run reduce, or omit both.", file=sys.stderr)
+        return 2
     out_parent = args.output.resolve()
     out_parent.mkdir(parents=True, exist_ok=True)
 
@@ -792,13 +804,13 @@ def main(argv: list[str] | None = None) -> int:
                 mtriple=args.mtriple,
                 mir_codegen_only=args.mir_codegen_only,
             )
-            if llvm_bin is not None:
+            if llc is not None:
                 print(
-                    f"Row {i}: running reduce (llvm-bin={llvm_bin})...",
+                    f"Row {i}: running reduce (llc={llc}, llvm-reduce={llvm_reduce})...",
                     file=sys.stderr,
                     flush=True,
                 )
-                run_reduce(case_dir=dest, llvm_bin=llvm_bin)
+                run_reduce(case_dir=dest, llc=llc, llvm_reduce=llvm_reduce)
             print(dest)
             ok += 1
             if amb:

@@ -12,5 +12,6 @@ cd "$REPO_ROOT"
 
 python3 -m reduce \
     --config "$REPO_ROOT/example/amd/argument-usage-multi-addr/config.json" \
-    --llvm-bin "$LLVM_BIN" \
+    --llc "$LLVM_BIN/llc" \
+    --llvm-reduce "$LLVM_BIN/llvm-reduce" \
     --output-dir "$OUTPUT_DIR"

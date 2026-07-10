@@ -1,0 +1,7 @@
+# COM: target-lines env fallback: omit --llvm-repo when FUZZ_FILL_LLVM_REPO
+# COM: is set on the RUN line. Baseline prerequisite uses explicit flags.
+
+# RUN: rm -rf %t && mkdir -p %t/{baseline,report}
+# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter 'CodeGen/AMDGPU/loop-live-out-copy-undef-subrange\.ll$' -j1
+# RUN: env FUZZ_FILL_LLVM_REPO=%llvm-repo %coverage target-lines --output-dir %t/report --baseline-output-dir %t/baseline --target-lines-csv %S/fixtures/target-lines-sample.csv
+# RUN: test -f %t/report/target_lines_uncovered.csv

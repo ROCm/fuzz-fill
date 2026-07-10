@@ -7,8 +7,10 @@ class Filepaths:
     output_baseline_dir: Path | None   
     output_candidate_tests_dir: Path | None
     output_diff_dir: Path | None
-    llvm_bin: Path | None
-    instrumented_bin: Path | None
+    sancov: Path | None
+    llvm_lit: Path | None
+    llc: Path | None
+    opt: Path | None
     candidate_tests_dir: Path | None
     llc_address_line_map_file: Path | None
     line_coverage_summary_file: Path | None
@@ -18,8 +20,10 @@ class Filepaths:
      output_baseline_dir: Path | None = None,
      output_candidate_tests_dir: Path | None = None,
      output_diff_dir: Path | None = None,
-     llvm_bin: Path | None = None,
-     instrumented_bin: Path | None = None,
+     sancov: Path | None = None,
+     llvm_lit: Path | None = None,
+     llc: Path | None = None,
+     opt: Path | None = None,
      candidate_tests_dir: Path | None = None,
      llc_address_line_map_file: Path | None = None,
      line_coverage_summary_file: Path | None = None,
@@ -28,8 +32,10 @@ class Filepaths:
         self.output_baseline_dir = output_baseline_dir
         self.output_candidate_tests_dir = output_candidate_tests_dir
         self.output_diff_dir = output_diff_dir
-        self.llvm_bin = llvm_bin
-        self.instrumented_bin = instrumented_bin
+        self.sancov = sancov
+        self.llvm_lit = llvm_lit
+        self.llc = llc
+        self.opt = opt
         self.candidate_tests_dir = candidate_tests_dir
         self.llc_address_line_map_file = llc_address_line_map_file
         self.line_coverage_summary_file = line_coverage_summary_file

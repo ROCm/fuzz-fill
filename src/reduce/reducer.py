@@ -10,6 +10,7 @@ from reduce.pass_registry import known_pass_ids, passes_from_ids
 from reduce.test import Test
 
 from reduce.config import PipelineStep
+from fuzz_fill.llvm_tools import ReduceTools
 from fuzz_fill.log import get_logger, log_timing, run_subprocess
 
 logger = get_logger("reduce")
@@ -71,7 +72,9 @@ def _verify_final_interesting(script: Path, candidate: Path) -> None:
 class ReduceContext:
     """Per-run context. Passes read/write intermediates under ``tmp_dir`` only."""
 
-    llvm_bin: Path
+    llc: Path
+    llvm_reduce: Path
+    llvm_dis: Path | None
     output_dir: Path
     tmp_dir: Path
     pass_options: Mapping[str, Any]
@@ -81,13 +84,13 @@ class ReduceContext:
 class Reducer:
     def __init__(
         self,
-        llvm_bin: Path,
+        tools: ReduceTools,
         output_dir: Path,
         test: Test,
         *,
         pipeline_steps: tuple[PipelineStep, ...],
     ):
-        self.llvm_bin: Path = llvm_bin
+        self.tools = tools
         self.output_dir: Path = output_dir
         self.test: Test = test
         self._pipeline_steps: tuple[PipelineStep, ...] = pipeline_steps
@@ -105,7 +108,9 @@ class Reducer:
         for step, (pass_id, p) in enumerate(zip(self._pass_ids, self._passes_list)):
             print(f"[reduce] pass {step + 1}/{n}: {pass_id}", flush=True)
             ctx = ReduceContext(
-                llvm_bin=self.llvm_bin,
+                llc=self.tools.llc,
+                llvm_reduce=self.tools.llvm_reduce,
+                llvm_dis=self.tools.llvm_dis,
                 output_dir=self.output_dir,
                 tmp_dir=tmp_dir,
                 pass_options=MappingProxyType(dict(self._pipeline_steps[step].options)),
