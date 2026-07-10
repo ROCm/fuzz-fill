@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+from coverage.constants import MAX_LIT_JOBS
 
 LIT_SITE_CONFIG_REL = Path("test/lit.site.cfg.py")
 PATCH_MARKER = "# fuzz-fill: SanitizerCoverage env forwarding"
@@ -20,32 +23,32 @@ for _fuzz_fill_name in ("UBSAN_OPTIONS",):
 """
 
 
-def llvm_build_root(instrumented_bin: Path) -> Path:
+def llvm_build_root(llvm_lit: Path) -> Path:
     """Top of the instrumented LLVM build tree (parent of ``bin/``)."""
-    return instrumented_bin.resolve().parent
+    return llvm_lit.resolve().parent.parent
 
 
-def lit_site_config_path(instrumented_bin: Path) -> Path:
+def lit_site_config_path(llvm_lit: Path) -> Path:
     """``test/lit.site.cfg.py`` for the instrumented LLVM build."""
-    return llvm_build_root(instrumented_bin) / LIT_SITE_CONFIG_REL
+    return llvm_build_root(llvm_lit) / LIT_SITE_CONFIG_REL
 
 
-def lit_test_suite_path(instrumented_bin: Path) -> Path:
+def lit_test_suite_path(llvm_lit: Path) -> Path:
     """Build-tree test suite entry point (same path ``check-llvm`` passes to llvm-lit)."""
-    return llvm_build_root(instrumented_bin) / "test"
+    return llvm_build_root(llvm_lit) / "test"
 
 
-def ensure_lit_sancov_env_forwarding(instrumented_bin: Path) -> Path:
+def ensure_lit_sancov_env_forwarding(llvm_lit: Path) -> Path:
     """Append fuzz-fill's lit env forwarding hook to the build site config.
 
     The patch is idempotent and is re-applied if CMake regenerates the file.
     """
-    path = lit_site_config_path(instrumented_bin)
+    path = lit_site_config_path(llvm_lit)
     if not path.is_file():
         raise FileNotFoundError(
             f"LLVM lit site config not found at {path}. "
             "Expected an instrumented LLVM build containing "
-            f"{LIT_SITE_CONFIG_REL} (instrumented-bin={instrumented_bin})."
+            f"{LIT_SITE_CONFIG_REL} (--llvm-lit={llvm_lit})."
         )
 
     text = path.read_text(encoding="utf-8")
@@ -56,3 +59,25 @@ def ensure_lit_sancov_env_forwarding(instrumented_bin: Path) -> Path:
         text += "\n"
     path.write_text(text + PATCH_SNIPPET, encoding="utf-8")
     return path
+
+
+def default_lit_job_count() -> int:
+    """Match llvm-lit's default worker count (``lit.util.usable_core_count``)."""
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        return os.cpu_count() or 1
+
+
+def resolve_lit_job_count(requested: int | None, *, max_jobs: int = MAX_LIT_JOBS) -> int:
+    """Resolve llvm-lit ``-j`` value, capping at *max_jobs* when needed."""
+    effective = requested if requested is not None else default_lit_job_count()
+    effective = max(1, effective)
+    if effective > max_jobs:
+        print(
+            f"warning: capping llvm-lit -j from {effective} to {max_jobs} "
+            "to work around high core-count issues in Docker",
+            flush=True,
+        )
+        return max_jobs
+    return effective

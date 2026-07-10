@@ -16,6 +16,6 @@ cd "$REPO_ROOT"
 
 python -m coverage candidate-test \
     --output-dir $CANDIDATE_TESTS_OUTPUT_DIR \
-    --instrumented-bin $INSTRUMENTED_BIN_DIR \
+    --llc "$INSTRUMENTED_BIN_DIR/llc" \
     --candidate-tests-dir $TESTS_DIR \
     --n 100

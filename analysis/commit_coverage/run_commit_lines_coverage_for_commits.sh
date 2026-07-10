@@ -177,8 +177,10 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 	TS_STAT="$(mktemp "${OUT}/.baseline_stats.XXXXXX")"
 	run_gnu_timed "${TS_STAT}" python -m coverage baseline \
 		--output-dir "${BASELINE_OUTPUT_DIR}" \
-		--llvm-bin "${LLVM_BIN}" \
-		--instrumented-bin "${INSTRUMENTED_BIN_DIR}" \
+		--sancov "${LLVM_BIN}/sancov" \
+		--llvm-lit "${INSTRUMENTED_BIN_DIR}/llvm-lit" \
+		--llc "${INSTRUMENTED_BIN_DIR}/llc" \
+		--opt "${INSTRUMENTED_BIN_DIR}/opt" \
 		--lit-filter "${FILTER}"
 	if [[ -n "${TS_STAT}" && -s "${TS_STAT}" ]]; then
 		IFS=',' read -r TS_WALL TS_USER TS_SYS TS_RSS <"${TS_STAT}" || true

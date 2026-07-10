@@ -91,7 +91,7 @@ run_in_container python -m unittest discover -s tests -v
 echo "=== integration tests ==="
 run_in_container ./integration-tests/test.sh \
     --venv /work/fuzz-fill-venv \
-    --llvm-build /work/llvm-build-uninstrumented/bin \
+    --llvm-build /work/llvm-build-sancov/bin \
     --llvm-sancov-build /work/llvm-build-sancov/bin \
     --llvm-src /work/llvm-project \
     "$@"

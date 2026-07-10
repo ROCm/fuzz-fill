@@ -4,7 +4,7 @@
 # COM: and none be skipped.
 
 # RUN: rm -rf %t && mkdir -p %t/candidate_tests
-# RUN: %coverage candidate-test --output-dir %t/candidate_tests --instrumented-bin "$(dirname %sancov-llc)" --candidate-tests-dir %S/fixtures/new-tests-parallel --n 3 | tee %t/candidate_tests.log
+# RUN: %coverage candidate-test --output-dir %t/candidate_tests --llc %sancov-llc --candidate-tests-dir %S/fixtures/new-tests-parallel --n 3 | tee %t/candidate_tests.log
 
 # COM: Final progress line reports the tallies across all flag runs.
 # RUN: %FileCheck %s --input-file=%t/candidate_tests.log --check-prefix=EXEC

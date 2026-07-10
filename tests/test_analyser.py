@@ -66,7 +66,7 @@ class DiffPartialBaselineTest(unittest.TestCase):
                 output_dir=diff,
                 output_baseline_dir=suite,
                 output_candidate_tests_dir=new_tests,
-                llvm_bin=Path("/unused"),
+                sancov=Path("/unused/sancov"),
                 llc_address_line_map_file=DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
                 line_coverage_summary_file=DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
                 new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,

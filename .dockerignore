@@ -2,3 +2,4 @@
 #   ./scripts/build-image.sh --llvm-dir /path/to/llvm-project
 # which uses a separate named build context (see Dockerfile).
 llvm-project/
+.fuzz-fill-llvm-pr-worktrees/

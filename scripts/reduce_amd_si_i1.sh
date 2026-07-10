@@ -9,4 +9,5 @@ cd "$REPO_ROOT"
 
 python3 -m reduce \
     --config "$REPO_ROOT/example/amd/si-i1-copies/config.json" \
-    --llvm-bin "$LLVM_BIN"
+    --llc "$LLVM_BIN/llc" \
+    --llvm-reduce "$LLVM_BIN/llvm-reduce"

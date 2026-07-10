@@ -9,6 +9,27 @@ fuzz-fill supports two main workflows:
 
 See [here](#contributions) for a list of tests contributed to LLVM.
 
+## Table of Contents
+
+- [Setup](#setup)
+  - [Python environment](#python-environment)
+  - [LLVM builds](#llvm-builds)
+- [Workflow 1: Fill suite coverage gaps with fuzz-generated tests](#workflow-1-fill-suite-coverage-gaps-with-fuzz-generated-tests)
+- [Workflow 2: Uncovered lines in a commit](#workflow-2-uncovered-lines-in-a-commit)
+- [Reduce interesting tests](#reduce-interesting-tests)
+- [CLI reference](#cli-reference)
+  - [Environment variables](#environment-variables)
+- [Docker test image](#docker-test-image)
+  - [Build](#build)
+  - [Build from an LLVM pull request](#build-from-an-llvm-pull-request)
+  - [Workflow 2: PR coverage gap detection](#pr-coverage-gap-detection)
+  - [Run integration tests](#run-integration-tests)
+  - [Run a container](#run-a-container)
+- [Running integration tests](#running-integration-tests)
+- [Contributions](#contributions)
+  - [AMDGPU](#amdgpu)
+  - [SPIR-V](#spir-v)
+
 ## Setup
 
 ### Python environment
@@ -19,23 +40,22 @@ source venv/bin/activate
 pip install -e .
 ```
 
-### LLVM builds
+### LLVM build
 
-You need **two** builds of the **same** LLVM revision:
+You need an official **LLVM GitHub release** as bootstrap and one **SanitizerCoverage** build of llvm-project at the matching tag:
 
-| Build | Purpose | How |
-|-------|---------|-----|
-| **Uninstrumented** | `sancov` merge/symbolize, `llvm-reduce`, LIT helper tools | `./scripts/build-llvm.sh /path/to/clang /path/to/clang++ llvm-project llvm-project/build-uninstrumented` |
-| **SanitizerCoverage** | Run `llvm-lit`, instrumented `llc`/`opt` | `./scripts/build-llvm-sancov.sh ./scripts/allowlist-amdgpu.txt llvm-project llvm-project/build-uninstrumented llvm-project/build-sancov` |
+| Component | Purpose | How |
+|-----------|---------|-----|
+| **Release bootstrap** | `clang`, `clang++` for compiling LLVM | Download [LLVM release](https://github.com/llvm/llvm-project/releases) (e.g. `LLVM-22.1.8-Linux-X64.tar.xz`) |
+| **SanitizerCoverage** | Unified build tree: instrumented `llc`/`opt`, Release LIT helpers, `llvm-lit`, `sancov` | `./scripts/build-llvm-sancov.sh ./scripts/allowlist-amdgpu.txt llvm-project llvm-project/build-sancov --bootstrap-bin /path/to/LLVM-22.1.8/bin` |
 
-Run `build-llvm.sh` first. The sancov build is compiled with `clang`/`clang++` from the uninstrumented `bin/`.
+`build-llvm-sancov.sh` runs two partial builds from the same source: **`llvm-tblgen` is built from the source tree first**, then a **Release** tree for target-agnostic LIT helpers plus **`sancov`**, and a **Debug** SanitizerCoverage tree for **`llc`**, **`opt`**, and target-linked helpers (`llvm-mc`, `llvm-objdump`, …). Release tools are copied into the instrumented tree's `bin/`; `llvm-lit` is generated there by cmake. The bootstrap release supplies **clang/clang++ only** (TableGen must match the source).
 
 **`python -m coverage baseline`** patches **`<instrumented-build>/test/lit.site.cfg.py`** so LIT forwards **`UBSAN_OPTIONS`** to every test subprocess. The patch is idempotent and is re-applied if CMake regenerates that file.
 
 The example scripts below assume paths like:
 
-- `$LLVM/build/bin` — uninstrumented tools (including `sancov`)
-- `$LLVM/build-amdgpu-bb/bin` — instrumented `llvm-lit`, `llc`, and `opt`
+- `$LLVM/build-sancov/bin` — unified build (`llvm-lit`, instrumented `llc`/`opt` + target helpers, Release `sancov`/other LIT helpers)
 
 Adjust these to match your trees before running.
 
@@ -157,7 +177,9 @@ Examples:
 - [`scripts/reduce_amd_coverage_based.sh`](scripts/reduce_amd_coverage_based.sh), [`scripts/batch_reduce_using_coverage.sh`](scripts/batch_reduce_using_coverage.sh) — batch reduction from a coverage CSV
 
 ```bash
-python -m reduce --config example/amd/new-test-1/config.json --llvm-bin "$LLVM/build/bin"
+python -m reduce --config example/amd/new-test-1/config.json \
+  --llc "$LLVM/build-sancov/bin/llc" \
+  --llvm-reduce "$LLVM/build-sancov/bin/llvm-reduce"
 ```
 
 See `python -m reduce --help` and the checked-in `example/*/config.json` files for pipeline options.
@@ -177,13 +199,44 @@ The workflows above call these modules. Use `--help` on any command for the full
 | `python -m added_lines` | Lines added by a git commit (Workflow 2) |
 | `python -m reduce` | Testcase reduction |
 
+### Environment variables
+
+Several commands accept LLVM tool paths via environment variables when the matching CLI flag is omitted. A flag on the command line always wins.
+
+| Env var | CLI flag | Commands |
+|---------|----------|----------|
+| `FUZZ_FILL_SANCOV` | `--sancov` | `coverage baseline`, `coverage incremental` |
+| `FUZZ_FILL_LLVM_LIT` | `--llvm-lit` | `coverage baseline` |
+| `FUZZ_FILL_LLC` | `--llc` | `coverage baseline`, `coverage candidate-test`, `reduce` |
+| `FUZZ_FILL_OPT` | `--opt` | `coverage baseline` |
+| `FUZZ_FILL_LLVM_REDUCE` | `--llvm-reduce` | `reduce` |
+| `FUZZ_FILL_LLVM_DIS` | `--llvm-dis` | `reduce` (required for `.bc` input with `llvm_reduce_ir`) |
+| `FUZZ_FILL_LLVM_REPO` | `--llvm-repo` | `added_lines`, `coverage target-lines` |
+
+The [Docker test image](#docker-test-image) sets these per-tool defaults so interactive container use can omit tool flags. Integration tests use explicit CLI flags instead (see [Integration tests](#integration-tests)).
+
+Example (paths match the Docker test image):
+
+```bash
+export FUZZ_FILL_SANCOV=/work/llvm-build-sancov/bin/sancov
+export FUZZ_FILL_LLVM_LIT=/work/llvm-build-sancov/bin/llvm-lit
+export FUZZ_FILL_LLC=/work/llvm-build-sancov/bin/llc
+export FUZZ_FILL_OPT=/work/llvm-build-sancov/bin/opt
+export FUZZ_FILL_LLVM_REPO=/work/llvm-project
+
+python -m coverage baseline --output-dir data/baseline --lit-filter CodeGen/AMDGPU
+python -m added_lines --commit HEAD
+```
+
+Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `INSTRUMENTED_BIN_DIR`, …); only the `FUZZ_FILL_*` variables are read by the Python CLIs.
+
 ---
 
 ## Docker test image
 
-The Docker image bundles a pinned LLVM revision, both instrumented and uninstrumented builds, and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
+The Docker image bundles an official LLVM release bootstrap, a dual-build SanitizerCoverage LLVM tree (instrumented `llc`/`opt` plus Release helpers), and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
 
-**Scripts:** [`scripts/build-image.sh`](scripts/build-image.sh), [`scripts/test-image.sh`](scripts/test-image.sh), [`scripts/tmp-container.sh`](scripts/tmp-container.sh)
+**Scripts:** [`scripts/build-image.sh`](scripts/build-image.sh), [`scripts/build-image-pr.sh`](scripts/build-image-pr.sh), [`scripts/pr-cov-gaps-detection.sh`](scripts/pr-cov-gaps-detection.sh), [`scripts/test-image.sh`](scripts/test-image.sh), [`scripts/tmp-container.sh`](scripts/tmp-container.sh)
 
 ### Build
 
@@ -193,32 +246,70 @@ From the repo root (first build compiles LLVM and can take a while):
 ./scripts/build-image.sh
 ```
 
-By default the image is tagged `fuzz-fill-test:latest` and LLVM is downloaded from GitHub at a pinned revision.
+By default the image is tagged `fuzz-fill-test:latest`. LLVM source is downloaded at tag `llvmorg-22.1.8` and bootstrapped from the matching GitHub release.
 
 | Option | Meaning |
 |--------|---------|
-| `--llvm-dir <path>` | Use a local `llvm-project` checkout instead of downloading LLVM |
+| `--llvm-dir <path>` | Use a local `llvm-project` checkout instead of downloading tagged source |
+| `--llvm-release-version <ver>` | Official LLVM release for bootstrap toolchain (default: `22.1.8`) |
 | `--tag <tag>` | Docker image tag (default: `latest`) |
 | `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist baked into the instrumented build (default: `amdgpu`) |
+| `-j <n>`, `--jobs <n>` | Limit ninja parallelism for the sancov build (default: unconstrained) |
 
 Examples:
 
 ```bash
 ./scripts/build-image.sh --llvm-dir llvm-project --tag local-llvm
 ./scripts/build-image.sh --allowlist spirv --tag spirv
+./scripts/build-image.sh -j "$(nproc)"
 ```
 
-Inside the image, LLVM and fuzz-fill live at fixed paths (required by `lit.site.cfg.py`):
+### Build from an LLVM pull request
 
-| Path | Contents |
-|------|----------|
-| `/work/llvm-project` | LLVM source checkout |
-| `/work/llvm-build-uninstrumented/bin` | Uninstrumented tools (`sancov`, …) |
-| `/work/llvm-build-sancov/bin` | SanitizerCoverage build (`llvm-lit`, `llc`, `opt`) |
-| `/work/fuzz-fill` | fuzz-fill checkout |
-| `/work/fuzz-fill-venv` | Python venv (outside the repo mount) |
-| `/work/.llvm-source` | How LLVM was sourced (`local build context` or `github <commit>`) |
-| `/work/.sancov-allowlist` | Allowlist used for the instrumented build (`amdgpu` or `spirv`) |
+[`scripts/build-image-pr.sh`](scripts/build-image-pr.sh) builds a Docker image from an LLVM PR. Pass a local `llvm-project` clone; the PR is squashed in a standalone fuzz-fill clone so your llvm checkout is unchanged. Requires local `gh` and Docker (BuildKit). PRs are assumed to live on **`llvm/llvm-project`** unless you pass `--github-repo`.
+
+```bash
+./scripts/build-image-pr.sh --llvm-repo /path/llvm-project --pr-id 185430 --allowlist amdgpu
+```
+
+| Option | Meaning |
+|--------|---------|
+| `--llvm-repo <path>` | Local `llvm-project` clone |
+| `--pr-id <n>` | GitHub pull request number |
+| `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist |
+| `--github-repo <owner/repo>` | GitHub repo hosting the PR (default: `llvm/llvm-project`) |
+| `-j <n>`, `--jobs <n>` | Limit ninja parallelism for both LLVM builds (default: unconstrained) |
+
+For the full coverage-gap workflow (build + detect), use [`pr-cov-gaps-detection.sh --build-image`](#pr-coverage-gap-detection) instead.
+
+### Workflow 2: PR coverage gap detection
+
+[`scripts/pr-cov-gaps-detection.sh`](scripts/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. The LIT filter defaults to the image's `/work/.sancov-allowlist` (set at build time via `--backend-tests`); override with `--lit-filter` if needed.
+
+```bash
+./scripts/pr-cov-gaps-detection.sh \
+  --build-image \
+  --llvm-repo /path/llvm-project \
+  --pr-id 203468 \
+  --backend-tests amdgpu \
+  --output-dir /path/pr-cov-gaps-203468 \
+  -j "$(nproc)"
+```
+
+| Option | Meaning |
+|--------|---------|
+| `--build-image` | Build PR image first via `build-image-pr.sh` |
+| `--llvm-repo <path>` | Required with `--build-image` |
+| `--backend-tests amdgpu\|spirv` | Required with `--build-image` |
+| `--pr-id <n>` | PR number (image tag `llvm-pr-<n>`) |
+| `--output-dir <path>` | Host output directory |
+| `-j <n>`, `--jobs <n>` | Parallel jobs (ninja when building, llvm-lit when detecting) |
+| `--lit-filter <prefix>` | Optional LIT filter override |
+| `--github-repo <owner/repo>` | Optional; default `llvm/llvm-project` when building |
+
+If the image `fuzz-fill-test:llvm-pr-<n>` already exists, omit `--build-image` to run detection only.
+
+Main output: `<output-dir>/commit_lines_report/target_lines_uncovered.csv`. See [Workflow 2](#workflow-2-uncovered-lines-in-a-commit) for report semantics.
 
 ### Run integration tests
 
@@ -264,7 +355,7 @@ To run integration tests manually inside the container:
 ```bash
 ./scripts/tmp-container.sh ./integration-tests/test.sh \
   --venv /work/fuzz-fill-venv \
-  --llvm-build /work/llvm-build-uninstrumented/bin \
+  --llvm-build /work/llvm-build-sancov/bin \
   --llvm-sancov-build /work/llvm-build-sancov/bin \
   --llvm-src /work/llvm-project \
   -v integration-tests/
@@ -291,12 +382,12 @@ python -m unittest tests.test_analyser -v
 
 ### Integration tests
 
-Integration tests need both LLVM `bin` directories (same version). Locally:
+Integration tests need the SanitizerCoverage LLVM `bin` directory and llvm-project source. Locally:
 
 ```bash
 ./integration-tests/test.sh \
   --venv ./venv/ \
-  --llvm-build llvm-project/build-uninstrumented/bin/ \
+  --llvm-build llvm-project/build-sancov/bin/ \
   --llvm-sancov-build llvm-project/build-sancov/bin/ \
   --llvm-src llvm-project/ \
   integration-tests/
@@ -304,7 +395,7 @@ Integration tests need both LLVM `bin` directories (same version). Locally:
 
 Or use [`scripts/test-image.sh`](scripts/test-image.sh) with the [Docker test image](#docker-test-image).
 
-`--llvm-build` is the uninstrumented tree; `--llvm-sancov-build` is the SanitizerCoverage build; `--llvm-src` is the llvm-project checkout root (used as `%llvm-repo` in tests).
+Both `--llvm-build` and `--llvm-sancov-build` point at the same SanitizerCoverage tree; `--llvm-src` is the llvm-project checkout root (used as `%llvm-repo` in tests).
 
 ---
 

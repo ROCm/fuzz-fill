@@ -41,11 +41,13 @@ class _ExtractMirLlcOptions:
     llc_O: str
 
 
-def _require_tool(llvm_bin: Path, exe_name: str) -> Path:
-    exe = llvm_bin / exe_name
-    if not exe.is_file():
-        raise SystemExit(f"{exe_name} not found: {exe}")
-    return exe
+def _require_llvm_dis(ctx: ReduceContext) -> Path:
+    if ctx.llvm_dis is None:
+        raise SystemExit(
+            "--llvm-dis is required when reducing .bc input with llvm_reduce_ir "
+            "(or set FUZZ_FILL_LLVM_DIS)."
+        )
+    return ctx.llvm_dis
 
 
 def _llc_opt_argv(llc_O: str) -> list[str]:
@@ -173,7 +175,7 @@ def _run_llc_extract_core(
     what: str,
     pass_specific_args: Sequence[str],
 ) -> Test:
-    exe = _require_tool(ctx.llvm_bin, "llc")
+    exe = ctx.llc
     cmd = [
         str(exe),
         "-o",
@@ -291,7 +293,7 @@ class LlvmReduceIrPass(ReducePass):
 
     def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
         interesting = _interesting_script_for_llvm_reduce_ir(ctx)
-        exe = _require_tool(ctx.llvm_bin, "llvm-reduce")
+        exe = ctx.llvm_reduce
         out = tmp_pass_path(ctx.tmp_dir, step, "llvmreduce", test.test_path.suffix)
         cmd = [
             str(exe),
@@ -314,8 +316,9 @@ class LlvmReduceIrPass(ReducePass):
             raise SystemExit(f"llvm-reduce did not write expected output: {out}")
 
         if test.test_path.suffix == ".bc":
+            llvm_dis = _require_llvm_dis(ctx)
             cmd = [
-                str(ctx.llvm_bin / "llvm-dis"),
+                str(llvm_dis),
                 "-o",
                 str(out.with_suffix(".ll").resolve()),
                 str(out.resolve()),
@@ -383,7 +386,7 @@ class LlvmReduceMirPass(ReducePass):
 
     def run(self, ctx: ReduceContext, test: Test, *, step: int) -> Test:
         interesting_mir = _require_interesting_mir_script(ctx)
-        exe = _require_tool(ctx.llvm_bin, "llvm-reduce")
+        exe = ctx.llvm_reduce
         out = tmp_pass_path_mir(ctx.tmp_dir, step, "llvmreduce_mir")
         cmd = [
             str(exe),

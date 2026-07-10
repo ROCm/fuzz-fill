@@ -47,7 +47,7 @@ class CoverageAnalyzer:
                     ["test_name", "file", "line", "covered-points"]
                 )
 
-            sancov = Sancov(self.filepaths.llvm_bin)
+            sancov = Sancov(self.filepaths.sancov)
 
             # Keep track of lines that are newly covered by candidate tests
             # so that we avoid adding them to the new coverage csv multiple times

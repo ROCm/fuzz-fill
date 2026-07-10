@@ -33,7 +33,7 @@ def _require_dir(env_var: str, human_label: str) -> str:
 
 _llvm_bin_dir = _require_dir(
     "FUZZ_FILL_LLVM_BIN_DIR",
-    "uninstrumented LLVM build bin directory (FileCheck, sancov)",
+    "LLVM build bin directory (FileCheck, sancov)",
 )
 _llvm_sancov_bin_dir = _require_dir(
     "FUZZ_FILL_LLVM_SANCOV_BIN_DIR",
@@ -84,6 +84,7 @@ def _tool(bin_dir: str, name: str) -> str:
 
 _llvm_build_dir = os.path.dirname(_llvm_bin_dir)
 _venv_cmd = f". {shlex.quote(_venv_activate)}"
+_venv_python = shlex.quote(os.path.join(_venv_dir, "bin", "python"))
 
 config.name = "fuzz-fill-integration-tests"
 config.suffixes = [".test"]
@@ -94,11 +95,13 @@ config.substitutions.extend(
         ("%sancov-llc", _tool(_llvm_sancov_bin_dir, "llc")),
         ("%sancov-opt", _tool(_llvm_sancov_bin_dir, "opt")),
         ("%sancov", _tool(_llvm_bin_dir, "sancov")),
+        ("%llvm-lit", _tool(_llvm_sancov_bin_dir, "llvm-lit")),
         ("%FileCheck", _tool(_llvm_bin_dir, "FileCheck")),
+        ("%not", _tool(_llvm_bin_dir, "not")),
         ("%llvm-build-dir", shlex.quote(_llvm_build_dir)),
         ("%llvm-repo", shlex.quote(_llvm_src_dir)),
         ("%venv", _venv_cmd),
-        ("%coverage", f"{_venv_cmd} && python -m coverage"),
-        ("%reduce", f"{_venv_cmd} && python -m reduce"),
+        ("%coverage", f"{_venv_python} -m coverage"),
+        ("%reduce", f"{_venv_python} -m reduce"),
     ]
 )

@@ -59,6 +59,7 @@ python3 scripts/batch_reduce_using_coverage.py \
   --csv "$TESTS_TO_REDUCE" \
   --candidate-tests "$CANDIDATE_TESTS_DIR" \
   --output "$OUTPUT_DIR" \
-  --llvm-bin "$LLVM_BIN" \
+  --llc "$LLVM_BIN/llc" \
+  --llvm-reduce "$LLVM_BIN/llvm-reduce" \
   --n $N_FILES \
   "${EXTRA_ARGS[@]}"
