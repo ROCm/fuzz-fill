@@ -51,8 +51,6 @@ def run_target_lines_check(
     ``coverage`` is ``none`` — every merged instrumentation point on that ``(file, line)``
     was absent from the suite's covered points.
 
-    Each row includes **``point_addresses``** from the summary CSV (semicolon-separated).
-
     Lines with ``coverage`` ``full`` or ``partial`` are omitted from the report;
     ``partial`` is counted in the printed summary.
 
@@ -110,20 +108,17 @@ def run_target_lines_check(
                     stats["covered"] += 1
                 elif coverage == "none":
                     stats["all_uncovered"] += 1
-                    addrs = index.point_addresses.get((sym_file, line_no), [])
                     uncovered_rows.append(
                         {
-                            "path": rel,
+                            "file": rel,
                             "line_no": str(line_no),
                             "text": text,
-                            "symcov_file": sym_file,
-                            "point_addresses": ";".join(addrs),
                         }
                     )
                 else:
                     stats["partial"] += 1
 
-    fieldnames = ["path", "line_no", "text", "symcov_file", "point_addresses"]
+    fieldnames = ["file", "line_no", "text"]
     with report_path.open("w", encoding="utf-8", newline="") as out:
         w = csv.DictWriter(out, fieldnames=fieldnames)
         w.writeheader()
