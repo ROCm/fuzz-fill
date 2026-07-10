@@ -1,7 +1,9 @@
 # COM: --log-to-file writes fuzz_fill.log under --output-dir with log messages.
 
-# RUN: rm -rf %t && mkdir -p %t/out
-# RUN: %added-lines --llvm-repo %llvm-repo --commit HEAD --output-dir %t/out --log-to-file --log-level info > %t/added-lines.csv
+# RUN: rm -rf %t && mkdir -p %t/out %t/repo
+# RUN: git init -q %t/repo && git -C %t/repo config user.email test@test && git -C %t/repo config user.name test
+# RUN: echo hello > %t/repo/foo.txt && git -C %t/repo add foo.txt && git -C %t/repo commit -qm init
+# RUN: %added-lines --llvm-repo %t/repo --commit HEAD --output-dir %t/out --log-to-file --log-level info > %t/added-lines.csv
 # RUN: test -f %t/out/fuzz_fill.log
 # RUN: %FileCheck %s --input-file=%t/out/fuzz_fill.log
 # CHECK: collect added lines
