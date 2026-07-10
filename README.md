@@ -9,26 +9,52 @@ fuzz-fill supports two main workflows:
 
 See [here](#contributions) for a list of tests contributed to LLVM.
 
+## Quick start (Docker)
+
+Try [Workflow 2](#workflow-2-uncovered-lines-in-a-commit), which reports lines added as part of a commit that the LLVM test suite does not cover.
+
+Prerequisites:
+- [Docker](https://docs.docker.com/)
+- A local `llvm-project` checkout
+
+```bash
+git clone https://github.com/ROCm/fuzz-fill.git
+cd fuzz-fill
+```
+
+**LLVM pull request** — requires [GitHub CLI](https://cli.github.com/) (`gh`). Builds a PR image and runs detection in one step (first build compiles LLVM in Docker and can take a while):
+
+```bash
+./scripts/pr-cov-gaps-detection.sh \
+  --build-image \
+  --llvm-repo /path/to/llvm-project \
+  --pr-id 203468 \
+  --backend-tests amdgpu \
+  --output-dir ./data/pr-cov-gaps-203468 \
+  -j "$(nproc)"
+```
+
+Use `spirv` instead of `amdgpu` for SPIR-V backend tests.
+
+**Local commit** — build from your `llvm-project` and then run:
+
+```bash
+./scripts/build-image.sh --llvm-dir /path/to/llvm-project --allowlist amdgpu -j "$(nproc)"
+
+./scripts/pr-cov-gaps-detection.sh \
+  --image fuzz-fill-test:latest \
+  --output-dir ./data/my-commit \
+  --commit HEAD \
+  -j "$(nproc)"
+```
+
+Replace `HEAD` with a hash, branch, or `main~3` as needed.
+
+**Result (both paths):** `<output-dir>/commit_lines_report/target_lines_uncovered.csv` — added source lines that are not covered by the test suite. See [Workflow 2](#workflow-2-uncovered-lines-in-a-commit) and [Docker test image](#docker-test-image) for more options.
+
 ## Table of Contents
 
-- [Setup](#setup)
-  - [Python environment](#python-environment)
-  - [LLVM builds](#llvm-builds)
-- [Workflow 1: Fill suite coverage gaps with fuzz-generated tests](#workflow-1-fill-suite-coverage-gaps-with-fuzz-generated-tests)
-- [Workflow 2: Uncovered lines in a commit](#workflow-2-uncovered-lines-in-a-commit)
-- [Reduce interesting tests](#reduce-interesting-tests)
-- [CLI reference](#cli-reference)
-- [Docker test image](#docker-test-image)
-  - [Build](#build)
-  - [Build from an LLVM pull request](#build-from-an-llvm-pull-request)
-  - [PR coverage gap detection](#pr-coverage-gap-detection)
-  - [Run integration tests](#run-integration-tests)
-  - [Run a container](#run-a-container)
-- [Tests](#tests)
-- [Contributions](#contributions)
-
-## Table of Contents
-
+- [Quick start (Docker)](#quick-start-docker)
 - [Setup](#setup)
   - [Python environment](#python-environment)
   - [LLVM builds](#llvm-builds)
@@ -40,10 +66,10 @@ See [here](#contributions) for a list of tests contributed to LLVM.
 - [Docker test image](#docker-test-image)
   - [Build](#build)
   - [Build from an LLVM pull request](#build-from-an-llvm-pull-request)
-  - [Workflow 2: PR coverage gap detection](#pr-coverage-gap-detection)
+  - [Workflow 2: PR coverage gap detection](#workflow-2-pr-coverage-gap-detection)
   - [Run integration tests](#run-integration-tests)
   - [Run a container](#run-a-container)
-- [Running integration tests](#running-integration-tests)
+- [Tests](#tests)
 - [Contributions](#contributions)
   - [AMDGPU](#amdgpu)
   - [SPIR-V](#spir-v)
