@@ -11,7 +11,7 @@ See [here](#contributions) for a list of tests contributed to LLVM.
 
 ## Quick start (Docker)
 
-Try [Workflow 2](#workflow-2-uncovered-lines-in-a-commit), which finds find lines added as part of a commit that the LLVM test suite does not cover.
+Try [Workflow 2](#workflow-2-uncovered-lines-in-a-commit), which reports lines added as part of a commit that the LLVM test suite does not cover.
 
 Prerequisites:
 - [Docker](https://docs.docker.com/)
