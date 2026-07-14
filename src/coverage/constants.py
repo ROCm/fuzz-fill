@@ -14,6 +14,7 @@ DEFAULT_LLC_ADDRESS_LINE_MAP_FILE = "llc_address_line_map.csv"
 DEFAULT_LINE_COVERAGE_SUMMARY_FILE = "line_coverage_summary.csv"
 DEFAULT_NEW_COVERAGE_CSV = "new_coverage.csv"
 DEFAULT_TARGET_LINES_REPORT = "target_lines_uncovered.csv"
+DEFAULT_LIT_FAILURES_REPORT = "lit_failures.json"
 
 # Sancov constants
 UNION_BATCH_SIZE = 200

@@ -313,3 +313,37 @@ report="${output_dir}/commit_lines_report/target_lines_uncovered.csv"
 echo "Wrote ${report}"
 echo "Image: ${image_ref}"
 echo "LIT filter: ${lit_filter}"
+
+lit_failures_json="${output_dir}/baseline/lit_failures.json"
+warning_file="${output_dir}/README-WARNING"
+
+fail_count=0
+if [[ -f "$lit_failures_json" ]]; then
+    fail_count="$(python3 -c '
+import json, sys
+FAILURE_CODES = {"FAIL", "TIMEOUT", "UNRESOLVED", "XPASS"}
+try:
+    with open(sys.argv[1]) as f:
+        data = json.load(f)
+    print(sum(1 for t in data.get("tests", []) if t.get("code") in FAILURE_CODES))
+except Exception:
+    print(0)
+' "$lit_failures_json")"
+fi
+
+if [[ "$fail_count" -gt 0 ]]; then
+    msg="WARNING: ${fail_count} LIT test(s) failed during the baseline run (e.g., failed a check, timed out, unresolved, or unexpectedly passed).
+Failed tests may lead to an incomplete coverage profile. As a result,
+target_lines_uncovered.csv may report lines as uncovered even though they are
+actually covered by a (failing) test.
+Review baseline/lit_failures.json for the list of failing tests."
+
+    if [[ -t 1 ]]; then
+        printf '%b\n' "\033[1;31m${msg}\033[0m"
+    else
+        printf '%s\n' "$msg"
+    fi
+
+    printf '%s\n' "$msg" > "$warning_file"
+    echo "Wrote ${warning_file}"
+fi

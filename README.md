@@ -151,6 +151,7 @@ Under `$OUTPUT_DIR`:
 | Path | Contents |
 |------|----------|
 | `baseline/line_coverage_summary.csv` | Per-line baseline coverage (joint llc + opt): `full`, `partial`, or `none` |
+| `baseline/lit_failures.json` | Failed lit tests from the baseline run (llvm-lit `--report-failures-only` JSON: `name`, `code`, `output`, `elapsed`) |
 | `baseline/processed_sancov/` | Merged, symbolized symcov files — reuse these if you re-run `incremental` with different candidate tests |
 | `candidate_tests/raw_sancov/` | Per-test raw sancov shards |
 | `incremental/new_coverage.csv` | **Main result** — columns `test`, `file`, `line`, `covered-points`: fuzz tests that fill suite coverage gaps |
@@ -204,6 +205,7 @@ Under `$OUTPUT_DIR`:
 |------|----------|
 | `added-lines/added-lines.csv` | Added lines from the commit (`path`, `line_no`, `text`) |
 | `test_suite/line_coverage_summary.csv` | Per-line baseline coverage (`full` / `partial` / `none`) — **required by `target-lines`** |
+| `baseline/lit_failures.json` | Failed lit tests from the baseline run (llvm-lit `--report-failures-only` JSON: `name`, `code`, `output`, `elapsed`) |
 | `baseline/processed_sancov/` | Merged symcov (still produced for debugging; not read by `target-lines`) |
 | `target_lines_report/target_lines_uncovered.csv` | **Main result** — added lines where every suite point on that line is off |
 

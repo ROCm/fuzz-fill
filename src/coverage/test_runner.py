@@ -8,7 +8,7 @@ import sys
 import pandas as pd
 from pathlib import Path
 
-from coverage.constants import TEST_FLAGS
+from coverage.constants import DEFAULT_LIT_FAILURES_REPORT, TEST_FLAGS
 from coverage.filepaths import Filepaths
 from coverage.lit_config import (
     ensure_lit_sancov_env_forwarding,
@@ -137,12 +137,16 @@ class TestRunner:
             )
 
         lit_jobs = resolve_lit_job_count(self.jobs)
+        lit_report_path = self.filepaths.output_dir / DEFAULT_LIT_FAILURES_REPORT
         argv = [
             sys.executable,
             str(llvm_lit),
             str(lit_suite),
             f"--filter={self._lit_filter}",
             f"-j{lit_jobs}",
+            "-o",
+            str(lit_report_path),
+            "--report-failures-only",
         ]
         if self.lit_verbose:
             argv.append("-vv")
