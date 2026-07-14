@@ -25,7 +25,7 @@ cd fuzz-fill
 **LLVM pull request** — requires [GitHub CLI](https://cli.github.com/) (`gh`). Builds a PR image and runs detection in one step (first build compiles LLVM in Docker and can take a while):
 
 ```bash
-./scripts/pr-cov-gaps-detection.sh \
+./scripts/docker/pr-cov-gaps-detection.sh \
   --build-image \
   --llvm-repo /path/to/llvm-project \
   --pr-id 203468 \
@@ -39,9 +39,9 @@ Use `spirv` instead of `amdgpu` for SPIR-V backend tests.
 **Local commit** — build from your `llvm-project` and then run:
 
 ```bash
-./scripts/build-image.sh --llvm-dir /path/to/llvm-project --allowlist amdgpu -j "$(nproc)"
+./scripts/docker/build-image.sh --llvm-dir /path/to/llvm-project --allowlist amdgpu -j "$(nproc)"
 
-./scripts/pr-cov-gaps-detection.sh \
+./scripts/docker/pr-cov-gaps-detection.sh \
   --image fuzz-fill-test:latest \
   --output-dir ./data/my-commit \
   --commit HEAD \
@@ -280,14 +280,14 @@ Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `IN
 
 The Docker image bundles an official LLVM release bootstrap, a dual-build SanitizerCoverage LLVM tree (instrumented `llc`/`opt` plus Release helpers), and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
 
-**Scripts:** [`scripts/build-image.sh`](scripts/build-image.sh), [`scripts/build-image-pr.sh`](scripts/build-image-pr.sh), [`scripts/pr-cov-gaps-detection.sh`](scripts/pr-cov-gaps-detection.sh), [`scripts/build-image-pr.sh`](scripts/build-image-pr.sh), [`scripts/pr-cov-gaps-detection.sh`](scripts/pr-cov-gaps-detection.sh), [`scripts/test-image.sh`](scripts/test-image.sh), [`scripts/tmp-container.sh`](scripts/tmp-container.sh)
+**Scripts** (under [`scripts/docker/`](scripts/docker/)): [`build-image.sh`](scripts/docker/build-image.sh), [`build-image-pr.sh`](scripts/docker/build-image-pr.sh), [`pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh), [`test-image.sh`](scripts/docker/test-image.sh), [`tmp-container.sh`](scripts/docker/tmp-container.sh)
 
 ### Build
 
 From the repo root (first build compiles LLVM and can take a while):
 
 ```bash
-./scripts/build-image.sh
+./scripts/docker/build-image.sh
 ```
 
 By default the image is tagged `fuzz-fill-test:latest`. LLVM source is downloaded at tag `llvmorg-22.1.8` and bootstrapped from the matching GitHub release.
@@ -303,17 +303,17 @@ By default the image is tagged `fuzz-fill-test:latest`. LLVM source is downloade
 Examples:
 
 ```bash
-./scripts/build-image.sh --llvm-dir llvm-project --tag local-llvm
-./scripts/build-image.sh --allowlist spirv --tag spirv
-./scripts/build-image.sh -j "$(nproc)"
+./scripts/docker/build-image.sh --llvm-dir llvm-project --tag local-llvm
+./scripts/docker/build-image.sh --allowlist spirv --tag spirv
+./scripts/docker/build-image.sh -j "$(nproc)"
 ```
 
 ### Build from an LLVM pull request
 
-[`scripts/build-image-pr.sh`](scripts/build-image-pr.sh) builds a Docker image from an LLVM PR. Pass a local `llvm-project` clone; the PR is squashed in a standalone fuzz-fill clone so your llvm checkout is unchanged. Requires local `gh` and Docker (BuildKit). PRs are assumed to live on **`llvm/llvm-project`** unless you pass `--github-repo`.
+[`scripts/docker/build-image-pr.sh`](scripts/docker/build-image-pr.sh) builds a Docker image from an LLVM PR. Pass a local `llvm-project` clone; the PR is squashed in a standalone fuzz-fill clone so your llvm checkout is unchanged. Requires local `gh` and Docker (BuildKit). PRs are assumed to live on **`llvm/llvm-project`** unless you pass `--github-repo`.
 
 ```bash
-./scripts/build-image-pr.sh --llvm-repo /path/llvm-project --pr-id 185430 --allowlist amdgpu
+./scripts/docker/build-image-pr.sh --llvm-repo /path/llvm-project --pr-id 185430 --allowlist amdgpu
 ```
 
 | Option | Meaning |
@@ -324,14 +324,14 @@ Examples:
 | `--github-repo <owner/repo>` | GitHub repo hosting the PR (default: `llvm/llvm-project`) |
 | `-j <n>`, `--jobs <n>` | Limit ninja parallelism for both LLVM builds (default: unconstrained) |
 
-For the full coverage-gap workflow (build + detect), use [`pr-cov-gaps-detection.sh --build-image`](#pr-coverage-gap-detection) instead.
+For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov-gaps-detection.sh --build-image`](#pr-coverage-gap-detection) instead.
 
 ### Workflow 2: PR coverage gap detection
 
-[`scripts/pr-cov-gaps-detection.sh`](scripts/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. The LIT filter defaults to the image's `/work/.sancov-allowlist` (set at build time via `--backend-tests`); override with `--lit-filter` if needed.
+[`scripts/docker/pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. The LIT filter defaults to the image's `/work/.sancov-allowlist` (set at build time via `--backend-tests`); override with `--lit-filter` if needed.
 
 ```bash
-./scripts/pr-cov-gaps-detection.sh \
+./scripts/docker/pr-cov-gaps-detection.sh \
   --build-image \
   --llvm-repo /path/llvm-project \
   --pr-id 203468 \
@@ -342,7 +342,7 @@ For the full coverage-gap workflow (build + detect), use [`pr-cov-gaps-detection
 
 | Option | Meaning |
 |--------|---------|
-| `--build-image` | Build PR image first via `build-image-pr.sh` |
+| `--build-image` | Build PR image first via `scripts/docker/build-image-pr.sh` |
 | `--llvm-repo <path>` | Required with `--build-image` |
 | `--backend-tests amdgpu\|spirv` | Required with `--build-image` |
 | `--pr-id <n>` | PR number (image tag `llvm-pr-<n>`) |
@@ -358,33 +358,33 @@ Main output: `<output-dir>/commit_lines_report/target_lines_uncovered.csv`. See 
 ### Run integration tests
 
 ```bash
-./scripts/test-image.sh
+./scripts/docker/test-image.sh
 ```
 
 This runs the full suite under `integration-tests/` using the image baked into the container. Pass the same `--tag` you used when building:
 
 ```bash
-./scripts/build-image.sh --tag local-llvm
-./scripts/test-image.sh --tag local-llvm
+./scripts/docker/build-image.sh --tag local-llvm
+./scripts/docker/test-image.sh --tag local-llvm
 ```
 
 After building a [PR image](#build-from-an-llvm-pull-request), pass the same tag (default `llvm-pr-<pr-id>`):
 
 ```bash
-./scripts/build-image-pr.sh --llvm-repo ../llvm-project --pr-id 185430 --allowlist amdgpu
-./scripts/test-image.sh --tag llvm-pr-185430
+./scripts/docker/build-image-pr.sh --llvm-repo ../llvm-project --pr-id 185430 --allowlist amdgpu
+./scripts/docker/test-image.sh --tag llvm-pr-185430
 ```
 
 Use `--bind-repo` to mount your local fuzz-fill checkout over `/work/fuzz-fill` while keeping the image venv at `/work/fuzz-fill-venv`:
 
 ```bash
-./scripts/test-image.sh --bind-repo
+./scripts/docker/test-image.sh --bind-repo
 ```
 
 Any extra arguments are forwarded to lit. For example:
 
 ```bash
-./scripts/test-image.sh --tag local-llvm integration-tests/smoke.test
+./scripts/docker/test-image.sh --tag local-llvm integration-tests/smoke.test
 ```
 
 ### Run a container
@@ -392,9 +392,9 @@ Any extra arguments are forwarded to lit. For example:
 For an interactive shell or arbitrary commands:
 
 ```bash
-./scripts/tmp-container.sh                              # interactive shell
-./scripts/tmp-container.sh --bind-repo                  # shell with host repo mounted
-./scripts/tmp-container.sh --bind-repo <command> [args] # one-shot command
+./scripts/docker/tmp-container.sh                              # interactive shell
+./scripts/docker/tmp-container.sh --bind-repo                  # shell with host repo mounted
+./scripts/docker/tmp-container.sh --bind-repo <command> [args] # one-shot command
 ```
 
 Without `--bind-repo`, the container uses the fuzz-fill copy baked into the image.
@@ -404,7 +404,7 @@ With `--bind-repo`, your local checkout is mounted at `/work/fuzz-fill`; the ven
 To run integration tests manually inside the container:
 
 ```bash
-./scripts/tmp-container.sh ./integration-tests/test.sh \
+./scripts/docker/tmp-container.sh ./integration-tests/test.sh \
   --venv /work/fuzz-fill-venv \
   --llvm-build /work/llvm-build-sancov/bin \
   --llvm-sancov-build /work/llvm-build-sancov/bin \
@@ -444,12 +444,12 @@ Integration tests need the SanitizerCoverage LLVM `bin` directory and llvm-proje
   integration-tests/
 ```
 
-Or use [`scripts/test-image.sh`](scripts/test-image.sh) with the [Docker test image](#docker-test-image). That script runs unit tests first, then integration tests:
+Or use [`scripts/docker/test-image.sh`](scripts/docker/test-image.sh) with the [Docker test image](#docker-test-image). That script runs unit tests first, then integration tests:
 
 ```bash
-./scripts/test-image.sh                    # default tag: latest
-./scripts/test-image.sh --tag llvm-pr-42   # after build-image-pr.sh
-./scripts/test-image.sh --bind-repo        # mount local checkout
+./scripts/docker/test-image.sh                    # default tag: latest
+./scripts/docker/test-image.sh --tag llvm-pr-42   # after scripts/docker/build-image-pr.sh
+./scripts/docker/test-image.sh --bind-repo        # mount local checkout
 ```
 
 Both `--llvm-build` and `--llvm-sancov-build` point at the same SanitizerCoverage tree; `--llvm-src` is the llvm-project checkout root (used as `%llvm-repo` in tests).
