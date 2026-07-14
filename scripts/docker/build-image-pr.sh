@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 llvm_repo=""
 pr_id=""
@@ -247,7 +247,7 @@ if [[ -z "$base_ref_oid" || "$base_ref_oid" == "null" ]]; then
 fi
 
 echo "Preparing ${github_repo}#${pr_id}: ${pr_title}"
-echo "  base: ${base_ref_oid}"
+echo "  base (target branch tip): ${base_ref_oid}"
 
 pr_head_ref="refs/fuzz-fill/pr-${pr_id}/head"
 pr_fetch_url="https://github.com/${github_repo}.git"
@@ -265,18 +265,36 @@ git clone --reference "$llvm_repo" -n "file://${llvm_repo}" "$docker_llvm_path"
 
 ensure_commit_available "$docker_llvm_path" "$base_ref_oid" "PR base commit" "$pr_fetch_url"
 
-echo "Checking out PR base ${base_ref_oid} on branch ${branch}"
-git -C "$docker_llvm_path" checkout -b "$branch" "$base_ref_oid"
-
 echo "Fetching PR head via ${pr_fetch_url}"
 git -C "$docker_llvm_path" fetch "$pr_fetch_url" "pull/${pr_id}/head:${pr_head_ref}"
 
-echo "Squashing PR changes into a single commit"
-git -C "$docker_llvm_path" merge --squash "$pr_head_ref"
-if ! git -C "$docker_llvm_path" commit -m "Squash ${github_repo}#${pr_id} for fuzz-fill image build (${ts})"; then
-    echo "error: squash commit failed (is the PR empty?): ${github_repo}#${pr_id}" >&2
+merge_base_oid="$(git -C "$docker_llvm_path" merge-base "$base_ref_oid" "$pr_head_ref")"
+if [[ -z "$merge_base_oid" ]]; then
+    echo "error: could not find merge-base between base and PR head for ${github_repo}#${pr_id}" >&2
     exit 1
 fi
+
+pr_head_oid="$(git -C "$docker_llvm_path" rev-parse "$pr_head_ref")"
+pr_tree_oid="$(git -C "$docker_llvm_path" rev-parse "${pr_head_ref}^{tree}")"
+merge_base_tree_oid="$(git -C "$docker_llvm_path" rev-parse "${merge_base_oid}^{tree}")"
+
+echo "  merge-base: ${merge_base_oid}"
+echo "  PR head: ${pr_head_oid}"
+
+if [[ "$merge_base_tree_oid" == "$pr_tree_oid" ]]; then
+    echo "error: PR has no changes vs merge-base ${merge_base_oid}: ${github_repo}#${pr_id}" >&2
+    exit 1
+fi
+
+echo "Creating single squash commit (PR head tree, merge-base parent)"
+squash_msg="Squash ${github_repo}#${pr_id} for fuzz-fill image build (${ts})"
+squash_oid="$(git -C "$docker_llvm_path" commit-tree "$pr_tree_oid" -p "$merge_base_oid" -m "$squash_msg")"
+if [[ -z "$squash_oid" ]]; then
+    echo "error: failed to create squash commit for ${github_repo}#${pr_id}" >&2
+    exit 1
+fi
+
+git -C "$docker_llvm_path" checkout -B "$branch" "$squash_oid"
 
 echo "Making clone self-contained for Docker build"
 dissociate_clone "$docker_llvm_path"
