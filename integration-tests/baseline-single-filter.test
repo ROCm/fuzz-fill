@@ -17,6 +17,14 @@
 # RUN: test -f %t/baseline/run_config.json
 # RUN: test -f %t/baseline/line_coverage_summary.csv
 # RUN: test -f %t/baseline/llc_address_line_map.csv
+# RUN: test -f %t/baseline/lit_failures.json
+
+# COM: lit_failures.json is always written; with no lit failures the tests array is empty.
+# RUN: %FileCheck %s --input-file=%t/baseline/lit_failures.json --check-prefix=LIT_FAILURES
+# LIT_FAILURES: "__version__":
+# LIT_FAILURES: "elapsed":
+# LIT_FAILURES: "tests": []
+# LIT_FAILURES-NOT: "code":
 
 # COM: Verify the test actually executed by confirming non-empty coverage: the
 # COM: address map must contain at least one real data row (an AMDGPU source path with a
