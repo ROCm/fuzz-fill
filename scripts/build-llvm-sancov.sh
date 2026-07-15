@@ -128,7 +128,7 @@ HELPERS_BUILD_DIR="${SANCOV_BUILD_DIR}-helpers"
 SANCOV_BIN="$SANCOV_BUILD_DIR/bin"
 HELPERS_BIN="$HELPERS_BUILD_DIR/bin"
 
-SANCOV_FLAGS="-O0 -fno-inline -fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=bb,trace-pc-guard"
+SANCOV_FLAGS="-fno-inline -fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=bb,trace-pc-guard"
 
 LLVM_CMAKE_BASE=(
     -G Ninja
@@ -194,13 +194,13 @@ echo "=== Release helpers (${#HELPER_RELEASE_TARGETS[@]} targets) ==="
 )
 
 echo
-echo "=== Instrumented tree (Debug + SanitizerCoverage, ${#SANCOV_INSTRUMENTED_TARGETS[@]} targets) ==="
+echo "=== Instrumented tree (RelWithDebInfo + SanitizerCoverage, ${#SANCOV_INSTRUMENTED_TARGETS[@]} targets) ==="
 (
     cd "$SANCOV_BUILD_DIR"
     cmake "${LLVM_CMAKE_CONFIGURED[@]}" \
         -DCMAKE_C_FLAGS="$SANCOV_FLAGS" \
         -DCMAKE_CXX_FLAGS="$SANCOV_FLAGS" \
-        -DCMAKE_BUILD_TYPE=Debug \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         "$LLVM_DIR/llvm"
     ninja "${ninja_args[@]}" "${SANCOV_INSTRUMENTED_TARGETS[@]}"
 )
