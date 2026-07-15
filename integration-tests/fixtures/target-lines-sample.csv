@@ -1,7 +1,7 @@
 path,line_no,text
 llvm/lib/Target/AMDGPU/AMDGPUAliasAnalysis.cpp,103,
 llvm/lib/Target/AMDGPU/AMDGPUAsmPrinter.cpp,211,
-llvm/lib/Target/AMDGPU/AMDGPUAsmPrinter.cpp,588,
-llvm/lib/Target/AMDGPU/AMDGPUAsmPrinter.cpp,596,
+llvm/lib/Target/AMDGPU/AMDGPUAsmPrinter.cpp,222,
+llvm/lib/Target/AMDGPU/AMDGPUAsmPrinter.cpp,581,
 llvm/lib/Target/AMDGPU/AMDGPUHSAMetadataStreamer.cpp,590,
 llvm/lib/Target/AMDGPU/AMDGPUHSAMetadataStreamer.cpp,680,
