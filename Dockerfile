@@ -96,12 +96,16 @@ RUN case "${SANCOV_ALLOWLIST}" in \
     esac \
  && echo "${SANCOV_ALLOWLIST}" > /work/.sancov-allowlist \
  && echo "=== fuzz-fill: SanitizerCoverage allowlist = ${SANCOV_ALLOWLIST} ===" \
+ && llvm_build_start=$(date +%s) \
  && /usr/local/bin/build-llvm-sancov.sh \
         "${allowlist}" \
         /work/llvm-project \
         /work/llvm-build-sancov \
         --bootstrap-bin /work/llvm-release/bin \
-        "${NINJA_JOBS}"
+        "${NINJA_JOBS}" \
+ && llvm_build_secs=$(( $(date +%s) - llvm_build_start )) \
+ && echo "${llvm_build_secs}" > /work/.llvm-build-time \
+ && echo "=== fuzz-fill: LLVM build wall time: ${llvm_build_secs}s ==="
 
 FROM ubuntu:24.04 AS final
 
@@ -127,6 +131,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.llvm-source /work/.llvm-source
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.sancov-allowlist /work/.sancov-allowlist
+COPY --chown=${UID}:${GID} --from=llvm-builder /work/.llvm-build-time /work/.llvm-build-time
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-project /work/llvm-project
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-build-sancov /work/llvm-build-sancov
 
@@ -136,7 +141,8 @@ COPY --chown=${UID}:${GID} tests /work/fuzz-fill/tests
 COPY --chown=${UID}:${GID} integration-tests /work/fuzz-fill/integration-tests
 
 RUN echo "=== fuzz-fill image LLVM source: $(cat /work/.llvm-source) ===" \
- && echo "=== fuzz-fill image SanitizerCoverage allowlist: $(cat /work/.sancov-allowlist) ==="
+ && echo "=== fuzz-fill image SanitizerCoverage allowlist: $(cat /work/.sancov-allowlist) ===" \
+ && echo "=== fuzz-fill image LLVM build wall time: $(cat /work/.llvm-build-time)s ==="
 
 USER "${UID}"
 WORKDIR /work/fuzz-fill
