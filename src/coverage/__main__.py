@@ -7,6 +7,7 @@ from coverage.filepaths import Filepaths
 from coverage.test_runner import TestRunner
 from coverage.constants import (
     DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
+    DEFAULT_OPT_ADDRESS_LINE_MAP_FILE,
     DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_NEW_COVERAGE_CSV,
@@ -54,9 +55,9 @@ def main():
     p_target_lines = sub.add_parser(
         "target-lines",
         help=(
-            "List target-lines CSV rows where every instrumentation point on that line is "
-            "uncovered by the suite (expects ``line_coverage_summary.csv`` from "
-            "``coverage baseline``; no lit re-run)."
+            "List target-lines CSV rows whose ``(file, line)`` is ``uncovered`` in the "
+            "baseline summary (``covered`` / ``partially`` lines are omitted; expects "
+            "``line_coverage_summary.csv`` from ``coverage baseline``; no lit re-run)."
         ),
     )
 
@@ -282,6 +283,7 @@ def get_filepaths(
         output_baseline_dir=getattr(args, "baseline_output_dir", None),
         output_candidate_tests_dir=getattr(args, "candidate_tests_output_dir", None),
         llc_address_line_map_file=DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
+        opt_address_line_map_file=DEFAULT_OPT_ADDRESS_LINE_MAP_FILE,
         line_coverage_summary_file=DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
         new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,
     )

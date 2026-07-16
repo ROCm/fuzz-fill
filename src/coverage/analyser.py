@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Literal
 
 from coverage.filepaths import Filepaths
+from coverage.line_coverage_summary import load_line_coverage_summary
 from coverage.line_rules import (
-    LineCoverageIndex,
     fully_covered_line_keys_from_address_map,
     normalize_llc_address_line_map,
 )
@@ -35,8 +35,9 @@ class CoverageAnalyzer:
 
     def get_full_incremental_coverage(self) -> None:
         with log_timing(logger, "incremental coverage analysis"):
-            line_coverage_summary = pd.read_csv(self.line_coverage_summary_file)
-            baseline_index = LineCoverageIndex.from_summary_df(line_coverage_summary)
+            _, baseline_uncovered = load_line_coverage_summary(
+                self.line_coverage_summary_file
+            )
             llc_address_line_map = normalize_llc_address_line_map(
                 pd.read_csv(self.llc_address_line_map_file)
             )
@@ -99,7 +100,7 @@ class CoverageAnalyzer:
                         # Only lines the suite left completely uncovered count as new;
                         # partially covered baseline lines are excluded.
                         is_new_vs_baseline = [
-                            baseline_index.is_baseline_gap(file, line) for file, line in keys
+                            (file, line) in baseline_uncovered for file, line in keys
                         ]
 
                         is_new_vs_other_candidate_tests = [
