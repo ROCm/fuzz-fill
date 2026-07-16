@@ -17,14 +17,13 @@ def normalize_llc_address_line_map(llc_address_line_map: pd.DataFrame) -> pd.Dat
     return m
 
 
-def fully_covered_line_keys_from_address_map(
+def gap_address_line_map(
     llc_address_line_map: pd.DataFrame,
-    covered_addresses: set[str],
-    *,
-    point_column: str = "point",
-) -> set[tuple[str, int]]:
-    """``(file, line)`` pairs where every mapped point on the line is in *covered_addresses*."""
-    m = llc_address_line_map.copy()
-    m["line"] = m["line"].astype(int)
-    m["covered"] = m[point_column].isin(covered_addresses).astype(int)
-    return Sancov.full_line_keys(m, covered_column="covered")
+    baseline_uncovered: frozenset[tuple[str, int]],
+) -> pd.DataFrame:
+    """Return address-map rows whose ``(file, line)`` is ``uncovered`` in the baseline summary."""
+    if not baseline_uncovered:
+        return llc_address_line_map.iloc[0:0].copy()
+    uncovered_keys = pd.DataFrame(list(baseline_uncovered), columns=["file", "line"])
+    uncovered_keys["line"] = uncovered_keys["line"].astype(int)
+    return llc_address_line_map.merge(uncovered_keys, on=["file", "line"])

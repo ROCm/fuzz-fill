@@ -7,7 +7,7 @@ from typing import Literal
 from coverage.filepaths import Filepaths
 from coverage.line_coverage_summary import load_line_coverage_summary
 from coverage.line_rules import (
-    fully_covered_line_keys_from_address_map,
+    gap_address_line_map,
     normalize_llc_address_line_map,
 )
 from coverage.sancov import Sancov
@@ -41,6 +41,14 @@ class CoverageAnalyzer:
             llc_address_line_map = normalize_llc_address_line_map(
                 pd.read_csv(self.llc_address_line_map_file)
             )
+            gap_map = gap_address_line_map(llc_address_line_map, baseline_uncovered)
+            logger.info(
+                "baseline gap address map: %d rows on %d uncovered lines "
+                "(from %d total address-map rows)",
+                len(gap_map),
+                len(baseline_uncovered),
+                len(llc_address_line_map),
+            )
 
             self.new_coverage_csv.parent.mkdir(parents=True, exist_ok=True)
             with self.new_coverage_csv.open("w", newline="", encoding="utf-8") as new_coverage_csv_f:
@@ -65,8 +73,8 @@ class CoverageAnalyzer:
 
                     new_test_covered_addresses: set[str] = sancov.get_covered_addresses(sancov_file)
 
-                    matched_addresses = llc_address_line_map[
-                        llc_address_line_map["point"].isin(new_test_covered_addresses)
+                    matched_addresses = gap_map[
+                        gap_map["point"].isin(new_test_covered_addresses)
                     ]
 
                     if len(matched_addresses) == 0:
@@ -83,9 +91,10 @@ class CoverageAnalyzer:
                         len(matched_addresses),
                     )
 
-                    fully_covered_keys = fully_covered_line_keys_from_address_map(
-                        llc_address_line_map, new_test_covered_addresses
+                    coverage_df = Sancov.coverage_df_from_hits(
+                        gap_map, new_test_covered_addresses
                     )
+                    fully_covered_keys = Sancov.covered_line_keys([coverage_df])
 
                     if fully_covered_keys:
                         per_test_csv = test_name
@@ -97,30 +106,13 @@ class CoverageAnalyzer:
                             len(keys),
                         )
 
-                        # Only lines the suite left completely uncovered count as new;
-                        # partially covered baseline lines are excluded.
-                        is_new_vs_baseline = [
-                            (file, line) in baseline_uncovered for file, line in keys
+                        accepted_keys = [
+                            key for key in keys if key not in newly_covered_lines
                         ]
 
-                        is_new_vs_other_candidate_tests = [
-                            (file, line) not in newly_covered_lines for file, line in keys
-                        ]
-
-                        mask = [
-                            a and b
-                            for a, b in zip(is_new_vs_baseline, is_new_vs_other_candidate_tests)
-                        ]
-                        accepted_keys = [key for key, keep in zip(keys, mask) if keep]
-
-                        logger.info(
-                            "%d lines are uncovered in baseline out of %d",
-                            sum(is_new_vs_baseline),
-                            len(keys),
-                        )
                         logger.info(
                             "%d lines are new vs other candidate tests out of %d",
-                            sum(is_new_vs_other_candidate_tests),
+                            len(accepted_keys),
                             len(keys),
                         )
 

@@ -122,6 +122,29 @@ class Sancov:
         return set(zip(full["file"], full["line"]))
 
     @staticmethod
+    def coverage_df_from_hits(
+        address_line_map: pd.DataFrame,
+        covered_addresses: set[str],
+        *,
+        point_column: str = "point",
+    ) -> pd.DataFrame:
+        """Build a ``(file, line, point, covered)`` frame from a static address map and runtime hits."""
+        m = address_line_map[["file", "line", point_column]].copy()
+        m["line"] = m["line"].astype(int)
+        m["point"] = m[point_column].map(
+            lambda x: Sancov.format_hex_address(x) if pd.notna(x) else x
+        )
+        m["covered"] = m["point"].isin(covered_addresses).astype(int)
+        return m[["file", "line", "point", "covered"]]
+
+    @staticmethod
+    def covered_line_keys(coverage_dfs: list[pd.DataFrame]) -> set[tuple[str, int]]:
+        """``(file, line)`` pairs classified as ``covered`` by ``build_coverage_summary``."""
+        summary = Sancov.build_coverage_summary(coverage_dfs)
+        rows = summary.loc[summary["coverage"] == "covered"]
+        return set(zip(rows["file"], rows["line"].astype(int)))
+
+    @staticmethod
     def build_address_line_map(df: pd.DataFrame) -> pd.DataFrame:
         """Static ``(file, line, point, covered)`` map for a per-tool coverage frame.
 
