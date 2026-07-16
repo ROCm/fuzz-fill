@@ -9,7 +9,6 @@ DEFAULT_RUN_CONFIG_FILE = "run_config.json"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "coverage_output" / f"cov_<timestamp>"
 
 # CSV file names
-CSV_FILE_NAME_COVERED = "covered_by_opt_or_llc.csv"
 DEFAULT_LLC_ADDRESS_LINE_MAP_FILE = "llc_address_line_map.csv"
 DEFAULT_OPT_ADDRESS_LINE_MAP_FILE = "opt_address_line_map.csv"
 DEFAULT_LLC_LINE_POINT_SUMMARY_FILE = "llc_line_point_summary.csv"
