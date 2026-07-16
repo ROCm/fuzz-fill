@@ -16,6 +16,8 @@
 # RUN: test -f %t/baseline/run_config.json
 # RUN: test -f %t/baseline/line_coverage_summary.csv
 # RUN: test -f %t/baseline/llc_address_line_map.csv
+# RUN: test -f %t/baseline/llc_line_point_summary.csv
+# RUN: test -f %t/baseline/opt_line_point_summary.csv
 # RUN: test -f %t/incremental/new_coverage.csv
 # RUN: test -f %t/target_lines/target_lines_uncovered.csv
 

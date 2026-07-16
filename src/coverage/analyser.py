@@ -66,7 +66,7 @@ class CoverageAnalyzer:
                     new_test_covered_addresses: set[str] = sancov.get_covered_addresses(sancov_file)
 
                     matched_addresses = llc_address_line_map[
-                        llc_address_line_map["point_llc"].isin(new_test_covered_addresses)
+                        llc_address_line_map["point"].isin(new_test_covered_addresses)
                     ]
 
                     if len(matched_addresses) == 0:
@@ -132,7 +132,7 @@ class CoverageAnalyzer:
 
                         keys_df = unique_locations[["file", "line"]]
                         sub = matched_addresses.merge(keys_df, on=["file", "line"], how="inner")
-                        addr_by_line = sub.groupby(["file", "line"], sort=False)["point_llc"].agg(
+                        addr_by_line = sub.groupby(["file", "line"], sort=False)["point"].agg(
                             lambda s: ";".join(sorted(s.dropna().astype(str).unique()))
                         )
 

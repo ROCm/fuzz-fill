@@ -122,8 +122,8 @@ class Sancov:
         return set(zip(full["file"], full["line"]))
 
     @staticmethod
-    def build_address_line_map(df: pd.DataFrame, suffix: str) -> pd.DataFrame:
-        """Static ``(file, line, point_<suffix>, covered)`` map for a per-tool coverage frame.
+    def build_address_line_map(df: pd.DataFrame) -> pd.DataFrame:
+        """Static ``(file, line, point, covered)`` map for a per-tool coverage frame.
 
         A line with multiple instrumentation points yields multiple rows. This reflects
         the coverage information available in the tool regardless of coverage achieved.
@@ -133,7 +133,6 @@ class Sancov:
         assert not missing, f"address line map input missing columns: {sorted(missing)}"
         address_line_map = df[list(required_cols)].copy()
         address_line_map["line"] = address_line_map["line"].astype(int)
-        address_line_map.rename(columns={"point": f"point_{suffix}"}, inplace=True)
         return address_line_map
 
     @staticmethod
@@ -142,21 +141,18 @@ class Sancov:
 
     @staticmethod
     def build_line_point_summary(
-        address_line_map: pd.DataFrame, *, point_column: str
+        address_line_map: pd.DataFrame, *, point_column: str = "point"
     ) -> pd.DataFrame:
         """Per-(file, line) semicolon-separated point lists for one tool address-line map.
 
         Input is the output of ``build_address_line_map`` with columns ``file``, ``line``,
-        ``covered``, and ``point_<suffix>``.
+        ``covered``, and ``point``.
 
         Returns columns ``file``, ``line``, ``covered_points``, ``all_points``.
         """
-        required_cols = ("file", "line", "covered")
+        required_cols = ("file", "line", "covered", point_column)
         missing = set(required_cols) - set(address_line_map.columns)
         assert not missing, f"address line map missing columns: {sorted(missing)}"
-        assert point_column in address_line_map.columns, (
-            f"address line map missing point column: {point_column!r}"
-        )
         if address_line_map.empty:
             return pd.DataFrame(columns=["file", "line", "covered_points", "all_points"])
 
@@ -505,7 +501,7 @@ class Sancov:
 
         Returns
         ``(llc_address_line_map, opt_address_line_map, llc_line_point_summary, opt_line_point_summary, coverage)``.
-        Each map uses columns ``file``, ``line``, ``point_<suffix>``, ``covered``.
+        Each map uses columns ``file``, ``line``, ``point``, ``covered``.
         Each line point summary uses columns ``file``, ``line``, ``covered_points``, ``all_points``.
         The coverage summary has columns ``file``, ``line``, ``coverage``.
         """
@@ -526,17 +522,13 @@ class Sancov:
             # A line with multiple points will have multiple rows in the map.
             # This is the coverage information available in the tool regardless of the coverage achieved.
             # Those points that were covered, are reported as such in the "covered" col.
-            llc_address_line_map = Sancov.build_address_line_map(llc_df, llc.suffix)
-            opt_address_line_map = Sancov.build_address_line_map(opt_df, opt.suffix)
+            llc_address_line_map = Sancov.build_address_line_map(llc_df)
+            opt_address_line_map = Sancov.build_address_line_map(opt_df)
             
             # {llc,opt}_line_point_summary has one row per (file, line) for that tool with
             # semicolon-separated covered_points and all_points derived from the address-line map.
-            llc_line_point_summary = Sancov.build_line_point_summary(
-                llc_address_line_map, point_column=f"point_{llc.suffix}"
-            )
-            opt_line_point_summary = Sancov.build_line_point_summary(
-                opt_address_line_map, point_column=f"point_{opt.suffix}"
-            )
+            llc_line_point_summary = Sancov.build_line_point_summary(llc_address_line_map)
+            opt_line_point_summary = Sancov.build_line_point_summary(opt_address_line_map)
             
             coverage = Sancov.build_coverage_summary([llc_df, opt_df])
 

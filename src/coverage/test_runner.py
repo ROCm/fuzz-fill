@@ -314,13 +314,19 @@ class TestRunner:
         (
             llc_address_line_map,
             opt_address_line_map,
-            _llc_line_point_summary,
-            _opt_line_point_summary,
+            llc_line_point_summary,
+            opt_line_point_summary,
             coverage,
         ) = Sancov.get_joint_coverage(llc_sancov, opt_sancov, self._path_filter)
 
         llc_address_line_map.to_csv(self.filepaths.output_dir / self.filepaths.llc_address_line_map_file, index=False)
         opt_address_line_map.to_csv(self.filepaths.output_dir / self.filepaths.opt_address_line_map_file, index=False)
+        llc_line_point_summary.to_csv(
+            self.filepaths.output_dir / self.filepaths.llc_line_point_summary_file, index=False
+        )
+        opt_line_point_summary.to_csv(
+            self.filepaths.output_dir / self.filepaths.opt_line_point_summary_file, index=False
+        )
         coverage.to_csv(
             self.filepaths.output_dir / self.filepaths.line_coverage_summary_file,
             index=False,

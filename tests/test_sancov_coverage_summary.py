@@ -21,7 +21,7 @@ def _join_points(points: list[str]) -> str:
 
 
 def _line_point_summary_from_address_map(
-    address_line_map: pd.DataFrame, *, point_column: str
+    address_line_map: pd.DataFrame, *, point_column: str = "point"
 ) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for (file, line), group in address_line_map.groupby(["file", "line"], sort=False):
@@ -143,15 +143,14 @@ class BuildCoverageSummaryTest(unittest.TestCase):
         self.assertEqual(result[(FILE, 30)], "uncovered")
 
 
-def _address_line_map(rows: list[tuple[str, int, str, int]], suffix: str = "llc") -> pd.DataFrame:
-    return Sancov.build_address_line_map(_coverage_df(rows), suffix)
+def _address_line_map(rows: list[tuple[str, int, str, int]]) -> pd.DataFrame:
+    return Sancov.build_address_line_map(_coverage_df(rows))
 
 
 class BuildLinePointSummaryTest(unittest.TestCase):
     def test_empty_input(self) -> None:
         summary = Sancov.build_line_point_summary(
-            pd.DataFrame(columns=["file", "line", "point_llc", "covered"]),
-            point_column="point_llc",
+            pd.DataFrame(columns=["file", "line", "point", "covered"]),
         )
         self.assertEqual(
             list(summary.columns), ["file", "line", "covered_points", "all_points"]
@@ -162,21 +161,21 @@ class BuildLinePointSummaryTest(unittest.TestCase):
         address_map = _address_line_map(
             [(FILE, 10, "0x1002", 0), (FILE, 10, "0x1001", 1)]
         )
-        summary = Sancov.build_line_point_summary(address_map, point_column="point_llc")
+        summary = Sancov.build_line_point_summary(address_map)
         row = summary.iloc[0]
         self.assertEqual(row["all_points"], "0x1001;0x1002")
         self.assertEqual(row["covered_points"], "0x1001")
 
     def test_no_covered_points(self) -> None:
         address_map = _address_line_map([(FILE, 10, "0x1001", 0), (FILE, 10, "0x1002", 0)])
-        summary = Sancov.build_line_point_summary(address_map, point_column="point_llc")
+        summary = Sancov.build_line_point_summary(address_map)
         row = summary.iloc[0]
         self.assertEqual(row["all_points"], "0x1001;0x1002")
         self.assertEqual(row["covered_points"], "")
 
     def test_single_point_fully_covered(self) -> None:
         address_map = _address_line_map([(FILE, 10, "0x1001", 1)])
-        summary = Sancov.build_line_point_summary(address_map, point_column="point_llc")
+        summary = Sancov.build_line_point_summary(address_map)
         row = summary.iloc[0]
         self.assertEqual(row["all_points"], "0x1001")
         self.assertEqual(row["covered_points"], "0x1001")
@@ -202,10 +201,8 @@ class ConsistencyTest(unittest.TestCase):
             (FILE_B, 5, "0x5001", 0),
         ]
         address_map = _address_line_map(llc_rows)
-        actual = Sancov.build_line_point_summary(address_map, point_column="point_llc")
-        expected = _line_point_summary_from_address_map(
-            address_map, point_column="point_llc"
-        )
+        actual = Sancov.build_line_point_summary(address_map)
+        expected = _line_point_summary_from_address_map(address_map)
         actual = actual.sort_values(["file", "line"]).reset_index(drop=True)
         pd.testing.assert_frame_equal(actual, expected)
 
@@ -230,14 +227,10 @@ class ConsistencyTest(unittest.TestCase):
                 (FILE, 30, "0x3102", 0),
             ]
         )
-        llc_address_map = Sancov.build_address_line_map(llc, "llc")
-        opt_address_map = Sancov.build_address_line_map(opt, "opt")
-        llc_line_point_summary = Sancov.build_line_point_summary(
-            llc_address_map, point_column="point_llc"
-        )
-        opt_line_point_summary = Sancov.build_line_point_summary(
-            opt_address_map, point_column="point_opt"
-        )
+        llc_address_map = Sancov.build_address_line_map(llc)
+        opt_address_map = Sancov.build_address_line_map(opt)
+        llc_line_point_summary = Sancov.build_line_point_summary(llc_address_map)
+        opt_line_point_summary = Sancov.build_line_point_summary(opt_address_map)
 
         actual = Sancov.build_coverage_summary([llc, opt])
         expected = _coverage_from_line_point_summaries(

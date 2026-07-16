@@ -18,6 +18,8 @@
 # RUN: test -f %t/baseline/line_coverage_summary.csv
 # RUN: test -f %t/baseline/llc_address_line_map.csv
 # RUN: test -f %t/baseline/lit_failures.json
+# RUN: test -f %t/baseline/llc_line_point_summary.csv
+# RUN: test -f %t/baseline/opt_line_point_summary.csv
 
 # COM: lit_failures.json is always written; with no lit failures the tests array is empty.
 # RUN: %FileCheck %s --input-file=%t/baseline/lit_failures.json --check-prefix=LIT_FAILURES
@@ -30,5 +32,5 @@
 # COM: address map must contain at least one real data row (an AMDGPU source path with a
 # COM: line number and llc point), not just the header.
 # RUN: %FileCheck %s --input-file=%t/baseline/llc_address_line_map.csv --check-prefix=COVERAGE
-# COVERAGE: file,line,point_llc
+# COVERAGE: file,line,point
 # COVERAGE: {{.*}}/AMDGPU/{{.*}}.cpp,{{[0-9]+}},0x{{[0-9a-f]+}}

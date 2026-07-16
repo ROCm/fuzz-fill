@@ -53,7 +53,7 @@ class DiffPartialBaselineTest(unittest.TestCase):
             _write_csv(
                 suite / DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
                 [
-                    ["file", "line", "point_llc"],
+                    ["file", "line", "point"],
                     [FILE, 10, "0x1001"],
                     [FILE, 10, "0x1002"],
                     [FILE, 20, "0x2001"],

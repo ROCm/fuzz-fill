@@ -9,6 +9,8 @@ from coverage.test_runner import TestRunner
 from coverage.constants import (
     DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
     DEFAULT_OPT_ADDRESS_LINE_MAP_FILE,
+    DEFAULT_LLC_LINE_POINT_SUMMARY_FILE,
+    DEFAULT_OPT_LINE_POINT_SUMMARY_FILE,
     DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_NEW_COVERAGE_CSV,
@@ -296,6 +298,8 @@ def get_filepaths(
         output_candidate_tests_dir=getattr(args, "candidate_tests_output_dir", None),
         llc_address_line_map_file=DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
         opt_address_line_map_file=DEFAULT_OPT_ADDRESS_LINE_MAP_FILE,
+        llc_line_point_summary_file=DEFAULT_LLC_LINE_POINT_SUMMARY_FILE,
+        opt_line_point_summary_file=DEFAULT_OPT_LINE_POINT_SUMMARY_FILE,
         line_coverage_summary_file=DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
         new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,
     )
