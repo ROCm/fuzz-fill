@@ -127,4 +127,15 @@ if [[ ${#lit_args[@]} -eq 0 ]]; then
     lit_args=(.)
 fi
 
+# Patch once before lit schedules tests; parallel baseline RUN lines otherwise
+# race while appending to the shared LLVM build's lit.site.cfg.py.
+"$venv_dir/bin/python" - "$llvm_sancov_build/llvm-lit" <<'PY'
+import sys
+from pathlib import Path
+
+from coverage.lit_config import ensure_lit_sancov_env_forwarding
+
+ensure_lit_sancov_env_forwarding(Path(sys.argv[1]))
+PY
+
 exec lit "${lit_args[@]}"
