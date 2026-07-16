@@ -175,7 +175,7 @@ added-lines  →  baseline  →  target-lines
 
 1. **`added-lines`** — parse `git show` for a commit and list every line added on the right-hand side of the diff.
 2. **`baseline`** — same baseline coverage run as Workflow 1 (produces `line_coverage_summary.csv` and related CSVs).
-3. **`target-lines`** — for each line in the target CSV, look up its `(file, line)` in the baseline `line_coverage_summary.csv`. Lines marked `uncovered` (every SanitizerCoverage point on that line was off under the suite run) go into the report; `covered` and `partially` lines are counted but omitted from the CSV.
+3. **`target-lines`** — for each line in the target CSV, look up its `(file, line)` in the baseline `line_coverage_summary.csv`. Lines marked `uncovered` go into the report; `covered` and `partially` lines are counted but omitted from the CSV.
 
 Step 3 does **not** re-run LIT, so you can repeat it with different `added-lines.csv` inputs as long as the `baseline` symcov artifacts are still present.
 
