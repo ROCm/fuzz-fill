@@ -30,7 +30,7 @@ def _write_csv(path: Path, rows: list[list[object]]) -> None:
 
 class DiffPartialBaselineTest(unittest.TestCase):
     def test_partial_baseline_line_fully_covered_by_new_test_is_not_reported(self) -> None:
-        """Diff reports only baseline ``none`` lines, not partial ones the new test completes."""
+        """Diff reports only baseline ``uncovered`` lines, not partial ones the new test completes."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             suite = root / "test_suite"
@@ -40,14 +40,14 @@ class DiffPartialBaselineTest(unittest.TestCase):
             new_tests.mkdir()
             (new_tests / NEW_TEST).mkdir()
 
-            # Line 10: full; line 20: partial; line 30: none.
+            # Line 10: covered; line 20: partially; line 30: uncovered.
             _write_csv(
                 suite / DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
                 [
-                    ["file", "line", "coverage", "point_addresses"],
-                    [FILE, 10, "full", "0x1001;0x1002"],
-                    [FILE, 20, "partial", "0x2001;0x2002"],
-                    [FILE, 30, "none", "0x3001"],
+                    ["file", "line", "coverage"],
+                    [FILE, 10, "covered"],
+                    [FILE, 20, "partially"],
+                    [FILE, 30, "uncovered"],
                 ],
             )
             _write_csv(
@@ -84,8 +84,8 @@ class DiffPartialBaselineTest(unittest.TestCase):
             with (diff / DEFAULT_NEW_COVERAGE_CSV).open(newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
 
-            # Core check: only baseline ``none`` lines count as new coverage.
-            # Line 20 is fully hit by the new test but was ``partial`` in the suite, so skip it.
+            # Core check: only baseline ``uncovered`` lines count as new coverage.
+            # Line 20 is fully hit by the new test but was ``partially`` in the suite, so skip it.
             reported_lines = {int(row["line"]) for row in rows}
             self.assertEqual(reported_lines, {30})
             self.assertNotIn(20, reported_lines)

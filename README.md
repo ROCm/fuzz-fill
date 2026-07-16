@@ -120,7 +120,7 @@ baseline  →  candidate-test  →  incremental  →  reduce
 
 1. **`baseline`** — run a filtered slice of the LLVM LIT suite with SanitizerCoverage to establish baseline coverage: which source lines the existing tests already hit.
 2. **`candidate-test`** — run a directory of fuzz-generated tests (`.ll` / `.bc`) through instrumented `llc` and collect their coverage.
-3. **`incremental`** — compare fuzz-test coverage against the suite baseline and report which fuzz tests cover lines the suite misses — these are candidate gap-fillers.
+3. **`incremental`** — compare fuzz-test coverage against the suite baseline and report which fuzz tests cover lines the suite misses — these are candidate gap-fillers. A fuzz test qualifies for a line only when it fully covers that line and the line is `uncovered` in the baseline `line_coverage_summary.csv` (`partially` covered baseline lines are excluded).
 4. **`reduce`** — shrink promising tests into minimal cases suitable for adding to the suite (see [Reduce interesting tests](#reduce-interesting-tests) below).
 
 ### Configure and run
@@ -150,7 +150,7 @@ Under `$OUTPUT_DIR`:
 
 | Path | Contents |
 |------|----------|
-| `baseline/line_coverage_summary.csv` | Per-line baseline coverage (joint llc + opt): `full`, `partial`, or `none` |
+| `baseline/line_coverage_summary.csv` | Per-line baseline coverage (joint llc + opt): `covered`, `partially`, or `uncovered` |
 | `baseline/lit_failures.json` | Failed lit tests from the baseline run (llvm-lit `--report-failures-only` JSON: `name`, `code`, `output`, `elapsed`) |
 | `baseline/processed_sancov/` | Merged, symbolized symcov files — reuse these if you re-run `incremental` with different candidate tests |
 | `candidate_tests/raw_sancov/` | Per-test raw sancov shards |
@@ -175,7 +175,7 @@ added-lines  →  baseline  →  target-lines
 
 1. **`added-lines`** — parse `git show` for a commit and list every line added on the right-hand side of the diff.
 2. **`baseline`** — same baseline coverage run as Workflow 1 (produces `line_coverage_summary.csv` and related CSVs).
-3. **`target-lines`** — for each line in the target CSV, check whether **every** SanitizerCoverage point on that line is off under the suite run. Fully uncovered lines go into the report; partially covered lines are counted but omitted from the CSV.
+3. **`target-lines`** — for each line in the target CSV, look up its `(file, line)` in the baseline `line_coverage_summary.csv`. Lines marked `uncovered` (every SanitizerCoverage point on that line was off under the suite run) go into the report; `covered` and `partially` lines are counted but omitted from the CSV.
 
 Step 3 does **not** re-run LIT, so you can repeat it with different `added-lines.csv` inputs as long as the `baseline` symcov artifacts are still present.
 
@@ -204,7 +204,7 @@ Under `$OUTPUT_DIR`:
 | Path | Contents |
 |------|----------|
 | `added-lines/added-lines.csv` | Added lines from the commit (`path`, `line_no`, `text`) |
-| `test_suite/line_coverage_summary.csv` | Per-line baseline coverage (`full` / `partial` / `none`) — **required by `target-lines`** |
+| `test_suite/line_coverage_summary.csv` | Per-line baseline coverage (`covered` / `partially` / `uncovered`) — **required by `target-lines`** |
 | `baseline/lit_failures.json` | Failed lit tests from the baseline run (llvm-lit `--report-failures-only` JSON: `name`, `code`, `output`, `elapsed`) |
 | `baseline/processed_sancov/` | Merged symcov (still produced for debugging; not read by `target-lines`) |
 | `target_lines_report/target_lines_uncovered.csv` | **Main result** — added lines where every suite point on that line is off |
