@@ -159,10 +159,6 @@ class Sancov:
         return address_line_map
 
     @staticmethod
-    def _join_point_ids(points: pd.Series) -> str:
-        return ";".join(sorted(points.dropna().astype(str).unique()))
-
-    @staticmethod
     def build_line_point_summary(
         address_line_map: pd.DataFrame, *, point_column: str = "point"
     ) -> pd.DataFrame:
@@ -179,31 +175,48 @@ class Sancov:
         if address_line_map.empty:
             return pd.DataFrame(columns=["file", "line", "covered_points", "all_points"])
 
-        m = address_line_map.copy()
-        m["line"] = m["line"].astype(int)
+        covered_col = address_line_map["covered"]
         assert (
-            pd.api.types.is_numeric_dtype(m["covered"])
-            and m["covered"].isin([0, 1]).all()
+            pd.api.types.is_numeric_dtype(covered_col)
+            and covered_col.isin([0, 1]).all()
         ), "covered must be numeric 0/1 flags"
 
-        all_points = (
-            m.groupby(["file", "line"], sort=False)[point_column]
-            .apply(Sancov._join_point_ids)
-            .reset_index(name="all_points")
-        )
-        covered_rows = m[m["covered"] == 1]
-        if covered_rows.empty:
-            summary = all_points.copy()
-            summary["covered_points"] = ""
-        else:
-            covered_points = (
-                covered_rows.groupby(["file", "line"], sort=False)[point_column]
-                .apply(Sancov._join_point_ids)
-                .reset_index(name="covered_points")
+        keys_order: list[tuple[str, int]] = []
+        all_points_by_key: dict[tuple[str, int], set[str]] = {}
+        covered_points_by_key: dict[tuple[str, int], set[str]] = {}
+
+        for file, line, point, covered in zip(
+            address_line_map["file"].to_numpy(),
+            address_line_map["line"].astype(int).to_numpy(),
+            address_line_map[point_column].to_numpy(),
+            covered_col.to_numpy(),
+        ):
+            if pd.isna(point):
+                continue
+            key = (file, line)
+            if key not in all_points_by_key:
+                keys_order.append(key)
+                all_points_by_key[key] = set()
+            point_str = str(point)
+            all_points_by_key[key].add(point_str)
+            if covered == 1:
+                covered_points_by_key.setdefault(key, set()).add(point_str)
+
+        rows = []
+        for file, line in keys_order:
+            key = (file, line)
+            covered_set = covered_points_by_key.get(key)
+            rows.append(
+                {
+                    "file": file,
+                    "line": line,
+                    "covered_points": ";".join(sorted(covered_set)) if covered_set else "",
+                    "all_points": ";".join(sorted(all_points_by_key[key])),
+                }
             )
-            summary = all_points.merge(covered_points, on=["file", "line"], how="left")
-            summary["covered_points"] = summary["covered_points"].fillna("")
-        return summary[["file", "line", "covered_points", "all_points"]]
+        return pd.DataFrame(
+            rows, columns=["file", "line", "covered_points", "all_points"]
+        )
 
     @staticmethod
     def merged_llc_opt_coverage_df(
