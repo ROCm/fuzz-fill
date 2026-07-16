@@ -237,6 +237,50 @@ class ConsistencyTest(unittest.TestCase):
             [llc_line_point_summary, opt_line_point_summary]
         )
         pd.testing.assert_frame_equal(actual, expected)
+        pd.testing.assert_frame_equal(actual, expected)
+
+
+class CoverageDfFromHitsTest(unittest.TestCase):
+    def test_partial_hits_are_not_covered(self) -> None:
+        address_map = pd.DataFrame(
+            [
+                [FILE, 10, "0x1001"],
+                [FILE, 10, "0x1002"],
+            ],
+            columns=["file", "line", "point"],
+        )
+        coverage_df = Sancov.coverage_df_from_hits(address_map, {"0x1001"})
+        keys = Sancov.covered_line_keys([coverage_df])
+        self.assertEqual(keys, set())
+
+    def test_all_hits_are_covered(self) -> None:
+        address_map = pd.DataFrame(
+            [
+                [FILE, 10, "0x1001"],
+                [FILE, 10, "0x1002"],
+            ],
+            columns=["file", "line", "point"],
+        )
+        coverage_df = Sancov.coverage_df_from_hits(
+            address_map, {"0x1001", "0x1002"}
+        )
+        keys = Sancov.covered_line_keys([coverage_df])
+        self.assertEqual(keys, {(FILE, 10)})
+
+    def test_covered_line_keys_matches_full_line_keys_for_single_tool(self) -> None:
+        address_map = pd.DataFrame(
+            [
+                [FILE, 10, "0x1001"],
+                [FILE, 10, "0x1002"],
+                [FILE, 20, "0x2001"],
+            ],
+            columns=["file", "line", "point"],
+        )
+        hits = {"0x1001", "0x1002", "0x2001"}
+        coverage_df = Sancov.coverage_df_from_hits(address_map, hits)
+        expected = Sancov.full_line_keys(coverage_df, covered_column="covered")
+        actual = Sancov.covered_line_keys([coverage_df])
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":
