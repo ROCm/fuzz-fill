@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from pathlib import Path
 
 from coverage.filepaths import Filepaths
@@ -12,6 +13,7 @@ from coverage.constants import (
     DEFAULT_OUTPUT_DIR,
     DEFAULT_NEW_COVERAGE_CSV,
     DEFAULT_TARGET_LINES_REPORT,
+    DEFAULT_TIMINGS_FILE,
 )
 
 from coverage.analyser import CoverageAnalyzer
@@ -34,6 +36,7 @@ from fuzz_fill.log import (
     add_log_to_file_argument,
     configure_logging,
     get_logger,
+    collect_timings,
     log_timing,
     resolve_log_file,
 )
@@ -193,18 +196,27 @@ def main():
         )
         filepaths = get_filepaths(args, tools=tools)
         logger.info("getting baseline coverage for the test suite")
-        with log_timing(logger, "baseline"):
-            test_runner = TestRunner(
-                mode="lit",
-                filepaths=filepaths,
-                lit_filter=args.lit_filter,
-                jobs=args.jobs,
-                lit_verbose=args.lit_verbose,
-                lit_allow_failures=args.lit_allow_failures,
-                require_sancov=args.require_sancov,
-                debug=args.debug,
-            )
-            test_runner.run()
+        with collect_timings() as timings:
+            with log_timing(logger, "baseline"):
+                test_runner = TestRunner(
+                    mode="lit",
+                    filepaths=filepaths,
+                    lit_filter=args.lit_filter,
+                    jobs=args.jobs,
+                    lit_verbose=args.lit_verbose,
+                    lit_allow_failures=args.lit_allow_failures,
+                    require_sancov=args.require_sancov,
+                    debug=args.debug,
+                )
+                test_runner.run()
+            args.output_dir.mkdir(parents=True, exist_ok=True)
+            timings_path = args.output_dir / DEFAULT_TIMINGS_FILE
+            with timings_path.open("w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["step", "seconds"])
+                for label, elapsed in timings:
+                    writer.writerow([label, f"{elapsed:.3f}"])
+            logger.info("wrote baseline timings to %s", timings_path)
 
     elif args.subcmd == "candidate-test":
         tools = candidate_test_tools_from_args(llc=args.llc)

@@ -4,6 +4,7 @@ import argparse
 import logging
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -19,6 +20,9 @@ _LOG_LEVELS = {
     "info": logging.INFO,
     "debug": logging.DEBUG,
 }
+
+_timings_lock = threading.Lock()
+_active_timings: list[tuple[str, float]] | None = None
 
 
 def resolve_log_file(output_dir: Path, log_to_file: bool) -> Path | None:
@@ -74,6 +78,20 @@ def add_log_to_file_argument(parser: argparse.ArgumentParser) -> None:
 
 
 @contextmanager
+def collect_timings() -> Iterator[list[tuple[str, float]]]:
+    """Collect ``(label, elapsed_seconds)`` rows from nested ``log_timing`` blocks."""
+    global _active_timings
+    rows: list[tuple[str, float]] = []
+    with _timings_lock:
+        _active_timings = rows
+    try:
+        yield rows
+    finally:
+        with _timings_lock:
+            _active_timings = None
+
+
+@contextmanager
 def log_timing(
     logger: logging.Logger,
     label: str,
@@ -88,6 +106,9 @@ def log_timing(
     finally:
         elapsed = time.perf_counter() - start
         logger.log(level, "%s finished in %.2fs", label, elapsed)
+        with _timings_lock:
+            if _active_timings is not None:
+                _active_timings.append((label, elapsed))
 
 
 def run_subprocess(

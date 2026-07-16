@@ -112,7 +112,8 @@ class TestRunner:
 
     def run(self) -> None:
         if self.mode == "lit":
-            self.run_lit_tests()
+            with log_timing(logger, "lit test suite"):
+                self.run_lit_tests()
             self.get_aggregate_coverage()
         elif self.mode == "standalone":
             self.run_standalone_tests()
@@ -280,7 +281,7 @@ class TestRunner:
 
     def get_aggregate_coverage(self) -> None:
         """Get the aggregate coverage for the test suite."""
-        with log_timing(logger, "aggregate coverage"):
+        with log_timing(logger, "aggregate coverage (sancov merge+symbolize)"):
             if self.require_sancov and not any(self.raw_sancov_output_dir.glob("*.sancov")):
                 raise SystemExit(
                     f"error: no sancov files found in {self.raw_sancov_output_dir}; "
