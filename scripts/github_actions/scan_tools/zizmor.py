@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-QUARTZ_DIR = Path(__file__).resolve().parent.parent.parent
+QUARTZ_DIR = Path(__file__).resolve().parent
 
 # Add build_tools to path for github_actions imports.
 sys.path.insert(0, str(QUARTZ_DIR / "build_tools"))
