@@ -26,4 +26,4 @@ runs:
     - name: Compute fetch-depth
       id: compute
       shell: bash
-      run: python scripts/github_actions/compute_pr_depth.py
+      run: python scripts/github_actions/build_tools/compute_pr_depth.py

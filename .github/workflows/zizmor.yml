@@ -141,7 +141,7 @@ jobs:
           ZIZMOR_SEVERITY_THRESHOLD: ${{ inputs.severity_threshold }}
           ZIZMOR_PERSONA: ${{ inputs.persona }}
           GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
-        run: python scan_tools/github_actions/zizmor.py
+        run: python scripts/github_actions/scan_tools/zizmor.py
 
       - name: Upload SARIF report to code scanning
         if: always() && steps.scan.outputs.sarif_path != ''
