@@ -22,13 +22,13 @@ permissions:
   contents: read
 
 jobs:
-  # gitleaks:
-  #   uses: ./.github/workflows/gitleaks.yml
-  #   with:
-  #     scan_mode: changed
-  #     report_formats: json
-  #   permissions:
-  #     contents: read
+  gitleaks:
+    uses: ./.github/workflows/gitleaks.yml
+    with:
+      scan_mode: changed
+      report_formats: json
+    permissions:
+      contents: read
 
   zizmor:
     uses: ./.github/workflows/zizmor.yml
