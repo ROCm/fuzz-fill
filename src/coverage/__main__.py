@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 from pathlib import Path
 
 from coverage.filepaths import Filepaths
@@ -38,9 +37,10 @@ from fuzz_fill.log import (
     add_log_to_file_argument,
     configure_logging,
     get_logger,
-    collect_timings,
     log_timing,
+    record_log_timings,
     resolve_log_file,
+    write_timings_csv,
 )
 
 logger = get_logger("coverage")
@@ -198,7 +198,7 @@ def main():
         )
         filepaths = get_filepaths(args, tools=tools)
         logger.info("getting baseline coverage for the test suite")
-        with collect_timings() as timings:
+        with record_log_timings() as timings:
             with log_timing(logger, "baseline"):
                 test_runner = TestRunner(
                     mode="lit",
@@ -211,13 +211,8 @@ def main():
                     debug=args.debug,
                 )
                 test_runner.run()
-            args.output_dir.mkdir(parents=True, exist_ok=True)
             timings_path = args.output_dir / DEFAULT_TIMINGS_FILE
-            with timings_path.open("w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(["step", "seconds"])
-                for label, elapsed in timings:
-                    writer.writerow([label, f"{elapsed:.3f}"])
+            write_timings_csv(timings_path, timings)
             logger.info("wrote baseline timings to %s", timings_path)
 
     elif args.subcmd == "candidate-test":
