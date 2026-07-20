@@ -120,7 +120,7 @@ baseline  →  candidate-test  →  incremental  →  reduce
 
 1. **`baseline`** — run a filtered slice of the LLVM LIT suite with SanitizerCoverage to establish baseline coverage: which source lines the existing tests already hit.
 2. **`candidate-test`** — run a directory of fuzz-generated tests (`.ll` / `.bc`) through instrumented `llc` and collect their coverage.
-3. **`incremental`** — compare fuzz-test coverage against the suite baseline and report which fuzz tests cover lines the suite misses — these are candidate gap-fillers. A fuzz test qualifies for a line only when it fully covers that line (using the same `covered` / `partially` / `uncovered` rules as baseline, evaluated on llc-only candidate coverage) and the line is `uncovered` in the baseline `line_coverage_summary.csv` (`partially` covered baseline lines are excluded).
+3. **`incremental`** — compare fuzz-test coverage against the suite baseline and report which fuzz tests cover lines the suite misses — these are candidate gap-fillers. A fuzz test qualifies for a line only when it fully covers that line and the line is `uncovered` in the baseline `line_coverage_summary.csv`.
 4. **`reduce`** — shrink promising tests into minimal cases suitable for adding to the suite (see [Reduce interesting tests](#reduce-interesting-tests) below).
 
 ### Configure and run
