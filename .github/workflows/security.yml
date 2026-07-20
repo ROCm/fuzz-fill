@@ -38,13 +38,13 @@ jobs:
     permissions:
       contents: read
 
-  # bandit:
-  #   uses: ./.github/workflows/bandit.yml
-  #   with:
-  #     scan_mode: changed
-  #     report_formats: txt
-  #   permissions:
-  #     contents: read
+  bandit:
+    uses: ./.github/workflows/bandit.yml
+    with:
+      scan_mode: changed
+      report_formats: txt
+    permissions:
+      contents: read
 
   trivy:
     uses: ./.github/workflows/trivy.yml
