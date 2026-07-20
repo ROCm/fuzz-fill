@@ -59,6 +59,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ninja-build \
     python3 \
     xz-utils \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work
