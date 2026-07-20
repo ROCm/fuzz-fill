@@ -7,11 +7,9 @@ ARG LLVM_RELEASE_VERSION=22.1.8
 ARG LLVM_TARBALL=LLVM-${LLVM_RELEASE_VERSION}-Linux-X64.tar.xz
 ARG LLVM_URL=https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_RELEASE_VERSION}/${LLVM_TARBALL}
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    xz-utils \
-    && rm -rf /var/lib/apt/lists/*
+COPY scripts/image/install-apt-packages.sh /usr/local/lib/fuzz-fill-image/
+COPY scripts/image/apt/ /usr/local/lib/fuzz-fill-image/apt/
+RUN /usr/local/lib/fuzz-fill-image/install-apt-packages.sh release
 
 RUN --mount=type=cache,target=/root/.cache/llvm-releases,sharing=locked \
     set -eux; \
@@ -27,10 +25,9 @@ FROM ubuntu:24.04 AS llvm-source
 ARG DEBIAN_FRONTEND=noninteractive
 ARG LLVM_RELEASE_VERSION=22.1.8
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+COPY scripts/image/install-apt-packages.sh /usr/local/lib/fuzz-fill-image/
+COPY scripts/image/apt/ /usr/local/lib/fuzz-fill-image/apt/
+RUN /usr/local/lib/fuzz-fill-image/install-apt-packages.sh source
 
 RUN --mount=type=cache,target=/root/.cache/llvm-sources,sharing=locked \
     set -eux; \
@@ -50,17 +47,9 @@ ARG LLVM_RELEASE_VERSION=22.1.8
 ARG SANCOV_ALLOWLIST=amdgpu
 ARG NINJA_JOBS=""
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    ca-certificates \
-    cmake \
-    curl \
-    file \
-    ninja-build \
-    python3 \
-    xz-utils \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+COPY scripts/image/install-apt-packages.sh /usr/local/lib/fuzz-fill-image/
+COPY scripts/image/apt/ /usr/local/lib/fuzz-fill-image/apt/
+RUN /usr/local/lib/fuzz-fill-image/install-apt-packages.sh builder
 
 WORKDIR /work
 
@@ -135,18 +124,9 @@ ARG UID=1000
 ARG GID=1000
 ARG USERNAME=developer
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    creduce \
-    git \
-    libgcc-s1 \
-    libstdc++6 \
-    libtinfo6 \
-    python3 \
-    python3-pip \
-    python3-pygments \
-    python3-venv \
-    python3-yaml \
-    && rm -rf /var/lib/apt/lists/* \
+COPY scripts/image/install-apt-packages.sh /usr/local/lib/fuzz-fill-image/
+COPY scripts/image/apt/ /usr/local/lib/fuzz-fill-image/apt/
+RUN /usr/local/lib/fuzz-fill-image/install-apt-packages.sh runtime \
     && groupadd -g "${GID}" "${USERNAME}" \
     && useradd -l -m -u "${UID}" -g "${GID}" -s /bin/bash "${USERNAME}"
 
