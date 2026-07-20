@@ -79,8 +79,8 @@ on:
 # `security-events: write` on their own `uses:` job, and the
 # upload-sarif step uses it transparently. PR callers that don't need
 # SARIF stay on the repo's restrictive default.
-permissions:
-  contents: read
+#permissions:
+#  contents: read
 
 jobs:
   scan:
