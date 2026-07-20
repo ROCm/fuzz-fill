@@ -46,10 +46,10 @@ jobs:
   #   permissions:
   #     contents: read
 
-  # trivy:
-  #   uses: ./.github/workflows/trivy.yml
-  #   with:
-  #     scan_mode: changed
-  #     report_formats: table
-  #   permissions:
-  #     contents: read
+  trivy:
+    uses: ./.github/workflows/trivy.yml
+    with:
+      scan_mode: changed
+      report_formats: table
+    permissions:
+      contents: read
