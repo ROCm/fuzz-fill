@@ -16,6 +16,7 @@ image_name="${IMAGE_NAME:-fuzz-fill-test}"
 commit_rev=""
 jobs=""
 build_image=0
+keep_image=0
 llvm_repo=""
 backend_tests=""
 github_repo=""
@@ -36,6 +37,8 @@ Required:
 
 Options:
   --build-image            Build PR image via build-image-pr.sh before detection
+  --keep-image             Keep the PR image after detection (default: remove it
+                           when --build-image was used)
   --llvm-repo <path>       Local llvm-project clone (required with --build-image)
   --backend-tests <target> amdgpu or spirv (required with --build-image)
   --github-repo <owner/repo>
@@ -73,6 +76,15 @@ validate_jobs() {
     fi
 }
 
+cleanup_built_image() {
+    if [[ "${build_image:-0}" -eq 1 && "${keep_image:-0}" -eq 0 && -n "${image_ref:-}" ]]; then
+        if docker image inspect "${image_ref}" >/dev/null 2>&1; then
+            echo "Removing Docker image ${image_ref}"
+            docker rmi "${image_ref}"
+        fi
+    fi
+}
+
 read_image_allowlist() {
     local allowlist
     if ! allowlist="$(docker run --rm --entrypoint cat "${image_ref}" /work/.sancov-allowlist 2>/dev/null | tr -d '[:space:]')"; then
@@ -105,6 +117,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --build-image)
             build_image=1
+            shift
+            ;;
+        --keep-image)
+            keep_image=1
             shift
             ;;
         --llvm-repo)
@@ -192,8 +208,8 @@ if [[ -z "$output_dir" ]]; then
 fi
 
 if [[ "$build_image" -eq 0 ]]; then
-    if [[ -n "$llvm_repo" || -n "$backend_tests" || -n "$github_repo" ]]; then
-        echo "error: --llvm-repo, --backend-tests, and --github-repo require --build-image" >&2
+    if [[ -n "$llvm_repo" || -n "$backend_tests" || -n "$github_repo" || "$keep_image" -eq 1 ]]; then
+        echo "error: --llvm-repo, --backend-tests, --github-repo, and --keep-image require --build-image" >&2
         exit 1
     fi
 else
@@ -230,6 +246,10 @@ if [[ -n "$pr_id" ]]; then
         exit 1
     fi
     image_ref="${image_name}:llvm-pr-${pr_id}"
+fi
+
+if [[ "$build_image" -eq 1 && "$keep_image" -eq 0 ]]; then
+    trap cleanup_built_image EXIT
 fi
 
 if [[ "$build_image" -eq 1 ]]; then
