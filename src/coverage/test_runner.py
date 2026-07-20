@@ -16,6 +16,7 @@ from coverage.lit_config import (
     resolve_lit_job_count,
 )
 from coverage.run_config import build_run_config, resolved_lit_filter, write_run_config
+from coverage.line_coverage_summary import write_line_coverage_summary_splits
 from coverage.sancov import Sancov
 from fuzz_fill.log import get_logger, log_timing, run_subprocess
 
@@ -331,4 +332,5 @@ class TestRunner:
             self.filepaths.output_dir / self.filepaths.line_coverage_summary_file,
             index=False,
         )
+        write_line_coverage_summary_splits(coverage, self.filepaths.output_dir)
 

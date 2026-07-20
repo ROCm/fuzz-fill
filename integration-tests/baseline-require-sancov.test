@@ -15,6 +15,9 @@
 # RUN: %coverage baseline --output-dir %t/baseline-ok --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter 'CodeGen/AMDGPU/fuzz-fill-no-tests' --lit-allow-failures --no-require-sancov -j1 2>&1 | tee %t/ok.log
 # RUN: test -f %t/baseline-ok/run_config.json
 # RUN: test -f %t/baseline-ok/line_coverage_summary.csv
+# RUN: test -f %t/baseline-ok/line_coverage_covered.csv
+# RUN: test -f %t/baseline-ok/line_coverage_partially.csv
+# RUN: test -f %t/baseline-ok/line_coverage_uncovered.csv
 # RUN: test -f %t/baseline-ok/llc_address_line_map.csv
 # RUN: %FileCheck %s --input-file=%t/ok.log --check-prefix=ALLOW_EMPTY
 # ALLOW_EMPTY: warning: no llc sancov files

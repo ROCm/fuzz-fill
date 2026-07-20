@@ -5,8 +5,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from coverage.constants import DEFAULT_LINE_COVERAGE_SUMMARY_FILE
-from coverage.line_coverage_summary import load_line_coverage_summary
+from coverage.line_coverage_summary import load_coverage_by_line
 from fuzz_fill.log import get_logger
 
 logger = get_logger("coverage.target_lines")
@@ -33,17 +32,16 @@ def run_target_lines_check(
     """
     Emit target source lines that the **existing** LIT test suite leaves completely cold.
 
-    Reads ``line_coverage_summary.csv`` produced by ``coverage baseline`` (scoped by that
-    run's lit filter). A line is listed only when it appears in the summary with
-    ``coverage`` == ``uncovered`` — every merged instrumentation point on that
-    ``(file, line)`` was absent from the suite's covered points.
+    Reads baseline coverage produced by ``coverage baseline`` (scoped by that
+    run's lit filter). A line is listed only when it appears in the baseline
+    output with ``coverage`` == ``uncovered`` — every merged instrumentation
+    point on that ``(file, line)`` was absent from the suite's covered points.
 
     Lines with ``coverage`` ``covered`` or ``partially`` are omitted from the report;
     ``partially`` is counted in the printed summary. Rows with unknown path, or no
     instrumentation for that line in the summary, are counted in the printed summary only.
     """
-    summary_path = baseline_output_dir / DEFAULT_LINE_COVERAGE_SUMMARY_FILE
-    coverage_by_line, _ = load_line_coverage_summary(summary_path)
+    coverage_by_line = load_coverage_by_line(baseline_output_dir)
     summary_files: set[str] = {file for file, _ in coverage_by_line}
 
     llvm_repo = llvm_repo.resolve()

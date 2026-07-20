@@ -16,6 +16,9 @@
 # COM: A successful single-test suite run must emit the baseline artifacts.
 # RUN: test -f %t/baseline/run_config.json
 # RUN: test -f %t/baseline/line_coverage_summary.csv
+# RUN: test -f %t/baseline/line_coverage_covered.csv
+# RUN: test -f %t/baseline/line_coverage_partially.csv
+# RUN: test -f %t/baseline/line_coverage_uncovered.csv
 # RUN: test -f %t/baseline/llc_address_line_map.csv
 # RUN: test -f %t/baseline/lit_failures.json
 # RUN: test -f %t/baseline/llc_line_point_summary.csv

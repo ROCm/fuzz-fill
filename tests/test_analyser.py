@@ -12,6 +12,7 @@ from coverage.analyser import CoverageAnalyzer
 from coverage.constants import (
     DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
     DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
+    DEFAULT_LINE_COVERAGE_UNCOVERED_FILE,
     DEFAULT_NEW_COVERAGE_CSV,
 )
 from coverage.filepaths import Filepaths
@@ -91,6 +92,55 @@ class DiffPartialBaselineTest(unittest.TestCase):
             self.assertNotIn(20, reported_lines)
 
             self.assertEqual(rows[0]["covered-points"], "0x3001")
+
+    def test_reads_baseline_uncovered_split_file(self) -> None:
+        """Incremental uses ``line_coverage_uncovered.csv`` when present."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            suite = root / "test_suite"
+            new_tests = root / "new_tests"
+            diff = root / "diff"
+            suite.mkdir()
+            new_tests.mkdir()
+            (new_tests / NEW_TEST).mkdir()
+
+            _write_csv(
+                suite / DEFAULT_LINE_COVERAGE_UNCOVERED_FILE,
+                [
+                    ["file", "line"],
+                    [FILE, 30],
+                ],
+            )
+            _write_csv(
+                suite / DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
+                [
+                    ["file", "line", "point"],
+                    [FILE, 30, "0x3001"],
+                ],
+            )
+
+            filepaths = Filepaths(
+                output_dir=diff,
+                output_baseline_dir=suite,
+                output_candidate_tests_dir=new_tests,
+                sancov=Path("/unused/sancov"),
+                llc_address_line_map_file=DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
+                new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,
+            )
+
+            with (
+                patch.object(Sancov, "get_covered_addresses", return_value=NEW_TEST_POINTS),
+                patch(
+                    "coverage.analyser.get_sancov_file",
+                    return_value=new_tests / NEW_TEST / "llc.1.sancov",
+                ),
+            ):
+                CoverageAnalyzer(filepaths, mode="full").get_incremental_coverage()
+
+            with (diff / DEFAULT_NEW_COVERAGE_CSV).open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+
+            self.assertEqual({int(row["line"]) for row in rows}, {30})
 
 
 if __name__ == "__main__":
