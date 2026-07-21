@@ -10,8 +10,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-from coverage.constants import DEFAULT_LIT_FILTER
-from coverage.run_config import path_filter_from_lit_filter
+from coverage.constants import DEFAULT_PATH_FILTER
 from fuzz_fill.log import get_logger, log_timing, run_subprocess
 
 logger = get_logger("coverage.sancov")
@@ -297,7 +296,7 @@ class Sancov:
     ) -> list[pd.DataFrame]:
         """Load per-tool coverage frames from merged symcov paths on each Sancov."""
         if path_filter is None:
-            path_filter = path_filter_from_lit_filter(DEFAULT_LIT_FILTER)
+            path_filter = DEFAULT_PATH_FILTER
         return Sancov.load_coverage_dfs(
             [s.get_merged_symcov_path() for s in sancovs],
             path_filter,
