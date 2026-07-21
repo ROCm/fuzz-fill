@@ -282,28 +282,26 @@ fi
 echo "=== coverage baseline (lit-filter=${LIT_FILTER}) ==="
 "${baseline_args[@]}"
 
-if [[ "${BASELINE_ONLY}" -eq 1 ]]; then
-    exit 0
+if [[ "${BASELINE_ONLY}" -ne 1 ]]; then
+    candidate_args=(
+        python -m coverage candidate-test
+        --output-dir /mounted-output/candidate_tests
+        --candidate-tests-dir /mounted-candidate-tests
+        --n "${CANDIDATE_N}"
+    )
+    if [[ -n "${JOBS:-}" ]]; then
+        candidate_args+=(-j "${JOBS}")
+    fi
+
+    echo "=== coverage candidate-test (n=${CANDIDATE_N}) ==="
+    "${candidate_args[@]}"
+
+    echo "=== coverage incremental ==="
+    python -m coverage incremental \
+        --output-dir /mounted-output/incremental \
+        --baseline-output-dir /mounted-output/baseline \
+        --candidate-tests-output-dir /mounted-output/candidate_tests
 fi
-
-candidate_args=(
-    python -m coverage candidate-test
-    --output-dir /mounted-output/candidate_tests
-    --candidate-tests-dir /mounted-candidate-tests
-    --n "${CANDIDATE_N}"
-)
-if [[ -n "${JOBS:-}" ]]; then
-    candidate_args+=(-j "${JOBS}")
-fi
-
-echo "=== coverage candidate-test (n=${CANDIDATE_N}) ==="
-"${candidate_args[@]}"
-
-echo "=== coverage incremental ==="
-python -m coverage incremental \
-    --output-dir /mounted-output/incremental \
-    --baseline-output-dir /mounted-output/baseline \
-    --candidate-tests-output-dir /mounted-output/candidate_tests
 '
 
 echo "Image: ${image_ref}"
