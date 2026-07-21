@@ -329,7 +329,7 @@ Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `IN
 
 The Docker image bundles an official LLVM release bootstrap, a dual-build SanitizerCoverage LLVM tree (instrumented `llc`/`opt` plus Release helpers), and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
 
-**Scripts** (under [`scripts/docker/`](scripts/docker/)): [`build-image.sh`](scripts/docker/build-image.sh), [`build-image-pr.sh`](scripts/docker/build-image-pr.sh), [`pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh), [`test-image.sh`](scripts/docker/test-image.sh), [`tmp-container.sh`](scripts/docker/tmp-container.sh)
+**Scripts** (under [`scripts/docker/`](scripts/docker/)): [`build-image.sh`](scripts/docker/build-image.sh), [`build-image-pr.sh`](scripts/docker/build-image-pr.sh), [`baseline-coverage-gap-fill.sh`](scripts/docker/baseline-coverage-gap-fill.sh), [`pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh), [`test-image.sh`](scripts/docker/test-image.sh), [`tmp-container.sh`](scripts/docker/tmp-container.sh)
 
 ### Build
 
@@ -373,7 +373,42 @@ Examples:
 | `--github-repo <owner/repo>` | GitHub repo hosting the PR (default: `llvm/llvm-project`) |
 | `-j <n>`, `--jobs <n>` | Limit ninja parallelism for both LLVM builds (default: unconstrained) |
 
-For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov-gaps-detection.sh --build-image`](#pr-coverage-gap-detection) instead.
+For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov-gaps-detection.sh --build-image`](#workflow-2-pr-coverage-gap-detection) instead.
+
+### Workflow 1: Baseline coverage gap fill
+
+[`scripts/docker/baseline-coverage-gap-fill.sh`](scripts/docker/baseline-coverage-gap-fill.sh) runs Workflow 1 in Docker (baseline → `candidate-test` → `incremental`). Candidate tests are **not** baked into the image: at run time the script stages only the first `--n` `.ll`/`.bc` files from `--candidate-tests-dir` on the host and bind-mounts them read-only into the container.
+
+**Baseline only** (no candidate corpus):
+
+```bash
+./scripts/docker/baseline-coverage-gap-fill.sh \
+  --baseline-only \
+  --output-dir ./data/wf1-baseline \
+  -j "$(nproc)"
+```
+
+**Full pipeline** (stage N candidate tests, then run all three steps):
+
+```bash
+./scripts/docker/baseline-coverage-gap-fill.sh \
+  --output-dir ./data/wf1-100 \
+  --candidate-tests-dir /path/to/irtests/bitcode/amdgpu/all \
+  -n 100 \
+  -j "$(nproc)"
+```
+
+| Option | Meaning |
+|--------|---------|
+| `--output-dir <path>` | Host output directory (required) |
+| `--baseline-only` | Run only `coverage baseline` |
+| `--candidate-tests-dir <path>` | Host corpus root (required for full pipeline) |
+| `-n <N>`, `--n <N>` | Stage and run only the first N candidate tests (required for full pipeline) |
+| `--image <ref>` | Docker image (default: `fuzz-fill-test:latest`) |
+| `--lit-filter <prefix>` | LIT filter override (default: from image `/work/.sancov-allowlist`) |
+| `-j <n>`, `--jobs <n>` | Parallel jobs for llvm-lit and candidate-test |
+
+Main output for the full pipeline: `<output-dir>/incremental/new_coverage.csv`. See [Workflow 1](#workflow-1-fill-suite-coverage-gaps-with-fuzz-generated-tests) for report semantics.
 
 ### Workflow 2: PR coverage gap detection
 
