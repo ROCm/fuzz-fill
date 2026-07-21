@@ -312,13 +312,14 @@ class TestRunner:
                 for future in concurrent.futures.as_completed(futures):
                     future.result()
 
-        (
-            llc_address_line_map,
-            opt_address_line_map,
-            llc_line_point_summary,
-            opt_line_point_summary,
-            coverage,
-        ) = Sancov.get_joint_coverage(llc_sancov, opt_sancov, self._path_filter)
+        sancovs = [llc_sancov, opt_sancov]
+        coverage_dfs = Sancov.load_coverage_dfs_from_sancovs(sancovs, self._path_filter)
+        address_line_maps, line_point_summaries, coverage = Sancov.get_joint_coverage(
+            coverage_dfs
+        )
+
+        llc_address_line_map, opt_address_line_map = address_line_maps
+        llc_line_point_summary, opt_line_point_summary = line_point_summaries
 
         llc_address_line_map.to_csv(self.filepaths.output_dir / self.filepaths.llc_address_line_map_file, index=False)
         opt_address_line_map.to_csv(self.filepaths.output_dir / self.filepaths.opt_address_line_map_file, index=False)

@@ -13,7 +13,6 @@ from pathlib import Path
 from coverage.constants import DEFAULT_LIT_FILTER
 from coverage.run_config import path_filter_from_lit_filter
 from fuzz_fill.log import get_logger, log_timing, run_subprocess
-from typing import Literal
 
 logger = get_logger("coverage.sancov")
 
@@ -36,7 +35,6 @@ class Sancov:
         symbolize_target: Path | None = None,
         raw_sancov_dir: Path | None = None,
         suffix: str | None = None,
-        coverage_mode: Literal["partial", "full"] = "full",
         union_batch: int = 200,
     ) -> None:
         self.sancov_bin = sancov
@@ -44,7 +42,6 @@ class Sancov:
         self.union_batch = union_batch
         self.raw_sancov_dir = raw_sancov_dir
         self.suffix = suffix
-        self.coverage_mode = coverage_mode
 
         if self.raw_sancov_dir is not None:
             self.output_dir = self.raw_sancov_dir.parent / f"processed_sancov"
@@ -281,18 +278,30 @@ class Sancov:
         ).reset_index(drop=True)
 
     @staticmethod
-    def _load_llc_opt_coverage_dfs(
-        this_symcov_path: Path,
-        other_symcov_path: Path,
+    def load_coverage_dfs(
+        symcov_paths: list[Path],
         path_filter: str,
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        with this_symcov_path.open(encoding="utf-8") as f:
-            this_symcov = json.load(f)
-        with other_symcov_path.open(encoding="utf-8") as f:
-            other_symcov = json.load(f)
-        this_df = Sancov.get_coverage_df(this_symcov, path_filter)
-        other_df = Sancov.get_coverage_df(other_symcov, path_filter)
-        return this_df, other_df
+    ) -> list[pd.DataFrame]:
+        """Load per-tool coverage frames from symcov JSON files."""
+        dfs: list[pd.DataFrame] = []
+        for symcov_path in symcov_paths:
+            with symcov_path.open(encoding="utf-8") as f:
+                symcov = json.load(f)
+            dfs.append(Sancov.get_coverage_df(symcov, path_filter))
+        return dfs
+
+    @staticmethod
+    def load_coverage_dfs_from_sancovs(
+        sancovs: list[Sancov],
+        path_filter: str | None = None,
+    ) -> list[pd.DataFrame]:
+        """Load per-tool coverage frames from merged symcov paths on each Sancov."""
+        if path_filter is None:
+            path_filter = path_filter_from_lit_filter(DEFAULT_LIT_FILTER)
+        return Sancov.load_coverage_dfs(
+            [s.get_merged_symcov_path() for s in sancovs],
+            path_filter,
+        )
 
     def get_merged_sancov_path(self) -> Path:
         return self.output_dir / f"{self.suffix}.0.sancov"
@@ -404,12 +413,12 @@ class Sancov:
 
     @staticmethod
     def get_joint_coverage(
-        llc: Sancov,
-        opt: Sancov,
-        path_filter: str | None = None,
-    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        coverage_dfs: list[pd.DataFrame],
+    ) -> tuple[list[pd.DataFrame], list[pd.DataFrame], pd.DataFrame]:
         """
-        Build the per-tool LLC/OPT address maps, line point summaries, and coverage summary.
+        Build per-tool address maps, line point summaries, and a joint coverage summary.
+
+        Each input frame must have columns ``file``, ``line``, ``point``, and ``covered``.
 
         Each address map is a static, per-tool table: one row per instrumentation point
         (a line with multiple points yields multiple rows), with a ``covered`` flag marking
@@ -421,47 +430,25 @@ class Sancov:
         The coverage summary classifies every instrumented ``(file, line)`` as
         ``uncovered``, ``covered``, or ``partially``.
 
-        Returns
-        ``(llc_address_line_map, opt_address_line_map, llc_line_point_summary, opt_line_point_summary, coverage)``.
+        Returns ``(address_line_maps, line_point_summaries, coverage)``.
         Each map uses columns ``file``, ``line``, ``point``, ``covered``.
         Each line point summary uses columns ``file``, ``line``, ``covered_points``, ``all_points``.
         The coverage summary has columns ``file``, ``line``, ``coverage``.
         """
-
-        with log_timing(logger, f"joint coverage ({llc.suffix})"):
-            if path_filter is None:
-                path_filter = path_filter_from_lit_filter(DEFAULT_LIT_FILTER)
-
+        with log_timing(logger, "joint coverage"):
             # Per-tool table (file, point, line, covered) based on the sancov traces and symcov.
-            llc_df, opt_df = Sancov._load_llc_opt_coverage_dfs(
-                llc.get_merged_symcov_path(),
-                opt.get_merged_symcov_path(),
-                path_filter,
-            )
-            
-            # {llc,opt}_address_line_map has rows of (file, line, point_id, covered) using the static
+            # Each address_line_map has rows of (file, line, point_id, covered) using the static
             # coverage information provided in the symcov of the respective tool.
             # A line with multiple points will have multiple rows in the map.
             # This is the coverage information available in the tool regardless of the coverage achieved.
-            # Those points that were covered, are reported as such in the "covered" col.
-            llc_address_line_map = Sancov.build_address_line_map(llc_df)
-            opt_address_line_map = Sancov.build_address_line_map(opt_df)
-            
-            # {llc,opt}_line_point_summary has one row per (file, line) for that tool with
+            # Those points that were covered are reported as such in the "covered" col.
+            address_line_maps = [
+                Sancov.build_address_line_map(df) for df in coverage_dfs
+            ]
+            # Each line_point_summary has one row per (file, line) for that tool with
             # semicolon-separated covered_points and all_points derived from the address-line map.
-            llc_line_point_summary = Sancov.build_line_point_summary(llc_address_line_map)
-            opt_line_point_summary = Sancov.build_line_point_summary(opt_address_line_map)
-            
-            coverage = Sancov.build_coverage_summary([llc_df, opt_df])
-
-            if llc.coverage_mode == "full":
-                return (
-                    llc_address_line_map,
-                    opt_address_line_map,
-                    llc_line_point_summary,
-                    opt_line_point_summary,
-                    coverage,
-                )
-
-            elif llc.coverage_mode == "partial":
-                raise NotImplementedError(f"Coverage mode {llc.coverage_mode} not implemented")
+            line_point_summaries = [
+                Sancov.build_line_point_summary(m) for m in address_line_maps
+            ]
+            coverage = Sancov.build_coverage_summary(coverage_dfs)
+            return address_line_maps, line_point_summaries, coverage
