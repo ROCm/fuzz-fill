@@ -64,12 +64,17 @@ require_command() {
     fi
 }
 
-dissociate_clone() {
+export_self_contained_clone() {
     local repo="$1"
-    if [[ -f "${repo}/.git/objects/info/alternates" ]]; then
-        git -C "$repo" repack -a -d
-        rm -f "${repo}/.git/objects/info/alternates"
-    fi
+    local minimal_path="${repo}.minimal"
+
+    # Worktrees and reference clones use alternates; Docker copies .git verbatim,
+    # so git commands fail inside the image unless the repo is self-contained.
+    # Depth 2 is enough for git show --first-parent on HEAD (squash + merge-base).
+    rm -rf "$minimal_path"
+    git clone --depth 2 --no-local "file://${repo}" "$minimal_path"
+    rm -rf "$repo"
+    mv "$minimal_path" "$repo"
 }
 
 commit_available() {
@@ -296,8 +301,8 @@ fi
 
 git -C "$docker_llvm_path" checkout -B "$branch" "$squash_oid"
 
-echo "Making clone self-contained for Docker build"
-dissociate_clone "$docker_llvm_path"
+echo "Exporting self-contained clone for Docker build (depth 2)"
+export_self_contained_clone "$docker_llvm_path"
 if ! git -C "$docker_llvm_path" rev-parse HEAD >/dev/null 2>&1; then
     echo "error: failed to create standalone llvm-project clone for Docker build" >&2
     exit 1
