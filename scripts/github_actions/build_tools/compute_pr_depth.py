@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 """Compute the smallest `actions/checkout` fetch-depth for the current event."""
 
 import sys

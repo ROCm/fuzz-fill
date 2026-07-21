@@ -4,5 +4,6 @@
 scan:
   skip-dirs:
     - .git
-    - .venv
-    - venv
+    - "venv*"
+    - "**/venv*"
+    - .fuzz-fill-llvm-pr-worktrees

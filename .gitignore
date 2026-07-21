@@ -1,9 +1,12 @@
 prompts/*
 scratch/*
 venv/*
+.venv-lock/*
 data/*
 logs/*
 coverage_output/*
+sbom/*
+requirements.txt
 **/__pycache__/*
 integration-tests/Output/*
 .fuzz-fill-llvm-pr-worktrees/

@@ -1,5 +1,5 @@
 # Copyright Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
 # Post-merge bandit scan: runs after every push to main (typically the
 # squash/rebase/merge of a PR) and pushes SARIF findings to the

@@ -1,0 +1,60 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# Post-merge dependency audit: compiles a pinned requirements.txt from
+# pyproject.toml, then generates an SPDX SBOM from the repository tree
+# (including that lockfile). The lockfile is published as its own CI
+# artifact and copied into sbom/ beside the SBOM bundle; it is not
+# committed to the repository.
+
+name: SBOM_main
+
+on:
+  push:
+    branches: [main]
+  # Allow re-running on demand, e.g. after changing generate-sbom.py or
+  # refreshing the trivy pin, without an unrelated commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Generate requirements lockfile
+        run: ./scripts/compile-requirements.sh
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Generate SPDX SBOM
+        run: python scripts/generate-sbom.py --format spdx-json
+
+      - name: Upload requirements lockfile
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: requirements-${{ github.sha }}
+          path: requirements.txt
+          retention-days: 365
+          if-no-files-found: error
+
+      - name: Upload SBOM bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-${{ github.sha }}
+          path: |
+            sbom/*.spdx.json
+            sbom/*.meta.json
+            sbom/*.requirements.txt
+          retention-days: 365
+          if-no-files-found: error
