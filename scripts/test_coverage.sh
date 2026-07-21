@@ -12,8 +12,17 @@ CANDIDATE_TESTS_OUTPUT_DIR=$OUTPUT_DIR/candidate_tests
 INCREMENTAL_OUTPUT_DIR=$OUTPUT_DIR/incremental
 TESTS_DIR="${TESTS_DIR:-${REPO_ROOT}/../irtests/bitcode/amdgpu/all}"
 
-#FILTER="CodeGen/AMDGPU/loop" # Small set of tests featuring both llc and opt for testing
-FILTER="CodeGen/AMDGPU" # All tests
+PATH_FILTER="${PATH_FILTER:-llvm/lib/Target/AMDGPU}"
+# LIT_FILTERS: space-separated prefixes (repeatable via --lit-filter on the CLI).
+# Example broader AMDGPU selection (~5782 tests):
+#   LIT_FILTERS="CodeGen/AMDGPU CodeGen/MIR/AMDGPU MC/AMDGPU Target/AMDGPU"
+LIT_FILTERS="${LIT_FILTERS:-CodeGen/AMDGPU}"
+read -r -a LIT_FILTER_LIST <<< "$LIT_FILTERS"
+
+baseline_lit_args=()
+for filter in "${LIT_FILTER_LIST[@]}"; do
+  baseline_lit_args+=(--lit-filter "$filter")
+done
 
 # Clear old output directories
 rm -rf $BASELINE_OUTPUT_DIR
@@ -28,7 +37,8 @@ python -m coverage baseline \
     --llvm-lit "$INSTRUMENTED_BIN_DIR/llvm-lit" \
     --llc "$INSTRUMENTED_BIN_DIR/llc" \
     --opt "$INSTRUMENTED_BIN_DIR/opt" \
-    --lit-filter $FILTER 
+    "${baseline_lit_args[@]}" \
+    --path-filter "$PATH_FILTER"
 
 python -m coverage candidate-test \
     --output-dir $CANDIDATE_TESTS_OUTPUT_DIR \

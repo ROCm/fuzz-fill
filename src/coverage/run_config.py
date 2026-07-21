@@ -1,4 +1,4 @@
-"""Persist baseline run settings (lit filter → symcov path filter)."""
+"""Persist baseline run settings (lit filter and symcov path scope)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,11 @@ import json
 from pathlib import Path
 from typing import TypedDict
 
-from coverage.constants import DEFAULT_LIT_FILTER, DEFAULT_RUN_CONFIG_FILE
+from coverage.constants import (
+    DEFAULT_LIT_FILTER,
+    DEFAULT_PATH_FILTER,
+    DEFAULT_RUN_CONFIG_FILE,
+)
 
 
 class RunConfig(TypedDict):
@@ -25,18 +29,46 @@ def path_filter_from_lit_filter(lit_filter: str) -> str:
     )
 
 
+def _is_simple_codegen_lit_filter(lit_filter: str) -> bool:
+    """True when *lit_filter* is a plain CodeGen/<target>/ prefix, not a regex."""
+    if any(char in lit_filter for char in "|()[]?*+^$"):
+        return False
+    parts = lit_filter.strip("/").split("/")
+    return len(parts) >= 2 and parts[0] == "CodeGen"
+
+
 def resolved_lit_filter(lit_filter: str | None) -> str:
     return lit_filter if lit_filter is not None else DEFAULT_LIT_FILTER
 
 
-def build_run_config(*, lit_filter: str | None) -> RunConfig:
+def resolved_path_filter(*, lit_filter: str, path_filter: str | None) -> str:
+    if path_filter is not None:
+        return path_filter
+    if _is_simple_codegen_lit_filter(lit_filter):
+        return path_filter_from_lit_filter(lit_filter)
+    return DEFAULT_PATH_FILTER
+
+
+def build_run_config(
+    *,
+    lit_filter: str | None,
+    path_filter: str | None = None,
+) -> RunConfig:
     lit = resolved_lit_filter(lit_filter)
-    return RunConfig(lit_filter=lit, path_filter=path_filter_from_lit_filter(lit))
+    return RunConfig(
+        lit_filter=lit,
+        path_filter=resolved_path_filter(lit_filter=lit, path_filter=path_filter),
+    )
 
 
-def write_run_config(output_dir: Path, *, lit_filter: str | None) -> Path:
+def write_run_config(
+    output_dir: Path,
+    *,
+    lit_filter: str | None,
+    path_filter: str | None = None,
+) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    config = build_run_config(lit_filter=lit_filter)
+    config = build_run_config(lit_filter=lit_filter, path_filter=path_filter)
     path = output_dir / DEFAULT_RUN_CONFIG_FILE
     with path.open("w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)

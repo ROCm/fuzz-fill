@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Compare SanitizerCoverage from a .bc corpus against the LLVM LIT test suite.
 #
 # Prerequisites (from fuzz-fill repo root):
@@ -10,7 +10,7 @@
 # Usage:
 #   ./scripts/corpus_vs_suite_coverage.sh
 #   CORPUS_N=100 ./scripts/corpus_vs_suite_coverage.sh          # smoke: first 100 .bc files
-#   FILTER=CodeGen/AMDGPU/loop ./scripts/corpus_vs_suite_coverage.sh
+#   LIT_FILTERS='CodeGen/AMDGPU/loop' ./scripts/corpus_vs_suite_coverage.sh
 #   REFRESH=all ./scripts/corpus_vs_suite_coverage.sh           # wipe prior outputs under OUTPUT_DIR
 #   SKIP_TEST_SUITE=1 ./scripts/corpus_vs_suite_coverage.sh     # reuse baseline, run corpus + diff only
 #
@@ -26,7 +26,12 @@ LLVM="${LLVM:-$FUZZ_FILL/llvm-project}"
 LLVM_BIN="${LLVM_BIN:-$LLVM/build-sancov/bin}"
 INSTRUMENTED_BIN="${INSTRUMENTED_BIN:-$LLVM/build-sancov/bin}"
 CORPUS="${CORPUS:-$FUZZ_FILL/amdgpu-tests}"
-FILTER="${FILTER:-CodeGen/AMDGPU}"
+PATH_FILTER="${PATH_FILTER:-llvm/lib/Target/AMDGPU}"
+if [[ -n "${LIT_FILTERS:-}" ]]; then
+  read -r -a LIT_FILTER_LIST <<< "${LIT_FILTERS//;/ }"
+else
+  LIT_FILTER_LIST=(CodeGen/AMDGPU)
+fi
 OUTPUT_DIR="${OUTPUT_DIR:-$FUZZ_FILL/data/coverage_output/corpus_vs_suite_$(date +%y%m%d_%H%M%S)}"
 
 TEST_SUITE_OUTPUT_DIR="$OUTPUT_DIR/test_suite"
@@ -103,13 +108,19 @@ esac
 
 mkdir -p "$OUTPUT_DIR"
 
+baseline_lit_args=()
+for filter in "${LIT_FILTER_LIST[@]}"; do
+  baseline_lit_args+=(--lit-filter "$filter")
+done
+
 echo "=== corpus vs LLVM test suite coverage ==="
 echo "fuzz-fill:      $FUZZ_FILL"
 echo "llvm-bin:       $LLVM_BIN"
 echo "instrumented:   $INSTRUMENTED_BIN"
 echo "corpus:         $CORPUS"
 echo "corpus tests:   $CORPUS_N"
-echo "lit filter:     $FILTER"
+echo "lit filters:    ${LIT_FILTER_LIST[*]}"
+echo "path filter:    $PATH_FILTER"
 echo "output:         $OUTPUT_DIR"
 echo
 
@@ -127,7 +138,8 @@ if [[ -z "${SKIP_TEST_SUITE:-}" ]]; then
     --llvm-lit "$INSTRUMENTED_BIN/llvm-lit" \
     --llc "$INSTRUMENTED_BIN/llc" \
     --opt "$INSTRUMENTED_BIN/opt" \
-    --lit-filter "$FILTER"
+    "${baseline_lit_args[@]}" \
+    --path-filter "$PATH_FILTER"
   STEP1_ELAPSED="$(format_duration $((SECONDS - step_start)))"
   echo "    finished in $STEP1_ELAPSED"
 else

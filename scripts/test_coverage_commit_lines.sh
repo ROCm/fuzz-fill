@@ -15,8 +15,15 @@ BASELINE_OUTPUT_DIR=$OUTPUT_DIR/baseline
 ADDED_LINES_DIR=$OUTPUT_DIR/added-lines
 TARGET_LINES_REPORT_DIR=$OUTPUT_DIR/target_lines_report
 
+PATH_FILTER="${PATH_FILTER:-llvm/lib/Target/AMDGPU}"
 #FILTER="CodeGen/AMDGPU/loop"
-FILTER="CodeGen/AMDGPU"
+LIT_FILTERS="${LIT_FILTERS:-CodeGen/AMDGPU}"
+read -r -a LIT_FILTER_LIST <<< "$LIT_FILTERS"
+
+baseline_lit_args=()
+for filter in "${LIT_FILTER_LIST[@]}"; do
+  baseline_lit_args+=(--lit-filter "$filter")
+done
 
 COMMIT=b01fe4e
 
@@ -38,7 +45,8 @@ python -m coverage baseline \
     --llvm-lit "$INSTRUMENTED_BIN_DIR/llvm-lit" \
     --llc "$INSTRUMENTED_BIN_DIR/llc" \
     --opt "$INSTRUMENTED_BIN_DIR/opt" \
-    --lit-filter "$FILTER"
+    "${baseline_lit_args[@]}" \
+    --path-filter "$PATH_FILTER"
 
 # 3) Target lines not fully covered by the suite (target_lines_uncovered.csv)
 python -m coverage target-lines \
