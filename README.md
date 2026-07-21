@@ -134,7 +134,8 @@ Edit the variables at the top of `scripts/test_coverage.sh`:
 | `INSTRUMENTED_BIN_DIR` | Instrumented `bin` directory |
 | `OUTPUT_DIR` | Root for all artifacts from this workflow |
 | `TESTS_DIR` | Directory of fuzz-generated `.ll` / `.bc` files to scan |
-| `FILTER` | LIT `--filter=` prefix (e.g. `CodeGen/AMDGPU`) |
+| `FILTER` | llvm-lit `--filter=` regex or prefix (default: `CodeGen/AMDGPU`; full AMDGPU folders: `(^|/)AMDGPU/`) |
+| `PATH_FILTER` | Symcov source path substring for coverage CSVs (default: `llvm/lib/Target/AMDGPU`) |
 
 Then run from the fuzz-fill repo root:
 
@@ -190,7 +191,8 @@ Edit the variables at the top of `scripts/test_coverage_commit_lines.sh`:
 | `LLVM` | `llvm-project` checkout (same tree `added-lines` diffs against) |
 | `LLVM_BIN` / `INSTRUMENTED_BIN_DIR` | Same as Workflow 1 |
 | `OUTPUT_DIR` | Root for all artifacts |
-| `FILTER` | LIT filter for the baseline run |
+| `FILTER` | llvm-lit `--filter=` regex or prefix for the baseline run |
+| `PATH_FILTER` | Symcov source path substring (default: `llvm/lib/Target/AMDGPU`) |
 | `COMMIT` | Revision to analyse (`HEAD`, a hash, `main~3`, …) |
 
 Then run from the fuzz-fill repo root:
@@ -247,6 +249,15 @@ The workflows above call these modules. Use `--help` on any command for the full
 | `python -m added_lines` | Lines added by a git commit (Workflow 2) |
 | `python -m reduce` | Testcase reduction |
 
+### `coverage baseline` filters
+
+| Flag | Meaning |
+|------|---------|
+| `--lit-filter` | Regex or path prefix for llvm-lit `--filter=` (default: `CodeGen/AMDGPU`) |
+| `--path-filter` | Symcov source path substring for coverage CSVs. Plain `CodeGen/<target>/` filters derive `llvm/lib/Target/<target>`; regex filters default to `llvm/lib/Target/AMDGPU`. |
+
+Constant for the full AMDGPU-folder regex: `DEFAULT_LIT_FILTER_AMDGPU_DIRS = r"(^|/)AMDGPU/"` in [`src/coverage/constants.py`](src/coverage/constants.py).
+
 ### Environment variables
 
 Several commands accept LLVM tool paths via environment variables when the matching CLI flag is omitted. A flag on the command line always wins.
@@ -272,9 +283,27 @@ export FUZZ_FILL_LLC=/work/llvm-build-sancov/bin/llc
 export FUZZ_FILL_OPT=/work/llvm-build-sancov/bin/opt
 export FUZZ_FILL_LLVM_REPO=/work/llvm-project
 
-python -m coverage baseline --output-dir data/baseline --lit-filter CodeGen/AMDGPU
+python -m coverage baseline \
+  --output-dir data/baseline \
+  --lit-filter CodeGen/AMDGPU \
+  --path-filter llvm/lib/Target/AMDGPU
 python -m added_lines --commit HEAD
 ```
+
+Full baseline over every LIT test under an `AMDGPU/` directory (~6600 tests; symcov scope unchanged):
+
+```bash
+python -m coverage baseline \
+  --output-dir data/baseline-amdgpu-dirs \
+  --lit-filter '(^|/)AMDGPU/' \
+  --path-filter llvm/lib/Target/AMDGPU \
+  -j "$(nproc)"
+```
+
+Or via [`scripts/test_coverage.sh`](scripts/test_coverage.sh):
+
+```bash
+FILTER='(^|/)AMDGPU/' PATH_FILTER=llvm/lib/Target/AMDGPU ./scripts/test_coverage.sh
 
 Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `INSTRUMENTED_BIN_DIR`, …); only the `FUZZ_FILL_*` variables are read by the Python CLIs.
 
@@ -332,7 +361,7 @@ For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov
 
 ### Workflow 2: PR coverage gap detection
 
-[`scripts/docker/pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. The LIT filter defaults to the image's `/work/.sancov-allowlist` (set at build time via `--backend-tests`); override with `--lit-filter` if needed.
+[`scripts/docker/pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. The lit filter defaults from the image's `/work/.sancov-allowlist`; override with `--lit-filter` (regex or prefix) and `--path-filter` for symcov CSV scope.
 
 ```bash
 ./scripts/docker/pr-cov-gaps-detection.sh \
@@ -352,7 +381,8 @@ For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov
 | `--pr-id <n>` | PR number (image tag `llvm-pr-<n>`) |
 | `--output-dir <path>` | Host output directory |
 | `-j <n>`, `--jobs <n>` | Parallel jobs (ninja when building, llvm-lit when detecting) |
-| `--lit-filter <prefix>` | Optional LIT filter override |
+| `--lit-filter <regex>` | llvm-lit `--filter=` regex or prefix (default from allowlist) |
+| `--path-filter <substring>` | Symcov source path scope (default from allowlist) |
 | `--github-repo <owner/repo>` | Optional; default `llvm/llvm-project` when building |
 
 If the image `fuzz-fill-test:llvm-pr-<n>` already exists, omit `--build-image` to run detection only.
