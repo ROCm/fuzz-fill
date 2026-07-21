@@ -405,6 +405,7 @@ For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov
 | `--candidate-tests-dir <path>` | Host corpus root (required for full pipeline) |
 | `-n <N>`, `--n <N>` | Stage and run only the first N candidate tests (required for full pipeline) |
 | `--image <ref>` | Docker image (default: `fuzz-fill-test:latest`) |
+| `--bind-repo` | Mount the local fuzz-fill checkout over `/work/fuzz-fill` (venv stays at `/work/fuzz-fill-venv`) |
 | `--lit-filter <prefix>` | LIT filter override (default: from image `/work/.sancov-allowlist`) |
 | `-j <n>`, `--jobs <n>` | Parallel jobs for llvm-lit and candidate-test |
 

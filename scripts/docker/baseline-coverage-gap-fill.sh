@@ -9,6 +9,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+CONTAINER_WORKDIR="/work/fuzz-fill"
 
 image_name="${IMAGE_NAME:-fuzz-fill-test}"
 image_tag="${IMAGE_TAG:-latest}"
@@ -17,6 +19,7 @@ output_dir=""
 lit_filter=""
 jobs=""
 baseline_only=0
+bind_repo=0
 candidate_tests_dir=""
 candidate_n=""
 
@@ -37,12 +40,14 @@ Modes (pick one):
 
 Options:
   --image <ref>                 Docker image ref (default: \${IMAGE_NAME:-fuzz-fill-test}:\${IMAGE_TAG:-latest})
+  --bind-repo                   Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
   --lit-filter <prefix>         LIT --filter= prefix (default: from image /work/.sancov-allowlist)
   -j <n>, --jobs <n>            Parallel jobs for llvm-lit and candidate-test
   --help, -h                    Show this help
 
 Examples:
   $(basename "$0") --baseline-only --output-dir ./data/wf1-baseline -j "\$(nproc)"
+  $(basename "$0") --bind-repo --baseline-only --output-dir ./data/wf1-baseline -j "\$(nproc)"
   $(basename "$0") --output-dir ./data/wf1-100 \\
       --candidate-tests-dir /path/to/irtests/bitcode/amdgpu/all -n 100 -j "\$(nproc)"
 EOF
@@ -143,6 +148,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --baseline-only)
             baseline_only=1
+            shift
+            ;;
+        --bind-repo)
+            bind_repo=1
             shift
             ;;
         --candidate-tests-dir)
@@ -260,11 +269,18 @@ if [[ "$baseline_only" -eq 0 ]]; then
     docker_env+=(-e "CANDIDATE_N=${candidate_n}")
 fi
 
+repo_mount=()
+if [[ "${bind_repo}" -eq 1 ]]; then
+    repo_mount=(-v "${REPO_ROOT}:${CONTAINER_WORKDIR}")
+    echo "Using local fuzz-fill checkout: ${REPO_ROOT}"
+fi
+
 docker run --rm \
     -v "${output_dir}:/mounted-output" \
     "${candidate_mount[@]}" \
+    "${repo_mount[@]}" \
     "${docker_env[@]}" \
-    -w /work/fuzz-fill \
+    -w "${CONTAINER_WORKDIR}" \
     "${image_ref}" \
     bash -lc '
 set -euo pipefail
