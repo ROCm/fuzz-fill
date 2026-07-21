@@ -13,16 +13,10 @@ INCREMENTAL_OUTPUT_DIR=$OUTPUT_DIR/incremental
 TESTS_DIR="${TESTS_DIR:-${REPO_ROOT}/../irtests/bitcode/amdgpu/all}"
 
 PATH_FILTER="${PATH_FILTER:-llvm/lib/Target/AMDGPU}"
-# LIT_FILTERS: space-separated prefixes (repeatable via --lit-filter on the CLI).
-# Example broader AMDGPU selection (~5782 tests):
-#   LIT_FILTERS="CodeGen/AMDGPU CodeGen/MIR/AMDGPU MC/AMDGPU Target/AMDGPU"
-LIT_FILTERS="${LIT_FILTERS:-CodeGen/AMDGPU}"
-read -r -a LIT_FILTER_LIST <<< "$LIT_FILTERS"
-
-baseline_lit_args=()
-for filter in "${LIT_FILTER_LIST[@]}"; do
-  baseline_lit_args+=(--lit-filter "$filter")
-done
+# FILTER: llvm-lit --filter= regex or path prefix (default: CodeGen/AMDGPU).
+# Full AMDGPU-folder suite (~6619 tests):
+#   FILTER='(^|/)AMDGPU/' ./scripts/test_coverage.sh
+FILTER="${FILTER:-CodeGen/AMDGPU}"
 
 # Clear old output directories
 rm -rf $BASELINE_OUTPUT_DIR
@@ -37,7 +31,7 @@ python -m coverage baseline \
     --llvm-lit "$INSTRUMENTED_BIN_DIR/llvm-lit" \
     --llc "$INSTRUMENTED_BIN_DIR/llc" \
     --opt "$INSTRUMENTED_BIN_DIR/opt" \
-    "${baseline_lit_args[@]}" \
+    --lit-filter "$FILTER" \
     --path-filter "$PATH_FILTER"
 
 python -m coverage candidate-test \
