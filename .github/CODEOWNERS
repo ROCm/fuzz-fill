@@ -1,0 +1,5 @@
+# Default owners for the repository
+* @ambergorzynski @mgcarrasco
+
+# CI and GitHub configuration
+/.github/ @mgcarrasco @ambergorzynski
