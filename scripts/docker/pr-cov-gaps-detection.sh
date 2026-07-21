@@ -63,7 +63,7 @@ EOF
 
 lit_filter_for_allowlist() {
     case "$1" in
-        amdgpu) echo "CodeGen/AMDGPU" ;;
+        amdgpu) echo "(^|/)AMDGPU/" ;;
         spirv) echo "CodeGen/SPIRV" ;;
         *)
             echo "error: unsupported image allowlist: ${1} (expected amdgpu or spirv)" >&2

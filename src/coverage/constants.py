@@ -2,10 +2,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Default for llvm-lit ``--filter=`` when none is passed.
-DEFAULT_LIT_FILTER = "CodeGen/AMDGPU"
-# All LIT tests under a directory named AMDGPU (~6600 tests in check-llvm).
+# Default for llvm-lit ``--filter=`` when none is passed (all tests under an AMDGPU/ directory).
 DEFAULT_LIT_FILTER_AMDGPU_DIRS = r"(^|/)AMDGPU/"
+DEFAULT_LIT_FILTER = DEFAULT_LIT_FILTER_AMDGPU_DIRS
 # Default symcov source-path substring for coverage CSVs.
 DEFAULT_PATH_FILTER = "llvm/lib/Target/AMDGPU"
 DEFAULT_RUN_CONFIG_FILE = "run_config.json"

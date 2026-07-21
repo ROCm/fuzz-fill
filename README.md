@@ -134,7 +134,7 @@ Edit the variables at the top of `scripts/test_coverage.sh`:
 | `INSTRUMENTED_BIN_DIR` | Instrumented `bin` directory |
 | `OUTPUT_DIR` | Root for all artifacts from this workflow |
 | `TESTS_DIR` | Directory of fuzz-generated `.ll` / `.bc` files to scan |
-| `FILTER` | llvm-lit `--filter=` regex or prefix (default: `CodeGen/AMDGPU`; full AMDGPU folders: `(^|/)AMDGPU/`) |
+| `FILTER` | llvm-lit `--filter=` regex or prefix (default: `(^|/)AMDGPU/` for all AMDGPU folders; use `CodeGen/AMDGPU` for CodeGen only) |
 | `PATH_FILTER` | Symcov source path substring for coverage CSVs (default: `llvm/lib/Target/AMDGPU`) |
 
 Then run from the fuzz-fill repo root:
@@ -253,10 +253,10 @@ The workflows above call these modules. Use `--help` on any command for the full
 
 | Flag | Meaning |
 |------|---------|
-| `--lit-filter` | Regex or path prefix for llvm-lit `--filter=` (default: `CodeGen/AMDGPU`) |
-| `--path-filter` | Symcov source path substring for coverage CSVs. Plain `CodeGen/<target>/` filters derive `llvm/lib/Target/<target>`; regex filters default to `llvm/lib/Target/AMDGPU`. |
+| `--lit-filter` | Regex or path prefix for llvm-lit `--filter=` (default: `(^|/)AMDGPU/`) |
+| `--path-filter` | Symcov source path substring for coverage CSVs (default: `llvm/lib/Target/AMDGPU`; plain `CodeGen/<target>/` filters derive `llvm/lib/Target/<target>`) |
 
-Constant for the full AMDGPU-folder regex: `DEFAULT_LIT_FILTER_AMDGPU_DIRS = r"(^|/)AMDGPU/"` in [`src/coverage/constants.py`](src/coverage/constants.py).
+Constants in [`src/coverage/constants.py`](src/coverage/constants.py): `DEFAULT_LIT_FILTER`, `DEFAULT_PATH_FILTER`.
 
 ### Environment variables
 
@@ -285,12 +285,20 @@ export FUZZ_FILL_LLVM_REPO=/work/llvm-project
 
 python -m coverage baseline \
   --output-dir data/baseline \
-  --lit-filter CodeGen/AMDGPU \
   --path-filter llvm/lib/Target/AMDGPU
 python -m added_lines --commit HEAD
 ```
 
-Full baseline over every LIT test under an `AMDGPU/` directory (~6600 tests; symcov scope unchanged):
+By default, `coverage baseline` uses `--lit-filter '(^|/)AMDGPU/'` (all LIT tests under an `AMDGPU/` directory). For a faster CodeGen-only run:
+
+```bash
+python -m coverage baseline \
+  --output-dir data/baseline-codegen \
+  --lit-filter CodeGen/AMDGPU \
+  --path-filter llvm/lib/Target/AMDGPU
+```
+
+Explicit full-folder baseline (same as default):
 
 ```bash
 python -m coverage baseline \
@@ -300,10 +308,16 @@ python -m coverage baseline \
   -j "$(nproc)"
 ```
 
-Or via [`scripts/test_coverage.sh`](scripts/test_coverage.sh):
+Or via [`scripts/test_coverage.sh`](scripts/test_coverage.sh) (defaults match the above):
 
 ```bash
-FILTER='(^|/)AMDGPU/' PATH_FILTER=llvm/lib/Target/AMDGPU ./scripts/test_coverage.sh
+./scripts/test_coverage.sh
+```
+
+CodeGen-only via script:
+
+```bash
+FILTER=CodeGen/AMDGPU ./scripts/test_coverage.sh
 
 Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `INSTRUMENTED_BIN_DIR`, …); only the `FUZZ_FILL_*` variables are read by the Python CLIs.
 

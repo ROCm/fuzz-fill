@@ -17,8 +17,8 @@ TARGET_LINES_REPORT_DIR=$OUTPUT_DIR/target_lines_report
 
 PATH_FILTER="${PATH_FILTER:-llvm/lib/Target/AMDGPU}"
 #FILTER="CodeGen/AMDGPU/loop"
-# Full AMDGPU-folder suite: FILTER='(^|/)AMDGPU/'
-FILTER="${FILTER:-CodeGen/AMDGPU}"
+# Faster CodeGen-only subset: FILTER=CodeGen/AMDGPU
+FILTER="${FILTER:-(^|/)AMDGPU/}"
 
 COMMIT=b01fe4e
 

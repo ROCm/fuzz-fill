@@ -28,7 +28,7 @@ LLVM_BIN="${LLVM_BIN:-$LLVM/build-sancov/bin}"
 INSTRUMENTED_BIN="${INSTRUMENTED_BIN:-$LLVM/build-sancov/bin}"
 CORPUS="${CORPUS:-$FUZZ_FILL/amdgpu-tests}"
 PATH_FILTER="${PATH_FILTER:-llvm/lib/Target/AMDGPU}"
-FILTER="${FILTER:-CodeGen/AMDGPU}"
+FILTER="${FILTER:-(^|/)AMDGPU/}"
 OUTPUT_DIR="${OUTPUT_DIR:-$FUZZ_FILL/data/coverage_output/corpus_vs_suite_$(date +%y%m%d_%H%M%S)}"
 
 TEST_SUITE_OUTPUT_DIR="$OUTPUT_DIR/test_suite"

@@ -13,10 +13,9 @@ INCREMENTAL_OUTPUT_DIR=$OUTPUT_DIR/incremental
 TESTS_DIR="${TESTS_DIR:-${REPO_ROOT}/../irtests/bitcode/amdgpu/all}"
 
 PATH_FILTER="${PATH_FILTER:-llvm/lib/Target/AMDGPU}"
-# FILTER: llvm-lit --filter= regex or path prefix (default: CodeGen/AMDGPU).
-# Full AMDGPU-folder suite (~6619 tests):
-#   FILTER='(^|/)AMDGPU/' ./scripts/test_coverage.sh
-FILTER="${FILTER:-CodeGen/AMDGPU}"
+# FILTER: llvm-lit --filter= regex or path prefix (default: all AMDGPU/ folders).
+# Faster CodeGen-only subset: FILTER=CodeGen/AMDGPU
+FILTER="${FILTER:-(^|/)AMDGPU/}"
 
 # Clear old output directories
 rm -rf $BASELINE_OUTPUT_DIR

@@ -6,7 +6,6 @@ import unittest
 from pathlib import Path
 
 from coverage.constants import (
-    DEFAULT_LIT_FILTER,
     DEFAULT_LIT_FILTER_AMDGPU_DIRS,
     DEFAULT_PATH_FILTER,
 )
@@ -51,8 +50,8 @@ class TestRunConfig(unittest.TestCase):
 
     def test_build_run_config_defaults(self) -> None:
         config = build_run_config(lit_filter=None)
-        self.assertEqual(config["lit_filter"], DEFAULT_LIT_FILTER)
-        self.assertEqual(config["path_filter"], "llvm/lib/Target/AMDGPU")
+        self.assertEqual(config["lit_filter"], DEFAULT_LIT_FILTER_AMDGPU_DIRS)
+        self.assertEqual(config["path_filter"], DEFAULT_PATH_FILTER)
 
     def test_build_run_config_amdgpu_dirs_regex(self) -> None:
         config = build_run_config(lit_filter=DEFAULT_LIT_FILTER_AMDGPU_DIRS)
