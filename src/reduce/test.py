@@ -15,10 +15,4 @@ class Test:
         self.file: str = file
         self.line: int = line
 
-    def run(self):
-        pass
-
-    def get_coverage(self):
-        pass
-
 

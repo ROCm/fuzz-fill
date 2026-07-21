@@ -7,10 +7,14 @@ from coverage.filepaths import Filepaths
 from coverage.test_runner import TestRunner
 from coverage.constants import (
     DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
+    DEFAULT_OPT_ADDRESS_LINE_MAP_FILE,
+    DEFAULT_LLC_LINE_POINT_SUMMARY_FILE,
+    DEFAULT_OPT_LINE_POINT_SUMMARY_FILE,
     DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_NEW_COVERAGE_CSV,
     DEFAULT_TARGET_LINES_REPORT,
+    DEFAULT_TIMINGS_FILE,
 )
 
 from coverage.analyser import CoverageAnalyzer
@@ -34,7 +38,9 @@ from fuzz_fill.log import (
     configure_logging,
     get_logger,
     log_timing,
+    record_log_timings,
     resolve_log_file,
+    write_timings_csv,
 )
 
 logger = get_logger("coverage")
@@ -54,9 +60,9 @@ def main():
     p_target_lines = sub.add_parser(
         "target-lines",
         help=(
-            "List target-lines CSV rows where every instrumentation point on that line is "
-            "uncovered by the suite (expects ``line_coverage_summary.csv`` from "
-            "``coverage baseline``; no lit re-run)."
+            "List target-lines CSV rows whose ``(file, line)`` is ``uncovered`` in the "
+            "baseline summary (``covered`` / ``partially`` lines are omitted; expects "
+            "``line_coverage_summary.csv`` from ``coverage baseline``; no lit re-run)."
         ),
     )
 
@@ -192,18 +198,22 @@ def main():
         )
         filepaths = get_filepaths(args, tools=tools)
         logger.info("getting baseline coverage for the test suite")
-        with log_timing(logger, "baseline"):
-            test_runner = TestRunner(
-                mode="lit",
-                filepaths=filepaths,
-                lit_filter=args.lit_filter,
-                jobs=args.jobs,
-                lit_verbose=args.lit_verbose,
-                lit_allow_failures=args.lit_allow_failures,
-                require_sancov=args.require_sancov,
-                debug=args.debug,
-            )
-            test_runner.run()
+        with record_log_timings() as timings:
+            with log_timing(logger, "baseline"):
+                test_runner = TestRunner(
+                    mode="lit",
+                    filepaths=filepaths,
+                    lit_filter=args.lit_filter,
+                    jobs=args.jobs,
+                    lit_verbose=args.lit_verbose,
+                    lit_allow_failures=args.lit_allow_failures,
+                    require_sancov=args.require_sancov,
+                    debug=args.debug,
+                )
+                test_runner.run()
+            timings_path = args.output_dir / DEFAULT_TIMINGS_FILE
+            write_timings_csv(timings_path, timings)
+            logger.info("wrote baseline timings to %s", timings_path)
 
     elif args.subcmd == "candidate-test":
         tools = candidate_test_tools_from_args(llc=args.llc)
@@ -282,6 +292,9 @@ def get_filepaths(
         output_baseline_dir=getattr(args, "baseline_output_dir", None),
         output_candidate_tests_dir=getattr(args, "candidate_tests_output_dir", None),
         llc_address_line_map_file=DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
+        opt_address_line_map_file=DEFAULT_OPT_ADDRESS_LINE_MAP_FILE,
+        llc_line_point_summary_file=DEFAULT_LLC_LINE_POINT_SUMMARY_FILE,
+        opt_line_point_summary_file=DEFAULT_OPT_LINE_POINT_SUMMARY_FILE,
         line_coverage_summary_file=DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
         new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,
     )

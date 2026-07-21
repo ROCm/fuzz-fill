@@ -13,7 +13,6 @@ from pathlib import Path
 from coverage.constants import DEFAULT_LIT_FILTER
 from coverage.run_config import path_filter_from_lit_filter
 from fuzz_fill.log import get_logger, log_timing, run_subprocess
-from typing import Literal
 
 logger = get_logger("coverage.sancov")
 
@@ -36,7 +35,6 @@ class Sancov:
         symbolize_target: Path | None = None,
         raw_sancov_dir: Path | None = None,
         suffix: str | None = None,
-        coverage_mode: Literal["partial", "full"] = "full",
         union_batch: int = 200,
     ) -> None:
         self.sancov_bin = sancov
@@ -44,7 +42,6 @@ class Sancov:
         self.union_batch = union_batch
         self.raw_sancov_dir = raw_sancov_dir
         self.suffix = suffix
-        self.coverage_mode = coverage_mode
 
         if self.raw_sancov_dir is not None:
             self.output_dir = self.raw_sancov_dir.parent / f"processed_sancov"
@@ -122,132 +119,189 @@ class Sancov:
         return set(zip(full["file"], full["line"]))
 
     @staticmethod
-    def merged_llc_opt_coverage_df(
-        this_df: pd.DataFrame, other_df: pd.DataFrame
+    def coverage_df_from_hits(
+        address_line_map: pd.DataFrame,
+        covered_addresses: set[str],
+        *,
+        point_column: str = "point",
     ) -> pd.DataFrame:
-        """Outer-merge llc and opt coverage rows on ``(file, line, col)`` with ``covered_either``."""
-        this_df = this_df.copy()
-        this_df["line"] = this_df["line"].astype(int)
-        other_df = other_df.copy()
-        other_df["line"] = other_df["line"].astype(int)
-        merged = this_df.merge(
-            other_df,
-            on=["file", "line", "col"],
-            how="outer",
-            suffixes=("_this", "_other"),
-        )
-        merged["covered_either"] = (
-            merged["covered_this"].fillna(0).astype(int)
-            | merged["covered_other"].fillna(0).astype(int)
-        )
-        return merged
-
-    @staticmethod
-    def jointly_fully_covered_line_keys_from_merged(
-        merged: pd.DataFrame,
-    ) -> set[tuple[str, int]]:
-        """``(file, line)`` where every merged row has ``covered_either`` set."""
-        return Sancov.full_line_keys(merged, covered_column="covered_either")
-
-    @staticmethod
-    def jointly_all_points_uncovered_line_keys_from_merged(
-        merged: pd.DataFrame,
-    ) -> set[tuple[str, int]]:
-        """``(file, line)`` where no merged row has ``covered_either`` set."""
-        agg = (
-            merged.groupby(["file", "line"], as_index=False)
-            .agg(
-                n_covered=("covered_either", "sum"),
-                n_points=("covered_either", "count"),
-            )
-        )
-        none_hit = agg[(agg["n_covered"] == 0) & (agg["n_points"] > 0)]
-        return set(zip(none_hit["file"], none_hit["line"]))
-
-    @staticmethod
-    def jointly_fully_covered_line_keys_from_llc_opt_dfs(
-        this_df: pd.DataFrame, other_df: pd.DataFrame
-    ) -> set[tuple[str, int]]:
-        merged = Sancov.merged_llc_opt_coverage_df(this_df, other_df)
-        return Sancov.jointly_fully_covered_line_keys_from_merged(merged)
-
-    @staticmethod
-    def jointly_all_points_uncovered_line_keys_from_llc_opt_dfs(
-        this_df: pd.DataFrame, other_df: pd.DataFrame
-    ) -> set[tuple[str, int]]:
-        merged = Sancov.merged_llc_opt_coverage_df(this_df, other_df)
-        return Sancov.jointly_all_points_uncovered_line_keys_from_merged(merged)
-
-    @staticmethod
-    def all_uncovered_line_point_addresses(
-        merged: pd.DataFrame,
-        line_keys: set[tuple[str, int]],
-    ) -> dict[tuple[str, int], list[str]]:
-        """Distinct sanitizer point ids (``point_this`` / ``point_other``) per ``(file, line)``."""
-        if not line_keys:
-            return {}
-        m = merged.copy()
+        """Build a ``(file, line, point, covered)`` frame from a static address map and runtime hits."""
+        m = address_line_map[["file", "line", point_column]].copy()
         m["line"] = m["line"].astype(int)
-        out: dict[tuple[str, int], list[str]] = {}
-        for f, ln in line_keys:
-            sub = m[(m["file"] == f) & (m["line"] == ln)]
-            ordered: list[str] = []
-            seen: set[str] = set()
-            for _, row in sub.iterrows():
-                for col in ("point_this", "point_other"):
-                    if col not in row.index:
-                        continue
-                    v = row[col]
-                    if pd.isna(v):
-                        continue
-                    s = str(v).strip()
-                    if not s or s in seen:
-                        continue
-                    seen.add(s)
-                    ordered.append(s)
-            out[(f, ln)] = ordered
-        return out
+        m["point"] = m[point_column].map(
+            lambda x: Sancov.format_hex_address(x) if pd.notna(x) else x
+        )
+        m["covered"] = m["point"].isin(covered_addresses).astype(int)
+        return m[["file", "line", "point", "covered"]]
 
     @staticmethod
-    def build_line_coverage_summary(merged: pd.DataFrame) -> pd.DataFrame:
-        """Per-(file, line) summary from merged llc/opt coverage.
+    def covered_line_keys(coverage_dfs: list[pd.DataFrame]) -> set[tuple[str, int]]:
+        """``(file, line)`` pairs classified as ``covered`` by ``build_coverage_summary``."""
+        summary = Sancov.build_coverage_summary(coverage_dfs)
+        rows = summary.loc[summary["coverage"] == "covered"]
+        return set(zip(rows["file"], rows["line"].astype(int)))
 
-        Returns columns ``file``, ``line``, ``coverage`` (``full`` | ``partial`` | ``none``),
-        and ``point_addresses`` (all ``point_this`` / ``point_other`` ids on the line,
-        semicolon-separated).
+    @staticmethod
+    def build_address_line_map(df: pd.DataFrame) -> pd.DataFrame:
+        """Static ``(file, line, point, covered)`` map for a per-tool coverage frame.
+
+        A line with multiple instrumentation points yields multiple rows. This reflects
+        the coverage information available in the tool regardless of coverage achieved.
         """
-        m = merged.copy()
-        m["line"] = m["line"].astype(int)
-        agg = (
-            m.groupby(["file", "line"], as_index=False)
-            .agg(n_covered=("covered_either", "sum"), n_points=("covered_either", "count"))
-        )
-        agg["coverage"] = np.where(
-            agg["n_covered"] == 0,
-            "none",
-            np.where(agg["n_covered"] == agg["n_points"], "full", "partial"),
-        )
-        line_keys = set(zip(agg["file"], agg["line"]))
-        addr_map = Sancov.all_uncovered_line_point_addresses(m, line_keys)
-        agg["point_addresses"] = [
-            ";".join(addr_map.get((f, ln), []))
-            for f, ln in zip(agg["file"], agg["line"])
-        ]
-        return agg[["file", "line", "coverage", "point_addresses"]]
+        required_cols = ("file", "line", "point", "covered")
+        missing = set(required_cols) - set(df.columns)
+        assert not missing, f"address line map input missing columns: {sorted(missing)}"
+        address_line_map = df[list(required_cols)].copy()
+        address_line_map["line"] = address_line_map["line"].astype(int)
+        return address_line_map
 
     @staticmethod
-    def _load_llc_opt_coverage_dfs(
-        this_symcov_path: Path,
-        other_symcov_path: Path,
+    def build_line_point_summary(
+        address_line_map: pd.DataFrame, *, point_column: str = "point"
+    ) -> pd.DataFrame:
+        """Per-(file, line) semicolon-separated point lists for one tool address-line map.
+
+        Input is the output of ``build_address_line_map`` with columns ``file``, ``line``,
+        ``covered``, and ``point``.
+
+        Returns columns ``file``, ``line``, ``covered_points``, ``all_points``.
+        """
+        required_cols = ("file", "line", "covered", point_column)
+        missing = set(required_cols) - set(address_line_map.columns)
+        assert not missing, f"address line map missing columns: {sorted(missing)}"
+        if address_line_map.empty:
+            return pd.DataFrame(columns=["file", "line", "covered_points", "all_points"])
+
+        covered_col = address_line_map["covered"]
+        assert (
+            pd.api.types.is_numeric_dtype(covered_col)
+            and covered_col.isin([0, 1]).all()
+        ), "covered must be numeric 0/1 flags"
+
+        keys_order: list[tuple[str, int]] = []
+        all_points_by_key: dict[tuple[str, int], set[str]] = {}
+        covered_points_by_key: dict[tuple[str, int], set[str]] = {}
+
+        for file, line, point, covered in zip(
+            address_line_map["file"].to_numpy(),
+            address_line_map["line"].astype(int).to_numpy(),
+            address_line_map[point_column].to_numpy(),
+            covered_col.to_numpy(),
+        ):
+            if pd.isna(point):
+                continue
+            key = (file, line)
+            if key not in all_points_by_key:
+                keys_order.append(key)
+                all_points_by_key[key] = set()
+            point_str = str(point)
+            all_points_by_key[key].add(point_str)
+            if covered == 1:
+                covered_points_by_key.setdefault(key, set()).add(point_str)
+
+        rows = []
+        for file, line in keys_order:
+            key = (file, line)
+            covered_set = covered_points_by_key.get(key)
+            rows.append(
+                {
+                    "file": file,
+                    "line": line,
+                    "covered_points": ";".join(sorted(covered_set)) if covered_set else "",
+                    "all_points": ";".join(sorted(all_points_by_key[key])),
+                }
+            )
+        return pd.DataFrame(
+            rows, columns=["file", "line", "covered_points", "all_points"]
+        )
+
+    @staticmethod
+    def build_coverage_summary(coverage_dfs: list[pd.DataFrame]) -> pd.DataFrame:
+        """Per-(file, line) coverage classification across one or more tool frames.
+
+        Each input frame must have columns ``file``, ``line``, ``point``, and ``covered``.
+        A ``(file, line)`` present in only one tool is judged solely on that tool's
+        points.
+
+        Returns columns ``file``, ``line``, ``coverage`` with values:
+        - ``uncovered``: every instrumentation point across all tools has ``covered == 0``
+        - ``covered``: at least one tool has all instrumentation points on the line covered
+        - ``partially``: some points are covered, but no tool fully covers the line
+        """
+        required_cols = ("file", "line", "point", "covered")
+        for i, df in enumerate(coverage_dfs):
+            missing = set(required_cols) - set(df.columns)
+            assert not missing, f"coverage_dfs[{i}] missing columns: {sorted(missing)}"
+        if not coverage_dfs:
+            return pd.DataFrame(columns=["file", "line", "coverage"])
+
+        per_tool: list[pd.DataFrame] = []
+        for df in coverage_dfs:
+            tool_df = df[list(required_cols)].copy()
+            tool_df["line"] = tool_df["line"].astype(int)
+            assert (
+                pd.api.types.is_numeric_dtype(tool_df["covered"])
+                and tool_df["covered"].isin([0, 1]).all()
+            ), "covered must be numeric 0/1 flags"
+            dupes = tool_df.duplicated(subset=["file", "line", "point"], keep=False)
+            assert not dupes.any(), (
+                "duplicate instrumentation points for the same (file, line) in one tool: "
+                f"{tool_df.loc[dupes, ['file', 'line', 'point']].drop_duplicates().to_dict('records')}"
+            )
+            # One row per (file, line) for this tool: how many points exist vs how many were hit.
+            # e.g. two points on line 42 with covered=[1, 0] -> tool_points=2, tool_covered=1.
+            grouped = (
+                tool_df.groupby(["file", "line"], as_index=False)
+                .agg(tool_points=("covered", "count"), tool_covered=("covered", "sum"))
+            )
+            grouped["tool_full"] = grouped["tool_covered"] == grouped["tool_points"]
+            per_tool.append(grouped)
+
+        combined = pd.concat(per_tool, ignore_index=True)
+        # Merge per-tool stats: total hits across tools, and whether any one tool fully covered the line.
+        # e.g. llc tool_covered=1, opt tool_covered=2 -> total_covered=3; llc tool_full=True -> any_tool_full=True.
+        agg = (
+            combined.groupby(["file", "line"], as_index=False)
+            .agg(total_covered=("tool_covered", "sum"), any_tool_full=("tool_full", "any"))
+        )
+        # A (file, line) is
+        #   a) uncovered if none of its points were covered by any tool.
+        #   b) covered if at least one tool fully covered all of its points in that tool.
+        #   c) partially if some points are covered, but no tool fully covered the line.
+        agg["coverage"] = np.select(
+            [agg["total_covered"] == 0, agg["any_tool_full"]],
+            ["uncovered", "covered"],
+            default="partially",
+        )
+        return agg[["file", "line", "coverage"]].sort_values(
+            ["file", "line"]
+        ).reset_index(drop=True)
+
+    @staticmethod
+    def load_coverage_dfs(
+        symcov_paths: list[Path],
         path_filter: str,
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        with this_symcov_path.open(encoding="utf-8") as f:
-            this_symcov = json.load(f)
-        with other_symcov_path.open(encoding="utf-8") as f:
-            other_symcov = json.load(f)
-        this_df = Sancov.get_coverage_df(this_symcov, path_filter)
-        other_df = Sancov.get_coverage_df(other_symcov, path_filter)
-        return this_df, other_df
+    ) -> list[pd.DataFrame]:
+        """Load per-tool coverage frames from symcov JSON files."""
+        dfs: list[pd.DataFrame] = []
+        for symcov_path in symcov_paths:
+            with symcov_path.open(encoding="utf-8") as f:
+                symcov = json.load(f)
+            dfs.append(Sancov.get_coverage_df(symcov, path_filter))
+        return dfs
+
+    @staticmethod
+    def load_coverage_dfs_from_sancovs(
+        sancovs: list[Sancov],
+        path_filter: str | None = None,
+    ) -> list[pd.DataFrame]:
+        """Load per-tool coverage frames from merged symcov paths on each Sancov."""
+        if path_filter is None:
+            path_filter = path_filter_from_lit_filter(DEFAULT_LIT_FILTER)
+        return Sancov.load_coverage_dfs(
+            [s.get_merged_symcov_path() for s in sancovs],
+            path_filter,
+        )
 
     def get_merged_sancov_path(self) -> Path:
         return self.output_dir / f"{self.suffix}.0.sancov"
@@ -357,42 +411,44 @@ class Sancov:
             with symcov_path.open("w") as f:
                 run_subprocess(logger, cmd, check=True, stdout=f, stderr=subprocess.STDOUT)
 
+    @staticmethod
     def get_joint_coverage(
-        self,
-        other: Sancov,
-        path_filter: str | None = None,
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        coverage_dfs: list[pd.DataFrame],
+    ) -> tuple[list[pd.DataFrame], list[pd.DataFrame], pd.DataFrame]:
         """
-        Build the LLC address map and per-line summary for *this* (llc) vs *other* (opt).
+        Build per-tool address maps, line point summaries, and a joint coverage summary.
 
-        A fully covered line is one where every instrumentation point on that line is covered
-        by llc and/or opt. Points are matched on ``(file, line, col)``; when both tools
-        instrument the same site, either tool hitting it counts. Ll-only and opt-only
-        points on the line are included as well.
+        Each input frame must have columns ``file``, ``line``, ``point``, and ``covered``.
 
-        Returns ``(llc_address_line_map, line_coverage_summary)``.
-        The map uses columns ``file``, ``line``, ``point_<suffix>``.
-        The summary has ``file``, ``line``, ``coverage``, ``point_addresses``.
+        Each address map is a static, per-tool table: one row per instrumentation point
+        (a line with multiple points yields multiple rows), with a ``covered`` flag marking
+        which points were hit.
+
+        Each line point summary is one row per ``(file, line)`` for that tool with
+        semicolon-separated ``covered_points`` and ``all_points``.
+
+        The coverage summary classifies every instrumented ``(file, line)`` as
+        ``uncovered``, ``covered``, or ``partially``.
+
+        Returns ``(address_line_maps, line_point_summaries, coverage)``.
+        Each map uses columns ``file``, ``line``, ``point``, ``covered``.
+        Each line point summary uses columns ``file``, ``line``, ``covered_points``, ``all_points``.
+        The coverage summary has columns ``file``, ``line``, ``coverage``.
         """
-
-        with log_timing(logger, f"joint coverage ({self.suffix})"):
-            if path_filter is None:
-                path_filter = path_filter_from_lit_filter(DEFAULT_LIT_FILTER)
-
-            this_df, other_df = Sancov._load_llc_opt_coverage_dfs(
-                self.get_merged_symcov_path(),
-                other.get_merged_symcov_path(),
-                path_filter,
-            )
-
-            this_address_line_map = this_df[["file", "line", "point"]].copy()
-            this_address_line_map["line"] = this_address_line_map["line"].astype(int)
-            this_address_line_map.rename(columns={"point": f"point_{self.suffix}"}, inplace=True)
-
-            if self.coverage_mode == "full":
-                merged_cov = Sancov.merged_llc_opt_coverage_df(this_df, other_df)
-                line_coverage_summary = Sancov.build_line_coverage_summary(merged_cov)
-                return (this_address_line_map, line_coverage_summary)
-
-            elif self.coverage_mode == "partial":
-                raise NotImplementedError(f"Coverage mode {self.coverage_mode} not implemented")
+        with log_timing(logger, "joint coverage"):
+            # Per-tool table (file, point, line, covered) based on the sancov traces and symcov.
+            # Each address_line_map has rows of (file, line, point_id, covered) using the static
+            # coverage information provided in the symcov of the respective tool.
+            # A line with multiple points will have multiple rows in the map.
+            # This is the coverage information available in the tool regardless of the coverage achieved.
+            # Those points that were covered are reported as such in the "covered" col.
+            address_line_maps = [
+                Sancov.build_address_line_map(df) for df in coverage_dfs
+            ]
+            # Each line_point_summary has one row per (file, line) for that tool with
+            # semicolon-separated covered_points and all_points derived from the address-line map.
+            line_point_summaries = [
+                Sancov.build_line_point_summary(m) for m in address_line_maps
+            ]
+            coverage = Sancov.build_coverage_summary(coverage_dfs)
+            return address_line_maps, line_point_summaries, coverage

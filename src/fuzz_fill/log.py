@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import logging
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -19,6 +21,9 @@ _LOG_LEVELS = {
     "info": logging.INFO,
     "debug": logging.DEBUG,
 }
+
+_timings_lock = threading.Lock()
+_active_timings: list[tuple[str, float]] | None = None
 
 
 def resolve_log_file(output_dir: Path, log_to_file: bool) -> Path | None:
@@ -73,6 +78,38 @@ def add_log_to_file_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
+# ``log_timing`` logs elapsed wall time. Wrap a block in ``record_log_timings`` when
+# nested ``log_timing`` rows should also be exported (see ``write_timings_csv``).
+
+
+@contextmanager
+def record_log_timings() -> Iterator[list[tuple[str, float]]]:
+    """Enable CSV export for nested ``log_timing`` blocks.
+
+    This does not measure time itself; it collects ``(label, elapsed_seconds)`` rows
+    that ``log_timing`` appends while this context is active.
+    """
+    global _active_timings
+    rows: list[tuple[str, float]] = []
+    with _timings_lock:
+        _active_timings = rows
+    try:
+        yield rows
+    finally:
+        with _timings_lock:
+            _active_timings = None
+
+
+def write_timings_csv(path: Path, rows: Sequence[tuple[str, float]]) -> None:
+    """Write rows collected by ``record_log_timings`` to a CSV file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["step", "seconds"])
+        for label, elapsed in rows:
+            writer.writerow([label, f"{elapsed:.3f}"])
+
+
 @contextmanager
 def log_timing(
     logger: logging.Logger,
@@ -80,7 +117,11 @@ def log_timing(
     *,
     level: int = logging.INFO,
 ) -> Iterator[None]:
-    """Log elapsed wall time for a block of work."""
+    """Log elapsed wall time for a block of work.
+
+    When called inside ``record_log_timings()``, also append the elapsed time to
+    the collected rows for CSV export.
+    """
     logger.log(level, "%s: starting", label)
     start = time.perf_counter()
     try:
@@ -88,6 +129,9 @@ def log_timing(
     finally:
         elapsed = time.perf_counter() - start
         logger.log(level, "%s finished in %.2fs", label, elapsed)
+        with _timings_lock:
+            if _active_timings is not None:
+                _active_timings.append((label, elapsed))
 
 
 def run_subprocess(

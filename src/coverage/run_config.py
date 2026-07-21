@@ -1,4 +1,4 @@
-"""Persist and load baseline run settings (lit filter → symcov path filter)."""
+"""Persist baseline run settings (lit filter → symcov path filter)."""
 
 from __future__ import annotations
 
@@ -42,18 +42,3 @@ def write_run_config(output_dir: Path, *, lit_filter: str | None) -> Path:
         json.dump(config, f, indent=2)
         f.write("\n")
     return path
-
-
-def load_run_config(baseline_output_dir: Path) -> RunConfig:
-    path = baseline_output_dir / DEFAULT_RUN_CONFIG_FILE
-    if not path.is_file():
-        raise SystemExit(
-            f"Missing {path}. Run ``coverage baseline`` first (same "
-            f"--output-dir / --baseline-output-dir) so run_config.json is written."
-        )
-    with path.open(encoding="utf-8") as f:
-        data = json.load(f)
-    for key in ("lit_filter", "path_filter"):
-        if key not in data or not isinstance(data[key], str) or not data[key]:
-            raise SystemExit(f"Invalid {path}: expected non-empty string {key!r}.")
-    return RunConfig(lit_filter=data["lit_filter"], path_filter=data["path_filter"])

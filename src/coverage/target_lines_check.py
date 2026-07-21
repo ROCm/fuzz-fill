@@ -5,10 +5,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-import pandas as pd
-
-from coverage.constants import DEFAULT_LINE_COVERAGE_SUMMARY_FILE
-from coverage.line_rules import LineCoverageIndex
+from coverage.line_coverage_summary import load_coverage_by_line
 from fuzz_fill.log import get_logger
 
 logger = get_logger("coverage.target_lines")
@@ -25,18 +22,6 @@ def _match_symcov_file(rel_path: str, summary_files: set[str]) -> str | None:
     return None
 
 
-def _load_line_coverage_summary(test_suite_output_dir: Path) -> pd.DataFrame:
-    summary_path = test_suite_output_dir / DEFAULT_LINE_COVERAGE_SUMMARY_FILE
-    if not summary_path.is_file():
-        raise SystemExit(
-            f"Missing {summary_path}. Run ``coverage test-suite`` first (or pass the same "
-            f"--output-dir you used for that run as --test-suite-output-dir)."
-        )
-    summary = pd.read_csv(summary_path)
-    summary["line"] = summary["line"].astype(int)
-    return summary
-
-
 def run_target_lines_check(
     *,
     baseline_output_dir: Path,
@@ -45,24 +30,19 @@ def run_target_lines_check(
     report_path: Path,
 ) -> None:
     """
-    Emit target source lines from *target_lines_csv* that the **existing** LIT test suite
-    leaves **completely** cold on every SanitizerCoverage site for that source line
-    (joint llc/opt view).
+    Emit target source lines that the **existing** LIT test suite leaves completely cold.
 
-    Reads ``line_coverage_summary.csv`` produced by ``coverage test-suite`` (scoped by
-    that run's lit filter). A line is listed only when it appears in the summary and
-    ``coverage`` is ``none`` — every merged instrumentation point on that ``(file, line)``
-    was absent from the suite's covered points.
+    Reads baseline coverage produced by ``coverage baseline`` (scoped by that
+    run's lit filter). A line is listed only when it appears in the baseline
+    output with ``coverage`` == ``uncovered`` — every merged instrumentation
+    point on that ``(file, line)`` was absent from the suite's covered points.
 
-    Lines with ``coverage`` ``full`` or ``partial`` are omitted from the report;
-    ``partial`` is counted in the printed summary.
-
-    Rows with unknown path, or no instrumentation for that line in the summary, are
-    counted in the printed summary only (they are omitted from the CSV).
+    Lines with ``coverage`` ``covered`` or ``partially`` are omitted from the report;
+    ``partially`` is counted in the printed summary. Rows with unknown path, or no
+    instrumentation for that line in the summary, are counted in the printed summary only.
     """
-    summary = _load_line_coverage_summary(baseline_output_dir)
-    index = LineCoverageIndex.from_summary_df(summary)
-    summary_files: set[str] = {file for file, _ in index.instrumented}
+    coverage_by_line = load_coverage_by_line(baseline_output_dir)
+    summary_files: set[str] = {file for file, _ in coverage_by_line}
 
     llvm_repo = llvm_repo.resolve()
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,23 +83,24 @@ def run_target_lines_check(
 
             if sym_file is None:
                 stats["unknown_file"] += 1
+                continue
+
+            coverage = coverage_by_line.get((sym_file, line_no))
+            if coverage is None:
+                stats["not_instrumented"] += 1
+            elif coverage == "covered":
+                stats["covered"] += 1
+            elif coverage == "uncovered":
+                stats["all_uncovered"] += 1
+                uncovered_rows.append(
+                    {
+                        "file": rel,
+                        "line_no": str(line_no),
+                        "text": text,
+                    }
+                )
             else:
-                coverage = index.classify(sym_file, line_no)
-                if coverage == "not_instrumented":
-                    stats["not_instrumented"] += 1
-                elif coverage == "full":
-                    stats["covered"] += 1
-                elif coverage == "none":
-                    stats["all_uncovered"] += 1
-                    uncovered_rows.append(
-                        {
-                            "file": rel,
-                            "line_no": str(line_no),
-                            "text": text,
-                        }
-                    )
-                else:
-                    stats["partial"] += 1
+                stats["partial"] += 1
 
     fieldnames = ["file", "line_no", "text"]
     with report_path.open("w", encoding="utf-8", newline="") as out:

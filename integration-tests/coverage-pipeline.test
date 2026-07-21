@@ -15,24 +15,40 @@
 
 # RUN: test -f %t/baseline/run_config.json
 # RUN: test -f %t/baseline/line_coverage_summary.csv
+# RUN: test -f %t/baseline/line_coverage_covered.csv
+# RUN: test -f %t/baseline/line_coverage_partially.csv
+# RUN: test -f %t/baseline/line_coverage_uncovered.csv
 # RUN: test -f %t/baseline/llc_address_line_map.csv
+# RUN: test -f %t/baseline/llc_line_point_summary.csv
+# RUN: test -f %t/baseline/opt_line_point_summary.csv
 # RUN: test -f %t/incremental/new_coverage.csv
 # RUN: test -f %t/target_lines/target_lines_uncovered.csv
 
 # COM: AMDGPUAlwaysInlinePass.cpp:160 is covered by the test suite slice itself,
-# COM: so it must appear in line_coverage_summary.csv as full and must NOT be reported
+# COM: so it must appear in line_coverage_summary.csv as covered and must NOT be reported
 # COM: as a new gain by incremental in new_coverage.csv.
 # RUN: %FileCheck %s --input-file=%t/baseline/line_coverage_summary.csv --check-prefix=BASELINE_CSV
-# BASELINE_CSV: {{.*}}/AMDGPUAlwaysInlinePass.cpp,160,full,
+# BASELINE_CSV: {{.*}}/AMDGPUAlwaysInlinePass.cpp,160,covered
 
-# COM: These lines are uncovered by the test suite slice (none in line_coverage_summary.csv)
+# COM: Per-status split CSVs must partition the combined summary (``file``, ``line`` only).
+# RUN: %FileCheck %s --input-file=%t/baseline/line_coverage_covered.csv --check-prefix=COVERED_CSV
+# COVERED_CSV: {{.*}}/AMDGPUAlwaysInlinePass.cpp,160
+
+# COM: These lines are uncovered by the test suite slice (uncovered in line_coverage_summary.csv)
 # COM: but covered by the external test — manually confirmed with llvmorg-22.1.8 (RelWithDebInfo sancov build).
 # RUN: %FileCheck %s --input-file=%t/baseline/line_coverage_summary.csv --check-prefix=SUMMARY_NONE
-# SUMMARY_NONE-DAG: {{.*}}AMDGPUAsmPrinter.cpp,211,none,
-# SUMMARY_NONE-DAG: {{.*}}AMDGPUAsmPrinter.cpp,222,none,
-# SUMMARY_NONE-DAG: {{.*}}AMDGPUAsmPrinter.cpp,581,none,
-# SUMMARY_NONE-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,590,none,
-# SUMMARY_NONE-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,680,none,
+# SUMMARY_NONE-DAG: {{.*}}AMDGPUAsmPrinter.cpp,211,uncovered
+# SUMMARY_NONE-DAG: {{.*}}AMDGPUAsmPrinter.cpp,222,uncovered
+# SUMMARY_NONE-DAG: {{.*}}AMDGPUAsmPrinter.cpp,581,uncovered
+# SUMMARY_NONE-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,590,uncovered
+# SUMMARY_NONE-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,680,uncovered
+
+# RUN: %FileCheck %s --input-file=%t/baseline/line_coverage_uncovered.csv --check-prefix=UNCOVERED_CSV
+# UNCOVERED_CSV-DAG: {{.*}}AMDGPUAsmPrinter.cpp,211
+# UNCOVERED_CSV-DAG: {{.*}}AMDGPUAsmPrinter.cpp,222
+# UNCOVERED_CSV-DAG: {{.*}}AMDGPUAsmPrinter.cpp,581
+# UNCOVERED_CSV-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,590
+# UNCOVERED_CSV-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,680
 
 # COM: These coverage gaps, uncovered by the test suite slice but covered by the external test, have been manually confirmed with llvmorg-22.1.8 (RelWithDebInfo sancov build).
 # RUN: %FileCheck %s --input-file=%t/incremental/new_coverage.csv --check-prefix=GAP_CSV
@@ -57,7 +73,7 @@
 # TARGET_CSV-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,590,
 # TARGET_CSV-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,680,
 
-# COM: AMDGPUAliasAnalysis.cpp:103 is fully covered (full in line_coverage_summary.csv) but
+# COM: AMDGPUAliasAnalysis.cpp:103 is fully covered (covered in line_coverage_summary.csv) but
 # COM: present in the sample target CSV, so target-lines must filter it out of the report.
 # RUN: %FileCheck %s --input-file=%t/target_lines/target_lines_uncovered.csv --check-prefix=TARGET_CSV_NOT
 # TARGET_CSV_NOT-NOT: /AMDGPUAliasAnalysis.cpp,103,

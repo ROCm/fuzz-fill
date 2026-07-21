@@ -16,6 +16,7 @@ from coverage.lit_config import (
     resolve_lit_job_count,
 )
 from coverage.run_config import build_run_config, resolved_lit_filter, write_run_config
+from coverage.line_coverage_summary import write_line_coverage_summary_splits
 from coverage.sancov import Sancov
 from fuzz_fill.log import get_logger, log_timing, run_subprocess
 
@@ -112,7 +113,8 @@ class TestRunner:
 
     def run(self) -> None:
         if self.mode == "lit":
-            self.run_lit_tests()
+            with log_timing(logger, "lit test suite"):
+                self.run_lit_tests()
             self.get_aggregate_coverage()
         elif self.mode == "standalone":
             self.run_standalone_tests()
@@ -280,7 +282,7 @@ class TestRunner:
 
     def get_aggregate_coverage(self) -> None:
         """Get the aggregate coverage for the test suite."""
-        with log_timing(logger, "aggregate coverage"):
+        with log_timing(logger, "aggregate coverage (sancov merge+symbolize)"):
             if self.require_sancov and not any(self.raw_sancov_output_dir.glob("*.sancov")):
                 raise SystemExit(
                     f"error: no sancov files found in {self.raw_sancov_output_dir}; "
@@ -310,13 +312,26 @@ class TestRunner:
                 for future in concurrent.futures.as_completed(futures):
                     future.result()
 
-        llc_address_line_map, line_coverage_summary = llc_sancov.get_joint_coverage(
-            opt_sancov, self._path_filter
+        sancovs = [llc_sancov, opt_sancov]
+        coverage_dfs = Sancov.load_coverage_dfs_from_sancovs(sancovs, self._path_filter)
+        address_line_maps, line_point_summaries, coverage = Sancov.get_joint_coverage(
+            coverage_dfs
         )
 
+        llc_address_line_map, opt_address_line_map = address_line_maps
+        llc_line_point_summary, opt_line_point_summary = line_point_summaries
+
         llc_address_line_map.to_csv(self.filepaths.output_dir / self.filepaths.llc_address_line_map_file, index=False)
-        line_coverage_summary.to_csv(
+        opt_address_line_map.to_csv(self.filepaths.output_dir / self.filepaths.opt_address_line_map_file, index=False)
+        llc_line_point_summary.to_csv(
+            self.filepaths.output_dir / self.filepaths.llc_line_point_summary_file, index=False
+        )
+        opt_line_point_summary.to_csv(
+            self.filepaths.output_dir / self.filepaths.opt_line_point_summary_file, index=False
+        )
+        coverage.to_csv(
             self.filepaths.output_dir / self.filepaths.line_coverage_summary_file,
             index=False,
         )
+        write_line_coverage_summary_splits(coverage, self.filepaths.output_dir)
 
