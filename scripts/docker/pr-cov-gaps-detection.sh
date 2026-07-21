@@ -12,7 +12,7 @@ image_ref=""
 pr_id=""
 output_dir=""
 lit_filter=""
-path_filter=""
+source_code_filter=""
 image_name="${IMAGE_NAME:-fuzz-fill-test}"
 commit_rev=""
 jobs=""
@@ -45,8 +45,8 @@ Options:
   --github-repo <owner/repo>
                            GitHub repo hosting the PR (default: llvm/llvm-project)
   --lit-filter <regex>     llvm-lit --filter= regex or prefix (default: from allowlist)
-  --path-filter <substring>
-                           Symcov source path scope (default: from allowlist)
+  --source-code-filter <substring>
+                           Symcov source code path scope (default: from allowlist)
   --image-name <name>      Image name when using --pr-id (default: fuzz-fill-test)
   --commit <rev>           Revision for added_lines (default: HEAD in image llvm-project)
   -j <n>, --jobs <n>       Parallel jobs for llvm-lit; with --build-image, also for ninja
@@ -57,7 +57,7 @@ Examples:
       --backend-tests amdgpu --output-dir ./data/pr-cov-gaps-203468 -j "\$(nproc)"
   $(basename "$0") --pr-id 203468 --output-dir ./data/pr-cov-gaps-203468
   $(basename "$0") --pr-id 203468 --output-dir ./data/pr-cov-gaps-203468 \\
-      --lit-filter '(^|/)AMDGPU/' --path-filter llvm/lib/Target/AMDGPU -j "\$(nproc)"
+      --lit-filter '(^|/)AMDGPU/' --source-code-filter llvm/lib/Target/AMDGPU -j "\$(nproc)"
 EOF
 }
 
@@ -72,7 +72,7 @@ lit_filter_for_allowlist() {
     esac
 }
 
-path_filter_for_allowlist() {
+source_code_filter_for_allowlist() {
     case "$1" in
         amdgpu) echo "llvm/lib/Target/AMDGPU" ;;
         spirv) echo "llvm/lib/Target/SPIRV" ;;
@@ -157,9 +157,9 @@ while [[ $# -gt 0 ]]; do
             lit_filter="$2"
             shift 2
             ;;
-        --path-filter)
-            [[ $# -ge 2 ]] || { echo "error: --path-filter requires a value" >&2; exit 2; }
-            path_filter="$2"
+        --source-code-filter)
+            [[ $# -ge 2 ]] || { echo "error: --source-code-filter requires a value" >&2; exit 2; }
+            source_code_filter="$2"
             shift 2
             ;;
         --image-name)
@@ -302,19 +302,19 @@ if [[ -z "$lit_filter" ]]; then
     echo "Image allowlist: ${image_allowlist} -> lit-filter: ${lit_filter}"
 fi
 
-if [[ -z "$path_filter" ]]; then
+if [[ -z "$source_code_filter" ]]; then
     if [[ -n "${image_allowlist:-}" ]]; then
-        path_filter="$(path_filter_for_allowlist "$image_allowlist")"
+        source_code_filter="$(source_code_filter_for_allowlist "$image_allowlist")"
     else
         image_allowlist="$(read_image_allowlist)"
-        path_filter="$(path_filter_for_allowlist "$image_allowlist")"
+        source_code_filter="$(source_code_filter_for_allowlist "$image_allowlist")"
     fi
 fi
 
 mkdir -p "$output_dir"
 output_dir="$(realpath "$output_dir")"
 
-docker_env=(-e "LIT_FILTER=${lit_filter}" -e "PATH_FILTER=${path_filter}")
+docker_env=(-e "LIT_FILTER=${lit_filter}" -e "SOURCE_CODE_FILTER=${source_code_filter}")
 if [[ -n "$commit_rev" ]]; then
     docker_env+=(-e "COMMIT_REV=${commit_rev}")
 fi
@@ -336,14 +336,14 @@ baseline_args=(
     python -m coverage baseline
     --output-dir /mounted-output/baseline
     --lit-filter "${LIT_FILTER}"
-    --path-filter "${PATH_FILTER}"
+    --source-code-filter "${SOURCE_CODE_FILTER}"
     --lit-allow-failures
 )
 if [[ -n "${JOBS:-}" ]]; then
     baseline_args+=(-j "${JOBS}")
 fi
 
-echo "=== coverage baseline (lit-filter=${LIT_FILTER}, path-filter=${PATH_FILTER}) ==="
+echo "=== coverage baseline (lit-filter=${LIT_FILTER}, source-code-filter=${SOURCE_CODE_FILTER}) ==="
 "${baseline_args[@]}"
 
 echo "=== added_lines (commit=${commit}) ==="
@@ -362,7 +362,7 @@ report="${output_dir}/commit_lines_report/target_lines_uncovered.csv"
 echo "Wrote ${report}"
 echo "Image: ${image_ref}"
 echo "LIT filter: ${lit_filter}"
-echo "Path filter: ${path_filter}"
+echo "Source code filter: ${source_code_filter}"
 
 lit_failures_json="${output_dir}/baseline/lit_failures.json"
 warning_file="${output_dir}/README-WARNING"

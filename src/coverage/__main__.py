@@ -103,11 +103,11 @@ def main():
         help="Regex or path prefix passed to llvm-lit as --filter=.",
     )
     p_baseline.add_argument(
-        "--path-filter",
+        "--source-code-filter",
         type=str,
         default=None,
         help=(
-            "Symcov source path substring for coverage CSVs. When omitted, plain "
+            "Symcov source code path substring for coverage CSVs. When omitted, plain "
             "CodeGen/<target>/ lit filters derive llvm/lib/Target/<target>; "
             "regex filters default to llvm/lib/Target/AMDGPU."
         ),
@@ -239,7 +239,7 @@ def main():
                     mode="lit",
                     filepaths=filepaths,
                     lit_filter=args.lit_filter,
-                    path_filter=args.path_filter,
+                    source_code_filter=args.source_code_filter,
                     jobs=args.jobs,
                     lit_verbose=args.lit_verbose,
                     lit_allow_failures=args.lit_allow_failures,

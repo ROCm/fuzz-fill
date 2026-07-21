@@ -1,6 +1,6 @@
 # COM: ``coverage baseline`` must fail when the lit filter matches no tests and
 # COM: no raw .sancov files are produced (--require-sancov, the default).
-# COM: Use a CodeGen/AMDGPU/ prefix so run_config.json path derivation succeeds
+# COM: Use a CodeGen/AMDGPU/ prefix so run_config.json source code filter derivation succeeds
 # COM: even though ``fuzz-fill-no-tests`` matches nothing in the suite.
 # COM: ``--lit-allow-failures`` lets llvm-lit exit after a zero-match filter so
 # COM: aggregation runs and the sancov check can fire.

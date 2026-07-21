@@ -135,7 +135,7 @@ Edit the variables at the top of `scripts/test_coverage.sh`:
 | `OUTPUT_DIR` | Root for all artifacts from this workflow |
 | `TESTS_DIR` | Directory of fuzz-generated `.ll` / `.bc` files to scan |
 | `FILTER` | llvm-lit `--filter=` regex or prefix (default: `(^|/)AMDGPU/` for all AMDGPU folders; use `CodeGen/AMDGPU` for CodeGen only) |
-| `PATH_FILTER` | Symcov source path substring for coverage CSVs (default: `llvm/lib/Target/AMDGPU`) |
+| `SOURCE_CODE_FILTER` | Symcov source code path substring for coverage CSVs (default: `llvm/lib/Target/AMDGPU`) |
 
 Then run from the fuzz-fill repo root:
 
@@ -192,7 +192,7 @@ Edit the variables at the top of `scripts/test_coverage_commit_lines.sh`:
 | `LLVM_BIN` / `INSTRUMENTED_BIN_DIR` | Same as Workflow 1 |
 | `OUTPUT_DIR` | Root for all artifacts |
 | `FILTER` | llvm-lit `--filter=` regex or prefix for the baseline run |
-| `PATH_FILTER` | Symcov source path substring (default: `llvm/lib/Target/AMDGPU`) |
+| `SOURCE_CODE_FILTER` | Symcov source code path substring (default: `llvm/lib/Target/AMDGPU`) |
 | `COMMIT` | Revision to analyse (`HEAD`, a hash, `main~3`, …) |
 
 Then run from the fuzz-fill repo root:
@@ -254,9 +254,9 @@ The workflows above call these modules. Use `--help` on any command for the full
 | Flag | Meaning |
 |------|---------|
 | `--lit-filter` | Regex or path prefix for llvm-lit `--filter=` (default: `(^|/)AMDGPU/`) |
-| `--path-filter` | Symcov source path substring for coverage CSVs (default: `llvm/lib/Target/AMDGPU`; plain `CodeGen/<target>/` filters derive `llvm/lib/Target/<target>`) |
+| `--source-code-filter` | Symcov source code path substring for coverage CSVs (default: `llvm/lib/Target/AMDGPU`; plain `CodeGen/<target>/` filters derive `llvm/lib/Target/<target>`) |
 
-Constants in [`src/coverage/constants.py`](src/coverage/constants.py): `DEFAULT_LIT_FILTER`, `DEFAULT_PATH_FILTER`.
+Constants in [`src/coverage/constants.py`](src/coverage/constants.py): `DEFAULT_LIT_FILTER`, `DEFAULT_SOURCE_CODE_FILTER`.
 
 ### Environment variables
 
@@ -285,7 +285,7 @@ export FUZZ_FILL_LLVM_REPO=/work/llvm-project
 
 python -m coverage baseline \
   --output-dir data/baseline \
-  --path-filter llvm/lib/Target/AMDGPU
+  --source-code-filter llvm/lib/Target/AMDGPU
 python -m added_lines --commit HEAD
 ```
 
@@ -295,7 +295,7 @@ By default, `coverage baseline` uses `--lit-filter '(^|/)AMDGPU/'` (all LIT test
 python -m coverage baseline \
   --output-dir data/baseline-codegen \
   --lit-filter CodeGen/AMDGPU \
-  --path-filter llvm/lib/Target/AMDGPU
+  --source-code-filter llvm/lib/Target/AMDGPU
 ```
 
 Explicit full-folder baseline (same as default):
@@ -304,7 +304,7 @@ Explicit full-folder baseline (same as default):
 python -m coverage baseline \
   --output-dir data/baseline-amdgpu-dirs \
   --lit-filter '(^|/)AMDGPU/' \
-  --path-filter llvm/lib/Target/AMDGPU \
+  --source-code-filter llvm/lib/Target/AMDGPU \
   -j "$(nproc)"
 ```
 
@@ -375,7 +375,7 @@ For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov
 
 ### Workflow 2: PR coverage gap detection
 
-[`scripts/docker/pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. The lit filter defaults from the image's `/work/.sancov-allowlist`; override with `--lit-filter` (regex or prefix) and `--path-filter` for symcov CSV scope.
+[`scripts/docker/pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. The lit filter defaults from the image's `/work/.sancov-allowlist`; override with `--lit-filter` (regex or prefix) and `--source-code-filter` for symcov CSV scope.
 
 ```bash
 ./scripts/docker/pr-cov-gaps-detection.sh \
@@ -396,7 +396,7 @@ For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov
 | `--output-dir <path>` | Host output directory |
 | `-j <n>`, `--jobs <n>` | Parallel jobs (ninja when building, llvm-lit when detecting) |
 | `--lit-filter <regex>` | llvm-lit `--filter=` regex or prefix (default from allowlist) |
-| `--path-filter <substring>` | Symcov source path scope (default from allowlist) |
+| `--source-code-filter <substring>` | Symcov source code path scope (default from allowlist) |
 | `--github-repo <owner/repo>` | Optional; default `llvm/llvm-project` when building |
 
 If the image `fuzz-fill-test:llvm-pr-<n>` already exists, omit `--build-image` to run detection only.

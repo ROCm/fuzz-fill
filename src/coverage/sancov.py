@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-from coverage.constants import DEFAULT_PATH_FILTER
+from coverage.constants import DEFAULT_SOURCE_CODE_FILTER
 from fuzz_fill.log import get_logger, log_timing, run_subprocess
 
 logger = get_logger("coverage.sancov")
@@ -70,7 +70,7 @@ class Sancov:
         return out
 
     @staticmethod
-    def get_coverage_df(symcov: dict[str, object], path_filter: str) -> pd.DataFrame:
+    def get_coverage_df(symcov: dict[str, object], source_code_filter: str) -> pd.DataFrame:
         """Get the coverage information in a dataframe.
             The symcov file is a dictionary with the following keys:
             - point-symbol-info: a dictionary of point-symbol-info
@@ -86,7 +86,9 @@ class Sancov:
         """
         point_symbol_info = symcov.get("point-symbol-info")
 
-        point_symbol_info = {k: v for k, v in point_symbol_info.items() if path_filter in k}
+        point_symbol_info = {
+            k: v for k, v in point_symbol_info.items() if source_code_filter in k
+        }
 
         df = Sancov.flatten_point_symbol_info(point_symbol_info)
 
@@ -279,27 +281,27 @@ class Sancov:
     @staticmethod
     def load_coverage_dfs(
         symcov_paths: list[Path],
-        path_filter: str,
+        source_code_filter: str,
     ) -> list[pd.DataFrame]:
         """Load per-tool coverage frames from symcov JSON files."""
         dfs: list[pd.DataFrame] = []
         for symcov_path in symcov_paths:
             with symcov_path.open(encoding="utf-8") as f:
                 symcov = json.load(f)
-            dfs.append(Sancov.get_coverage_df(symcov, path_filter))
+            dfs.append(Sancov.get_coverage_df(symcov, source_code_filter))
         return dfs
 
     @staticmethod
     def load_coverage_dfs_from_sancovs(
         sancovs: list[Sancov],
-        path_filter: str | None = None,
+        source_code_filter: str | None = None,
     ) -> list[pd.DataFrame]:
         """Load per-tool coverage frames from merged symcov paths on each Sancov."""
-        if path_filter is None:
-            path_filter = DEFAULT_PATH_FILTER
+        if source_code_filter is None:
+            source_code_filter = DEFAULT_SOURCE_CODE_FILTER
         return Sancov.load_coverage_dfs(
             [s.get_merged_symcov_path() for s in sancovs],
-            path_filter,
+            source_code_filter,
         )
 
     def get_merged_sancov_path(self) -> Path:
