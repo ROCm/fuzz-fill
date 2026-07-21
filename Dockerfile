@@ -160,3 +160,6 @@ ENV VIRTUAL_ENV=/work/fuzz-fill-venv \
     FUZZ_FILL_LLVM_REDUCE=/work/llvm-build-sancov/bin/llvm-reduce \
     FUZZ_FILL_LLVM_DIS=/work/llvm-build-sancov/bin/llvm-dis \
     FUZZ_FILL_LLVM_REPO=/work/llvm-project
+
+# Dev/batch image: runs to completion or interactively, no health check applicable.
+HEALTHCHECK NONE
