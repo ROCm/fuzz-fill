@@ -24,8 +24,25 @@ import subprocess
 import sys
 from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from urllib.request import urlopen, Request
+
+_ALLOWED_URL_SCHEMES = frozenset({"https"})
+
+
+def gha_open_https_url(url: str, *, timeout: int, headers: Mapping[str, str] | None = None):
+    """Open an HTTPS URL, rejecting file:// and other schemes.
+
+    Bandit B310 blacklists urllib.request.urlopen regardless of input
+    validation; the nosec on that call is safe because we restrict
+    schemes here.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in _ALLOWED_URL_SCHEMES:
+        raise ValueError(
+            f"Refusing to fetch URL with unsupported scheme {parsed.scheme!r}: {url}"
+        )
+    return urlopen(Request(url, headers=headers or {}), timeout=timeout)  # nosec B310
 
 
 def _log(*args, **kwargs):
@@ -207,10 +224,11 @@ class GitHubAPI:
             GitHubAPIError: If the request fails for any reason.
         """
         headers = self._get_request_headers()
-        request = Request(url, headers=headers)
 
         try:
-            with urlopen(request, timeout=timeout_seconds) as response:
+            with gha_open_https_url(
+                url, timeout=timeout_seconds, headers=headers
+            ) as response:
                 body = response.read().decode("utf-8")
         except HTTPError as e:
             # Try to read the error response body for more context
