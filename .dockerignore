@@ -1,5 +1,30 @@
 # Keep the default build context small; pass a local checkout via
 #   ./scripts/build-image.sh --llvm-dir /path/to/llvm-project
 # which uses a separate named build context (see Dockerfile).
+
+# Large vendored / local LLVM trees (LLVM is supplied via build stages/context).
 llvm-project/
+.llvm-docker-staging/
 .fuzz-fill-llvm-pr-worktrees/
+
+# Local virtual environments and generated audit output.
+venv*
+sbom/
+requirements.txt
+
+# Local working data (not copied by the Dockerfile).
+.git/
+prompts/
+scratch/
+data/
+logs/
+coverage_output/
+integration-tests/Output/
+.backups/
+
+# Python / test artifacts.
+**/__pycache__/
+*.egg-info/
+*.lit_test_times.txt
+*.sancov
+*.pcy
