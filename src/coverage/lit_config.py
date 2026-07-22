@@ -86,7 +86,7 @@ def resolve_lit_job_count(requested: int | None, *, max_jobs: int = MAX_LIT_JOBS
 
 def build_lit_filter_regex(lit_filters: list[str]) -> str:
     """Combine one or more LIT directory prefixes into an llvm-lit ``--filter=`` regex."""
-    normalized = [prefix.strip("/") for prefix in lit_filters if prefix.strip("/")]
+    normalized = [prefix.strip().strip("/") for prefix in lit_filters if prefix.strip().strip("/")]
     if not normalized:
         raise ValueError("lit_filters must not be empty")
     if len(normalized) == 1:
