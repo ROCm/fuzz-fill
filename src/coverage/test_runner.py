@@ -8,12 +8,13 @@ import sys
 import pandas as pd
 from pathlib import Path
 
-from coverage.constants import DEFAULT_LIT_FAILURES_REPORT, DEFAULT_LIT_FILTER, TEST_FLAGS
+from coverage.constants import DEFAULT_LIT_FAILURES_REPORT, TEST_FLAGS
 from coverage.filepaths import Filepaths
 from coverage.lit_config import (
     ensure_lit_sancov_env_forwarding,
     lit_test_suite_path,
     resolve_lit_job_count,
+    resolved_lit_filter,
 )
 from coverage.line_coverage_summary import write_line_coverage_summary_splits
 from coverage.sancov import Sancov
@@ -49,7 +50,7 @@ class TestRunner:
         self,
         mode: str,
         filepaths: Filepaths,
-        lit_filter: str | None = None,
+        lit_filters: list[str] | None = None,
         jobs: int | None = None,
         lit_verbose: bool = False,
         lit_allow_failures: bool = False,
@@ -70,7 +71,7 @@ class TestRunner:
         self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
 
         if self.mode == "lit":
-            self._lit_filter = lit_filter if lit_filter is not None else DEFAULT_LIT_FILTER
+            self._lit_filter = resolved_lit_filter(lit_filters)
             self.raw_sancov_output_dir.mkdir(parents=True, exist_ok=True)
             self._symbolize_jobs = min(jobs, 2) if jobs is not None else 2
 

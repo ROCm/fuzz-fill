@@ -98,9 +98,14 @@ def main():
     )
     p_baseline.add_argument(
         "--lit-filter",
-        type=str,
+        action="append",
+        dest="lit_filters",
         default=None,
-        help="Regex or path prefix passed to llvm-lit as --filter=.",
+        metavar="DIR",
+        help=(
+            "LIT directory prefix; repeat for multiple prefixes "
+            "(OR'd into one llvm-lit --filter= regex)."
+        ),
     )
     p_baseline.add_argument("-j", "--jobs", type=int, default=None,
         help=(
@@ -228,7 +233,7 @@ def main():
                 test_runner = TestRunner(
                     mode="lit",
                     filepaths=filepaths,
-                    lit_filter=args.lit_filter,
+                    lit_filters=args.lit_filters,
                     jobs=args.jobs,
                     lit_verbose=args.lit_verbose,
                     lit_allow_failures=args.lit_allow_failures,
