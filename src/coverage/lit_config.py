@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
-from coverage.constants import MAX_LIT_JOBS
+from coverage.constants import DEFAULT_LIT_FILTER_DIRS, MAX_LIT_JOBS
 
 LIT_SITE_CONFIG_REL = Path("test/lit.site.cfg.py")
 PATCH_MARKER = "# fuzz-fill: SanitizerCoverage env forwarding"
@@ -81,3 +82,18 @@ def resolve_lit_job_count(requested: int | None, *, max_jobs: int = MAX_LIT_JOBS
         )
         return max_jobs
     return effective
+
+
+def build_lit_filter_regex(lit_filters: list[str]) -> str:
+    """Combine one or more LIT directory prefixes into an llvm-lit ``--filter=`` regex."""
+    normalized = [prefix.strip("/") for prefix in lit_filters if prefix.strip("/")]
+    if not normalized:
+        raise ValueError("lit_filters must not be empty")
+    if len(normalized) == 1:
+        return normalized[0]
+    return "|".join(re.escape(prefix) for prefix in normalized)
+
+
+def resolved_lit_filter(lit_filters: list[str] | None) -> str:
+    filters = lit_filters if lit_filters else DEFAULT_LIT_FILTER_DIRS
+    return build_lit_filter_regex(filters)

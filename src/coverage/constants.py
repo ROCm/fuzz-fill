@@ -2,9 +2,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Default for llvm-lit ``--filter=`` when none is passed (all tests under an AMDGPU/ directory).
-DEFAULT_LIT_FILTER_AMDGPU_DIRS = r"(^|/)AMDGPU/"
-DEFAULT_LIT_FILTER = DEFAULT_LIT_FILTER_AMDGPU_DIRS
+# Default LIT directory prefixes when none are passed (combined into one --filter= regex).
+DEFAULT_LIT_FILTER_DIRS = ["AMDGPU"]
+# Resolved default for callers still using a single regex string (see lit_config.resolved_lit_filter).
+DEFAULT_LIT_FILTER = "AMDGPU"
 # Default symcov source-path substring for coverage CSVs.
 DEFAULT_SOURCE_CODE_FILTER = "llvm/lib"
 
