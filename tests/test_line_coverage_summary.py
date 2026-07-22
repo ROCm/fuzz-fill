@@ -10,13 +10,11 @@ from pathlib import Path
 from coverage.constants import (
     DEFAULT_LINE_COVERAGE_COVERED_FILE,
     DEFAULT_LINE_COVERAGE_PARTIALLY_FILE,
-    DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
     DEFAULT_LINE_COVERAGE_UNCOVERED_FILE,
 )
 from coverage.line_coverage_summary import (
-    load_baseline_uncovered_lines,
-    load_coverage_by_line,
     load_line_coverage_summary,
+    load_uncovered_lines_csv,
     write_line_coverage_summary_splits,
 )
 
@@ -125,75 +123,26 @@ class WriteLineCoverageSummarySplitsTest(unittest.TestCase):
             self.assertEqual(lines, ["file,line"])
 
 
-class LoadBaselineUncoveredLinesTest(unittest.TestCase):
-    def test_prefers_uncovered_split_file(self) -> None:
+class LoadUncoveredLinesCsvTest(unittest.TestCase):
+    def test_loads_uncovered_lines(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            baseline = Path(tmp)
+            path = Path(tmp) / DEFAULT_LINE_COVERAGE_UNCOVERED_FILE
             _write_summary(
-                baseline / DEFAULT_LINE_COVERAGE_UNCOVERED_FILE,
+                path,
                 [
                     ["file", "line"],
                     [FILE, 30],
                     [FILE, 40],
                 ],
             )
-            baseline_uncovered = load_baseline_uncovered_lines(baseline)
+            uncovered = load_uncovered_lines_csv(path)
 
-        self.assertEqual(baseline_uncovered, frozenset({(FILE, 30), (FILE, 40)}))
+        self.assertEqual(uncovered, frozenset({(FILE, 30), (FILE, 40)}))
 
-    def test_falls_back_to_summary_file(self) -> None:
+    def test_missing_file_raises_systemexit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            baseline = Path(tmp)
-            _write_summary(
-                baseline / DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
-                [
-                    ["file", "line", "coverage"],
-                    [FILE, 10, "covered"],
-                    [FILE, 30, "uncovered"],
-                ],
-            )
-            baseline_uncovered = load_baseline_uncovered_lines(baseline)
-
-        self.assertEqual(baseline_uncovered, frozenset({(FILE, 30)}))
-
-
-class LoadCoverageByLineTest(unittest.TestCase):
-    def test_prefers_split_files(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            baseline = Path(tmp)
-            _write_summary(
-                baseline / DEFAULT_LINE_COVERAGE_COVERED_FILE,
-                [["file", "line"], [FILE, 10]],
-            )
-            _write_summary(
-                baseline / DEFAULT_LINE_COVERAGE_PARTIALLY_FILE,
-                [["file", "line"], [FILE, 20]],
-            )
-            _write_summary(
-                baseline / DEFAULT_LINE_COVERAGE_UNCOVERED_FILE,
-                [["file", "line"], [FILE, 30]],
-            )
-            coverage_by_line = load_coverage_by_line(baseline)
-
-        self.assertEqual(coverage_by_line[(FILE, 10)], "covered")
-        self.assertEqual(coverage_by_line[(FILE, 20)], "partially")
-        self.assertEqual(coverage_by_line[(FILE, 30)], "uncovered")
-
-    def test_falls_back_to_summary_file(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            baseline = Path(tmp)
-            _write_summary(
-                baseline / DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
-                [
-                    ["file", "line", "coverage"],
-                    [FILE, 10, "covered"],
-                    [FILE, 30, "uncovered"],
-                ],
-            )
-            coverage_by_line = load_coverage_by_line(baseline)
-
-        self.assertEqual(coverage_by_line[(FILE, 10)], "covered")
-        self.assertEqual(coverage_by_line[(FILE, 30)], "uncovered")
+            with self.assertRaises(SystemExit):
+                load_uncovered_lines_csv(Path(tmp) / "missing.csv")
 
 
 if __name__ == "__main__":

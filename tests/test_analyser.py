@@ -11,7 +11,6 @@ from unittest.mock import patch
 from coverage.analyser import CoverageAnalyzer
 from coverage.constants import (
     DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
-    DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
     DEFAULT_LINE_COVERAGE_UNCOVERED_FILE,
     DEFAULT_NEW_COVERAGE_CSV,
 )
@@ -41,18 +40,19 @@ class DiffPartialBaselineTest(unittest.TestCase):
             new_tests.mkdir()
             (new_tests / NEW_TEST).mkdir()
 
+            uncovered_csv = suite / DEFAULT_LINE_COVERAGE_UNCOVERED_FILE
+            map_csv = suite / DEFAULT_LLC_ADDRESS_LINE_MAP_FILE
+
             # Line 10: covered; line 20: partially; line 30: uncovered.
             _write_csv(
-                suite / DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
+                uncovered_csv,
                 [
-                    ["file", "line", "coverage"],
-                    [FILE, 10, "covered"],
-                    [FILE, 20, "partially"],
-                    [FILE, 30, "uncovered"],
+                    ["file", "line"],
+                    [FILE, 30],
                 ],
             )
             _write_csv(
-                suite / DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
+                map_csv,
                 [
                     ["file", "line", "point"],
                     [FILE, 10, "0x1001"],
@@ -65,11 +65,10 @@ class DiffPartialBaselineTest(unittest.TestCase):
 
             filepaths = Filepaths(
                 output_dir=diff,
-                output_baseline_dir=suite,
                 output_candidate_tests_dir=new_tests,
                 sancov=Path("/unused/sancov"),
-                llc_address_line_map_file=DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
-                line_coverage_summary_file=DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
+                line_coverage_uncovered_csv=uncovered_csv,
+                llc_address_line_map_csv=map_csv,
                 new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,
             )
 
@@ -93,8 +92,8 @@ class DiffPartialBaselineTest(unittest.TestCase):
 
             self.assertEqual(rows[0]["covered-points"], "0x3001")
 
-    def test_reads_baseline_uncovered_split_file(self) -> None:
-        """Incremental uses ``line_coverage_uncovered.csv`` when present."""
+    def test_reads_baseline_uncovered_csv(self) -> None:
+        """Incremental uses ``line_coverage_uncovered.csv``."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             suite = root / "test_suite"
@@ -104,15 +103,18 @@ class DiffPartialBaselineTest(unittest.TestCase):
             new_tests.mkdir()
             (new_tests / NEW_TEST).mkdir()
 
+            uncovered_csv = suite / DEFAULT_LINE_COVERAGE_UNCOVERED_FILE
+            map_csv = suite / DEFAULT_LLC_ADDRESS_LINE_MAP_FILE
+
             _write_csv(
-                suite / DEFAULT_LINE_COVERAGE_UNCOVERED_FILE,
+                uncovered_csv,
                 [
                     ["file", "line"],
                     [FILE, 30],
                 ],
             )
             _write_csv(
-                suite / DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
+                map_csv,
                 [
                     ["file", "line", "point"],
                     [FILE, 30, "0x3001"],
@@ -121,10 +123,10 @@ class DiffPartialBaselineTest(unittest.TestCase):
 
             filepaths = Filepaths(
                 output_dir=diff,
-                output_baseline_dir=suite,
                 output_candidate_tests_dir=new_tests,
                 sancov=Path("/unused/sancov"),
-                llc_address_line_map_file=DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
+                line_coverage_uncovered_csv=uncovered_csv,
+                llc_address_line_map_csv=map_csv,
                 new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,
             )
 

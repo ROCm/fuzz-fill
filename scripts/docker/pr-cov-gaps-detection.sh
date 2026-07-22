@@ -325,7 +325,7 @@ python -m added_lines \
 echo "=== coverage target-lines ==="
 python -m coverage target-lines \
     --output-dir /mounted-output/commit_lines_report \
-    --baseline-output-dir /mounted-output/baseline \
+    --line-coverage-uncovered-csv /mounted-output/baseline/line_coverage_uncovered.csv \
     --target-lines-csv /mounted-output/added-lines/added-lines.csv
 '
 

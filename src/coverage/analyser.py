@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Literal
 
 from coverage.filepaths import Filepaths
-from coverage.line_coverage_summary import load_baseline_uncovered_lines
+from coverage.line_coverage_summary import load_uncovered_lines_csv
 from coverage.line_rules import (
     gap_address_line_map,
     normalize_llc_address_line_map,
@@ -19,7 +19,11 @@ class CoverageAnalyzer:
     def __init__(self, filepaths: Filepaths, mode: Literal["partial", "full"]):
         self.filepaths = filepaths
         self.mode = mode
-        self.llc_address_line_map_file = filepaths.output_baseline_dir / filepaths.llc_address_line_map_file
+        if filepaths.llc_address_line_map_csv is None:
+            raise ValueError("llc_address_line_map_csv is required for incremental coverage")
+        if filepaths.line_coverage_uncovered_csv is None:
+            raise ValueError("line_coverage_uncovered_csv is required for incremental coverage")
+        self.llc_address_line_map_file = filepaths.llc_address_line_map_csv
         self.new_coverage_csv = filepaths.output_dir / filepaths.new_coverage_csv
 
     def get_incremental_coverage(self) -> None:
@@ -32,8 +36,8 @@ class CoverageAnalyzer:
 
     def get_full_incremental_coverage(self) -> None:
         with log_timing(logger, "incremental coverage analysis"):
-            baseline_uncovered = load_baseline_uncovered_lines(
-                self.filepaths.output_baseline_dir
+            baseline_uncovered = load_uncovered_lines_csv(
+                self.filepaths.line_coverage_uncovered_csv
             )
             llc_address_line_map = normalize_llc_address_line_map(
                 pd.read_csv(self.llc_address_line_map_file)

@@ -10,5 +10,5 @@
 # RUN: test -f %t/baseline/line_coverage_partially.csv
 # RUN: test -f %t/baseline/line_coverage_uncovered.csv
 # RUN: %coverage candidate-test --output-dir %t/candidate --llc %sancov-llc --candidate-tests-dir %S/fixtures/coverage-new-tests --n 1
-# RUN: env FUZZ_FILL_SANCOV=%sancov %coverage incremental --output-dir %t/incremental --baseline-output-dir %t/baseline --candidate-tests-output-dir %t/candidate
+# RUN: env FUZZ_FILL_SANCOV=%sancov %coverage incremental --output-dir %t/incremental --line-coverage-uncovered-csv %t/baseline/line_coverage_uncovered.csv --llc-address-line-map-csv %t/baseline/llc_address_line_map.csv --candidate-tests-output-dir %t/candidate
 # RUN: test -f %t/incremental/new_coverage.csv
