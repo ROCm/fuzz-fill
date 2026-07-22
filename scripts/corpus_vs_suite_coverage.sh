@@ -27,7 +27,6 @@ LLVM="${LLVM:-$FUZZ_FILL/llvm-project}"
 LLVM_BIN="${LLVM_BIN:-$LLVM/build-sancov/bin}"
 INSTRUMENTED_BIN="${INSTRUMENTED_BIN:-$LLVM/build-sancov/bin}"
 CORPUS="${CORPUS:-$FUZZ_FILL/amdgpu-tests}"
-SOURCE_CODE_FILTER="${SOURCE_CODE_FILTER:-llvm/lib/Target/AMDGPU}"
 FILTER="${FILTER:-(^|/)AMDGPU/}"
 OUTPUT_DIR="${OUTPUT_DIR:-$FUZZ_FILL/data/coverage_output/corpus_vs_suite_$(date +%y%m%d_%H%M%S)}"
 
@@ -112,7 +111,6 @@ echo "instrumented:   $INSTRUMENTED_BIN"
 echo "corpus:         $CORPUS"
 echo "corpus tests:   $CORPUS_N"
 echo "lit filter:     $FILTER"
-echo "source code filter: $SOURCE_CODE_FILTER"
 echo "output:         $OUTPUT_DIR"
 echo
 
@@ -130,8 +128,7 @@ if [[ -z "${SKIP_TEST_SUITE:-}" ]]; then
     --llvm-lit "$INSTRUMENTED_BIN/llvm-lit" \
     --llc "$INSTRUMENTED_BIN/llc" \
     --opt "$INSTRUMENTED_BIN/opt" \
-    --lit-filter "$FILTER" \
-    --source-code-filter "$SOURCE_CODE_FILTER"
+    --lit-filter "$FILTER"
   STEP1_ELAPSED="$(format_duration $((SECONDS - step_start)))"
   echo "    finished in $STEP1_ELAPSED"
 else

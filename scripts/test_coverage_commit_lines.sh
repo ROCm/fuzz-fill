@@ -15,8 +15,6 @@ BASELINE_OUTPUT_DIR=$OUTPUT_DIR/baseline
 ADDED_LINES_DIR=$OUTPUT_DIR/added-lines
 TARGET_LINES_REPORT_DIR=$OUTPUT_DIR/target_lines_report
 
-SOURCE_CODE_FILTER="${SOURCE_CODE_FILTER:-llvm/lib/Target/AMDGPU}"
-#FILTER="CodeGen/AMDGPU/loop"
 # Faster CodeGen-only subset: FILTER=CodeGen/AMDGPU
 FILTER="${FILTER:-(^|/)AMDGPU/}"
 
@@ -40,8 +38,7 @@ python -m coverage baseline \
     --llvm-lit "$INSTRUMENTED_BIN_DIR/llvm-lit" \
     --llc "$INSTRUMENTED_BIN_DIR/llc" \
     --opt "$INSTRUMENTED_BIN_DIR/opt" \
-    --lit-filter "$FILTER" \
-    --source-code-filter "$SOURCE_CODE_FILTER"
+    --lit-filter "$FILTER"
 
 # 3) Target lines not fully covered by the suite (target_lines_uncovered.csv)
 python -m coverage target-lines \

@@ -12,9 +12,6 @@ CANDIDATE_TESTS_OUTPUT_DIR=$OUTPUT_DIR/candidate_tests
 INCREMENTAL_OUTPUT_DIR=$OUTPUT_DIR/incremental
 TESTS_DIR="${TESTS_DIR:-${REPO_ROOT}/../irtests/bitcode/amdgpu/all}"
 
-SOURCE_CODE_FILTER="${SOURCE_CODE_FILTER:-llvm/lib/Target/AMDGPU}"
-# FILTER: llvm-lit --filter= regex or path prefix (default: all AMDGPU/ folders).
-# Faster CodeGen-only subset: FILTER=CodeGen/AMDGPU
 FILTER="${FILTER:-(^|/)AMDGPU/}"
 
 # Clear old output directories
@@ -30,8 +27,7 @@ python -m coverage baseline \
     --llvm-lit "$INSTRUMENTED_BIN_DIR/llvm-lit" \
     --llc "$INSTRUMENTED_BIN_DIR/llc" \
     --opt "$INSTRUMENTED_BIN_DIR/opt" \
-    --lit-filter "$FILTER" \
-    --source-code-filter "$SOURCE_CODE_FILTER"
+    --lit-filter "$FILTER"
 
 python -m coverage candidate-test \
     --output-dir $CANDIDATE_TESTS_OUTPUT_DIR \

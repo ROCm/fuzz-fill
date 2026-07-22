@@ -12,7 +12,7 @@
 #
 # Example (AMDGPU):
 #   BUILD_SCRIPT=build-amdgpu-bb.sh BUILD_DIR=build-amdgpu-bb \
-#     FILTER='CodeGen/AMDGPU' SOURCE_CODE_FILTER='llvm/lib/Target/AMDGPU' \
+#     FILTER='CodeGen/AMDGPU' \
 #     COMMITS_FILE=commits.txt ./run_commit_lines_coverage_for_commits.sh
 #
 # Optional environment:
@@ -21,7 +21,6 @@
 #   OUTPUT_ROOT_BASE   — under this, each run uses bb_coverage_commit_lines_<short_sha>/
 #                        (default: $FUZZ_FILL_ROOT/data/coverage_output)
 #   FILTER             — llvm-lit --filter= regex or prefix (default: CodeGen/SPIRV)
-#   SOURCE_CODE_FILTER — symcov source code path substring (default: llvm/lib/Target/SPIRV)
 #   LLVM_BIN           — dir with clang for LIT (default: $LLVM_REPO/build/bin)
 #   BUILD_SCRIPT       — BB build script under llvm-project (default: build-spirv-bb.sh)
 #   BUILD_DIR          — instrumented build tree name/dir under llvm-project (default: build-spirv-bb)
@@ -41,7 +40,6 @@ FUZZ_FILL_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 LLVM_REPO="${LLVM_REPO:-$(cd "${FUZZ_FILL_ROOT}/../llvm-project" && pwd)}"
 OUTPUT_ROOT_BASE="${OUTPUT_ROOT_BASE:-${FUZZ_FILL_ROOT}/data/coverage_output/spirv_20_lines}"
 FILTER="${FILTER:-CodeGen/SPIRV}"
-SOURCE_CODE_FILTER="${SOURCE_CODE_FILTER:-llvm/lib/Target/SPIRV}"
 LLVM_BIN="${LLVM_BIN:-${LLVM_REPO}/build/bin}"
 BUILD_SCRIPT="${BUILD_SCRIPT:-build-spirv-bb.sh}"
 BUILD_DIR="${BUILD_DIR:-build-spirv-bb}"
@@ -183,8 +181,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 		--llvm-lit "${INSTRUMENTED_BIN_DIR}/llvm-lit" \
 		--llc "${INSTRUMENTED_BIN_DIR}/llc" \
 		--opt "${INSTRUMENTED_BIN_DIR}/opt" \
-		--lit-filter "${FILTER}" \
-		--source-code-filter "${SOURCE_CODE_FILTER}"
+		--lit-filter "${FILTER}"
 	if [[ -n "${TS_STAT}" && -s "${TS_STAT}" ]]; then
 		IFS=',' read -r TS_WALL TS_USER TS_SYS TS_RSS <"${TS_STAT}" || true
 	fi

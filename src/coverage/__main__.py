@@ -102,16 +102,6 @@ def main():
         default=None,
         help="Regex or path prefix passed to llvm-lit as --filter=.",
     )
-    p_baseline.add_argument(
-        "--source-code-filter",
-        type=str,
-        default=None,
-        help=(
-            "Symcov source code path substring for coverage CSVs. When omitted, plain "
-            "CodeGen/<target>/ lit filters derive llvm/lib/Target/<target>; "
-            "regex filters default to llvm/lib/Target/AMDGPU."
-        ),
-    )
     p_baseline.add_argument("-j", "--jobs", type=int, default=None,
         help=(
             "Number of parallel jobs forwarded to llvm-lit as -j<N>. "
@@ -239,7 +229,6 @@ def main():
                     mode="lit",
                     filepaths=filepaths,
                     lit_filter=args.lit_filter,
-                    source_code_filter=args.source_code_filter,
                     jobs=args.jobs,
                     lit_verbose=args.lit_verbose,
                     lit_allow_failures=args.lit_allow_failures,
