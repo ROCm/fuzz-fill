@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 from pathlib import Path
 
@@ -48,6 +49,22 @@ def require_executable(path: Path, *, flag_name: str) -> Path:
     if not os.access(path, os.X_OK):
         raise SystemExit(f"{flag_name}: not executable: {path}")
     return path
+
+
+def existing_file_path(path_str: str) -> Path:
+    """Argparse type: require an existing file; return its resolved path."""
+    path = Path(path_str).expanduser()
+    if not path.is_file():
+        raise argparse.ArgumentTypeError(f"not a file: {path}")
+    return path.resolve()
+
+
+def existing_dir_path(path_str: str) -> Path:
+    """Argparse type: require an existing directory; return its resolved path."""
+    path = Path(path_str).expanduser()
+    if not path.is_dir():
+        raise argparse.ArgumentTypeError(f"not a directory: {path}")
+    return path.resolve()
 
 
 def executable_from_flag_or_env(

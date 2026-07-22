@@ -25,6 +25,8 @@ from fuzz_fill.env import (
     FUZZ_FILL_LLVM_REPO,
     FUZZ_FILL_OPT,
     FUZZ_FILL_SANCOV,
+    existing_dir_path,
+    existing_file_path,
     path_from_flag_or_env,
 )
 from fuzz_fill.llvm_tools import (
@@ -149,7 +151,7 @@ def main():
     )
     p_incremental.add_argument(
         "--line-coverage-uncovered-csv",
-        type=Path,
+        type=existing_file_path,
         required=True,
         help=(
             "Baseline uncovered lines CSV (``file``, ``line`` columns; output of "
@@ -158,19 +160,23 @@ def main():
     )
     p_incremental.add_argument(
         "--llc-address-line-map-csv",
-        type=Path,
+        type=existing_file_path,
         required=True,
         help=(
             "Baseline llc address-to-line map (``file``, ``line``, ``point`` columns; "
             "output of ``coverage baseline`` as ``llc_address_line_map.csv``)."
         ),
     )
-    p_incremental.add_argument("--candidate-tests-output-dir", type=Path, required=True,
-        help="Directory containing the candidate tests coverage output")
+    p_incremental.add_argument(
+        "--candidate-tests-output-dir",
+        type=existing_dir_path,
+        required=True,
+        help="Directory containing the candidate tests coverage output",
+    )
 
     p_target_lines.add_argument(
         "--line-coverage-uncovered-csv",
-        type=Path,
+        type=existing_file_path,
         required=True,
         help=(
             "Baseline uncovered lines CSV (``file``, ``line`` columns; output of "
@@ -188,7 +194,7 @@ def main():
     )
     p_target_lines.add_argument(
         "--target-lines-csv",
-        type=Path,
+        type=existing_file_path,
         required=True,
         help="CSV of source lines to check (columns path, line_no, text).",
     )
@@ -251,8 +257,8 @@ def main():
             "getting incremental coverage for candidate tests relative to the baseline test suite",
         )
         with log_timing(logger, "incremental"):
-            filepaths.line_coverage_uncovered_csv = args.line_coverage_uncovered_csv.resolve()
-            filepaths.llc_address_line_map_csv = args.llc_address_line_map_csv.resolve()
+            filepaths.line_coverage_uncovered_csv = args.line_coverage_uncovered_csv
+            filepaths.llc_address_line_map_csv = args.llc_address_line_map_csv
             filepaths.output_candidate_tests_dir = args.candidate_tests_output_dir
 
             coverage_analyzer = CoverageAnalyzer(filepaths, mode="full")
@@ -271,9 +277,9 @@ def main():
             args.output_dir.mkdir(parents=True, exist_ok=True)
             report_path = args.output_dir / DEFAULT_TARGET_LINES_REPORT
             run_target_lines_check(
-                line_coverage_uncovered_csv=args.line_coverage_uncovered_csv.resolve(),
+                line_coverage_uncovered_csv=args.line_coverage_uncovered_csv,
                 llvm_repo=args.llvm_repo,
-                target_lines_csv=args.target_lines_csv.resolve(),
+                target_lines_csv=args.target_lines_csv,
                 report_path=report_path,
             )
 
