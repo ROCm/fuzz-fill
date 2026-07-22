@@ -43,7 +43,7 @@ python -m coverage baseline \
 # 3) Target lines not fully covered by the suite (target_lines_uncovered.csv)
 python -m coverage target-lines \
     --output-dir "$TARGET_LINES_REPORT_DIR" \
-    --baseline-output-dir "$BASELINE_OUTPUT_DIR" \
+    --line-coverage-uncovered-csv "$BASELINE_OUTPUT_DIR/line_coverage_uncovered.csv" \
     --llvm-repo "$LLVM_REPO" \
     --target-lines-csv "$ADDED_LINES_DIR/added-lines.csv"
 

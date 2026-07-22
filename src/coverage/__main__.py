@@ -60,9 +60,8 @@ def main():
     p_target_lines = sub.add_parser(
         "target-lines",
         help=(
-            "List target-lines CSV rows whose ``(file, line)`` is ``uncovered`` in the "
-            "baseline summary (``covered`` / ``partially`` lines are omitted; expects "
-            "``line_coverage_summary.csv`` from ``coverage baseline``; no lit re-run)."
+            "List target-lines CSV rows whose ``(file, line)`` appears in "
+            "``line_coverage_uncovered.csv`` from ``coverage baseline`` (no lit re-run)."
         ),
     )
 
@@ -148,18 +147,34 @@ def main():
         default=None,
         help=f"Path to the sancov executable (or set {FUZZ_FILL_SANCOV}).",
     )
-    p_incremental.add_argument("--baseline-output-dir", type=Path, required=True,
-        help="Directory containing the baseline coverage output")
+    p_incremental.add_argument(
+        "--line-coverage-uncovered-csv",
+        type=Path,
+        required=True,
+        help=(
+            "Baseline uncovered lines CSV (``file``, ``line`` columns; output of "
+            "``coverage baseline`` as ``line_coverage_uncovered.csv``)."
+        ),
+    )
+    p_incremental.add_argument(
+        "--llc-address-line-map-csv",
+        type=Path,
+        required=True,
+        help=(
+            "Baseline llc address-to-line map (``file``, ``line``, ``point`` columns; "
+            "output of ``coverage baseline`` as ``llc_address_line_map.csv``)."
+        ),
+    )
     p_incremental.add_argument("--candidate-tests-output-dir", type=Path, required=True,
         help="Directory containing the candidate tests coverage output")
 
     p_target_lines.add_argument(
-        "--baseline-output-dir",
+        "--line-coverage-uncovered-csv",
         type=Path,
         required=True,
         help=(
-            "Same directory passed as ``--output-dir`` to ``coverage baseline`` "
-            "(must contain ``line_coverage_summary.csv``)."
+            "Baseline uncovered lines CSV (``file``, ``line`` columns; output of "
+            "``coverage baseline`` as ``line_coverage_uncovered.csv``)."
         ),
     )
     p_target_lines.add_argument(
@@ -236,7 +251,8 @@ def main():
             "getting incremental coverage for candidate tests relative to the baseline test suite",
         )
         with log_timing(logger, "incremental"):
-            filepaths.output_baseline_dir = args.baseline_output_dir
+            filepaths.line_coverage_uncovered_csv = args.line_coverage_uncovered_csv.resolve()
+            filepaths.llc_address_line_map_csv = args.llc_address_line_map_csv.resolve()
             filepaths.output_candidate_tests_dir = args.candidate_tests_output_dir
 
             coverage_analyzer = CoverageAnalyzer(filepaths, mode="full")
@@ -248,14 +264,14 @@ def main():
             args.llvm_repo, FUZZ_FILL_LLVM_REPO, flag_name="--llvm-repo"
         )
         logger.info(
-            "checking target lines from CSV against baseline line coverage summary "
+            "checking target lines from CSV against baseline uncovered lines "
             "(no lit re-run)"
         )
         with log_timing(logger, "target-lines"):
             args.output_dir.mkdir(parents=True, exist_ok=True)
             report_path = args.output_dir / DEFAULT_TARGET_LINES_REPORT
             run_target_lines_check(
-                baseline_output_dir=args.baseline_output_dir.resolve(),
+                line_coverage_uncovered_csv=args.line_coverage_uncovered_csv.resolve(),
                 llvm_repo=args.llvm_repo,
                 target_lines_csv=args.target_lines_csv.resolve(),
                 report_path=report_path,
@@ -289,7 +305,8 @@ def get_filepaths(
         llc=llc,
         opt=opt,
         candidate_tests_dir=getattr(args, "candidate_tests_dir", None),
-        output_baseline_dir=getattr(args, "baseline_output_dir", None),
+        line_coverage_uncovered_csv=getattr(args, "line_coverage_uncovered_csv", None),
+        llc_address_line_map_csv=getattr(args, "llc_address_line_map_csv", None),
         output_candidate_tests_dir=getattr(args, "candidate_tests_output_dir", None),
         llc_address_line_map_file=DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
         opt_address_line_map_file=DEFAULT_OPT_ADDRESS_LINE_MAP_FILE,

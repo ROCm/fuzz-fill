@@ -191,7 +191,7 @@ for COMMIT in "${COMMIT_ARRAY[@]}"; do
 	echo "Computing target-lines report ..."
 	python -m coverage target-lines \
 		--output-dir "${TARGET_LINES_REPORT_DIR}" \
-		--baseline-output-dir "${BASELINE_OUTPUT_DIR}" \
+		--line-coverage-uncovered-csv "${BASELINE_OUTPUT_DIR}/line_coverage_uncovered.csv" \
 		--llvm-repo "${LLVM_REPO}" \
 		--target-lines-csv "${ADDED_LINES_DIR}/added-lines.csv"
 

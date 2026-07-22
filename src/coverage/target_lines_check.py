@@ -1,11 +1,11 @@
-"""Compare target-lines CSV against test-suite line coverage summary."""
+"""Compare target-lines CSV against baseline uncovered line coverage."""
 
 from __future__ import annotations
 
 import csv
 from pathlib import Path
 
-from coverage.line_coverage_summary import load_coverage_by_line
+from coverage.line_coverage_summary import load_uncovered_lines_csv
 from fuzz_fill.log import get_logger
 
 logger = get_logger("coverage.target_lines")
@@ -24,35 +24,27 @@ def _match_symcov_file(rel_path: str, summary_files: set[str]) -> str | None:
 
 def run_target_lines_check(
     *,
-    baseline_output_dir: Path,
+    line_coverage_uncovered_csv: Path,
     llvm_repo: Path,
     target_lines_csv: Path,
     report_path: Path,
 ) -> None:
     """
-    Emit target source lines that the **existing** LIT test suite leaves completely cold.
+    Emit target source lines that appear in ``line_coverage_uncovered.csv``.
 
-    Reads baseline coverage produced by ``coverage baseline`` (scoped by that
-    run's lit filter). A line is listed only when it appears in the baseline
-    output with ``coverage`` == ``uncovered`` — every merged instrumentation
-    point on that ``(file, line)`` was absent from the suite's covered points.
-
-    Lines with ``coverage`` ``covered`` or ``partially`` are omitted from the report;
-    ``partially`` is counted in the printed summary. Rows with unknown path, or no
-    instrumentation for that line in the summary, are counted in the printed summary only.
+    A line is listed only when its matched ``(file, line)`` is present in the
+    baseline uncovered CSV produced by ``coverage baseline``.
     """
-    coverage_by_line = load_coverage_by_line(baseline_output_dir)
-    summary_files: set[str] = {file for file, _ in coverage_by_line}
+    uncovered_lines = load_uncovered_lines_csv(line_coverage_uncovered_csv)
+    summary_files: set[str] = {file for file, _ in uncovered_lines}
 
     llvm_repo = llvm_repo.resolve()
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
     uncovered_rows: list[dict[str, str]] = []
     stats = {
-        "covered": 0,
-        "all_uncovered": 0,
-        "partial": 0,
-        "not_instrumented": 0,
+        "reported": 0,
+        "not_in_uncovered_list": 0,
         "unknown_file": 0,
     }
 
@@ -85,13 +77,8 @@ def run_target_lines_check(
                 stats["unknown_file"] += 1
                 continue
 
-            coverage = coverage_by_line.get((sym_file, line_no))
-            if coverage is None:
-                stats["not_instrumented"] += 1
-            elif coverage == "covered":
-                stats["covered"] += 1
-            elif coverage == "uncovered":
-                stats["all_uncovered"] += 1
+            if (sym_file, line_no) in uncovered_lines:
+                stats["reported"] += 1
                 uncovered_rows.append(
                     {
                         "file": rel,
@@ -100,7 +87,7 @@ def run_target_lines_check(
                     }
                 )
             else:
-                stats["partial"] += 1
+                stats["not_in_uncovered_list"] += 1
 
     fieldnames = ["file", "line_no", "text"]
     with report_path.open("w", encoding="utf-8", newline="") as out:
@@ -110,14 +97,12 @@ def run_target_lines_check(
 
     total_in = sum(stats.values())
     logger.info(
-        "wrote %s (%d all-points-uncovered rows of %d target lines). "
-        "covered=%d all_uncovered=%d partial=%d not_instrumented=%d unknown_file=%d",
+        "wrote %s (%d uncovered rows of %d target lines). "
+        "reported=%d not_in_uncovered_list=%d unknown_file=%d",
         report_path,
         len(uncovered_rows),
         total_in,
-        stats["covered"],
-        stats["all_uncovered"],
-        stats["partial"],
-        stats["not_instrumented"],
+        stats["reported"],
+        stats["not_in_uncovered_list"],
         stats["unknown_file"],
     )

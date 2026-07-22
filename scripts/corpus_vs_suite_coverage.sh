@@ -154,7 +154,8 @@ if [[ -z "${SKIP_DIFF:-}" ]]; then
   python -m coverage incremental \
     --output-dir "$DIFF_OUTPUT_DIR" \
     --sancov "$LLVM_BIN/sancov" \
-    --baseline-output-dir "$TEST_SUITE_OUTPUT_DIR" \
+    --line-coverage-uncovered-csv "$TEST_SUITE_OUTPUT_DIR/line_coverage_uncovered.csv" \
+    --llc-address-line-map-csv "$TEST_SUITE_OUTPUT_DIR/llc_address_line_map.csv" \
     --candidate-tests-output-dir "$NEW_TESTS_OUTPUT_DIR"
   STEP3_ELAPSED="$(format_duration $((SECONDS - step_start)))"
   echo "    finished in $STEP3_ELAPSED"
