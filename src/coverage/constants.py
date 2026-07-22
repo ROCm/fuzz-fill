@@ -7,7 +7,6 @@ DEFAULT_LIT_FILTER_AMDGPU_DIRS = r"(^|/)AMDGPU/"
 DEFAULT_LIT_FILTER = DEFAULT_LIT_FILTER_AMDGPU_DIRS
 # Default symcov source-path substring for coverage CSVs.
 DEFAULT_SOURCE_CODE_FILTER = "llvm/lib"
-DEFAULT_RUN_CONFIG_FILE = "run_config.json"
 
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "coverage_output" / f"cov_<timestamp>"
 

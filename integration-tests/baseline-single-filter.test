@@ -14,7 +14,6 @@
 # ALLOW_OK-NOT: warning: llvm-lit exited with code
 
 # COM: A successful single-test suite run must emit the baseline artifacts.
-# RUN: test -f %t/baseline/run_config.json
 # RUN: test -f %t/baseline/line_coverage_summary.csv
 # RUN: test -f %t/baseline/line_coverage_covered.csv
 # RUN: test -f %t/baseline/line_coverage_partially.csv

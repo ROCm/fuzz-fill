@@ -1,7 +1,5 @@
 # COM: ``coverage baseline`` must fail when the lit filter matches no tests and
 # COM: no raw .sancov files are produced (--require-sancov, the default).
-# COM: Use a CodeGen/AMDGPU/ prefix so run_config.json source code filter derivation succeeds
-# COM: even though ``fuzz-fill-no-tests`` matches nothing in the suite.
 # COM: ``--lit-allow-failures`` lets llvm-lit exit after a zero-match filter so
 # COM: aggregation runs and the sancov check can fire.
 
@@ -13,7 +11,6 @@
 # COM: ``--no-require-sancov`` restores the previous empty-baseline behavior.
 # RUN: rm -rf %t/baseline-ok && mkdir -p %t/baseline-ok
 # RUN: %coverage baseline --output-dir %t/baseline-ok --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter 'CodeGen/AMDGPU/fuzz-fill-no-tests' --lit-allow-failures --no-require-sancov -j1 2>&1 | tee %t/ok.log
-# RUN: test -f %t/baseline-ok/run_config.json
 # RUN: test -f %t/baseline-ok/line_coverage_summary.csv
 # RUN: test -f %t/baseline-ok/line_coverage_covered.csv
 # RUN: test -f %t/baseline-ok/line_coverage_partially.csv

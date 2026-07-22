@@ -8,14 +8,18 @@ import sys
 import pandas as pd
 from pathlib import Path
 
-from coverage.constants import DEFAULT_LIT_FAILURES_REPORT, TEST_FLAGS
+from coverage.constants import (
+    DEFAULT_LIT_FAILURES_REPORT,
+    DEFAULT_LIT_FILTER,
+    DEFAULT_SOURCE_CODE_FILTER,
+    TEST_FLAGS,
+)
 from coverage.filepaths import Filepaths
 from coverage.lit_config import (
     ensure_lit_sancov_env_forwarding,
     lit_test_suite_path,
     resolve_lit_job_count,
 )
-from coverage.run_config import build_run_config, write_run_config
 from coverage.line_coverage_summary import write_line_coverage_summary_splits
 from coverage.sancov import Sancov
 from fuzz_fill.log import get_logger, log_timing, run_subprocess
@@ -72,16 +76,11 @@ class TestRunner:
         self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
 
         if self.mode == "lit":
-            run_config = build_run_config(
-                lit_filter=lit_filter,
-                source_code_filter=source_code_filter,
-            )
-            self._lit_filter = run_config["lit_filter"]
-            self._source_code_filter = run_config["source_code_filter"]
-            write_run_config(
-                self.filepaths.output_dir,
-                lit_filter=lit_filter,
-                source_code_filter=source_code_filter,
+            self._lit_filter = lit_filter if lit_filter is not None else DEFAULT_LIT_FILTER
+            self._source_code_filter = (
+                source_code_filter
+                if source_code_filter is not None
+                else DEFAULT_SOURCE_CODE_FILTER
             )
             self.raw_sancov_output_dir.mkdir(parents=True, exist_ok=True)
             self._symbolize_jobs = min(jobs, 2) if jobs is not None else 2
