@@ -13,9 +13,6 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
   --ignorelist      Sanitizer coverage ignorelist file (optional)
   ninja_jobs        Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
 
-When allowlist is allowlist-amdgpu.txt, ignorelist-amdgpu.txt in the same directory
-is applied automatically if present and --ignorelist is not given.
-
 Builds llvm-tblgen from the source tree, then instrumented llc/opt (Debug + SanitizerCoverage)
 and Release LIT helpers. Target-linked helpers are built in the instrumented tree; other helpers
 (and sancov) are Release-built in \${sancov_build_dir}-helpers and copied into bin/.
@@ -95,13 +92,6 @@ fi
 ALLOWLIST="$(realpath "$ALLOWLIST")"
 LLVM_DIR="$(realpath "$LLVM_DIR")"
 BOOTSTRAP_BIN="$(realpath "$BOOTSTRAP_BIN")"
-
-if [[ -z "$IGNORELIST" && "$(basename "$ALLOWLIST")" == "allowlist-amdgpu.txt" ]]; then
-    candidate="$(dirname "$ALLOWLIST")/ignorelist-amdgpu.txt"
-    if [[ -f "$candidate" ]]; then
-        IGNORELIST="$candidate"
-    fi
-fi
 
 if [[ -n "$IGNORELIST" ]]; then
     if [[ ! -f "$IGNORELIST" ]]; then
