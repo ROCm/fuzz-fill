@@ -1,9 +1,10 @@
 # COM: Run `coverage baseline` with a filter that matches exactly one lit test,
-# COM: without -j (llvm-lit picks its own default), and with --lit-verbose and
-# COM: --lit-allow-failures. Validate baseline coverage artifacts are produced.
+# COM: without -j (llvm-lit picks its own default), and with --lit-verbose,
+# COM: --lit-allow-failures, and --lit-priority-slow-tests. Validate baseline
+# COM: coverage artifacts are produced.
 
 # RUN: rm -rf %t && mkdir -p %t/baseline
-# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter CodeGen/AMDGPU/loop-live-out-copy-undef-subrange.ll --lit-verbose --lit-allow-failures | tee %t/baseline.log
+# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter 'CodeGen/AMDGPU/loop-live-out-copy-undef-subrange\.ll$' --lit-priority-slow-tests --lit-verbose --lit-allow-failures | tee %t/baseline.log
 
 # COM: --lit-verbose forwards -vv to llvm-lit; expect per-test PASS output.
 # RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=VERBOSE
@@ -12,6 +13,12 @@
 # COM: --lit-allow-failures must not warn when llvm-lit succeeds.
 # RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=ALLOW_OK
 # ALLOW_OK-NOT: warning: llvm-lit exited with code
+
+# COM: --lit-priority-slow-tests must seed .lit_test_times.txt without warnings
+# COM: when the configured priority tests exist in the LLVM source tree.
+# RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=PRIORITY_OK
+# PRIORITY_OK-NOT: warning: skipping lit priority scheduling for missing test(s)
+# PRIORITY_OK-NOT: warning: no configured lit priority tests exist in the LLVM
 
 # COM: A successful single-test suite run must emit the baseline artifacts.
 # RUN: test -f %t/baseline/line_coverage_summary.csv

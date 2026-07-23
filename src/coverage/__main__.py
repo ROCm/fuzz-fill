@@ -118,6 +118,16 @@ def main():
     p_baseline.add_argument("--lit-allow-failures", action="store_true",
         help="Continue baseline coverage even if llvm-lit exits non-zero.")
     p_baseline.add_argument(
+        "--lit-priority-slow-tests",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Seed .lit_test_times.txt so known slow AMDGPU tests run first under "
+            "llvm-lit --order=smart (default: enabled). Use --no-lit-priority-slow-tests "
+            "to skip seeding."
+        ),
+    )
+    p_baseline.add_argument(
         "--require-sancov",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -237,6 +247,7 @@ def main():
                     jobs=args.jobs,
                     lit_verbose=args.lit_verbose,
                     lit_allow_failures=args.lit_allow_failures,
+                    lit_priority_slow_tests=args.lit_priority_slow_tests,
                     require_sancov=args.require_sancov,
                     debug=args.debug,
                 )

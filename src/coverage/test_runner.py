@@ -8,13 +8,20 @@ import sys
 import pandas as pd
 from pathlib import Path
 
-from coverage.constants import DEFAULT_LIT_FAILURES_REPORT, TEST_FLAGS
+from coverage.constants import (
+    BASELINE_LIT_PRIORITY_TESTS,
+    DEFAULT_LIT_FAILURES_REPORT,
+    TEST_FLAGS,
+)
 from coverage.filepaths import Filepaths
 from coverage.lit_config import (
     ensure_lit_sancov_env_forwarding,
+    filter_existing_lit_priority_tests,
     lit_test_suite_path,
     resolve_lit_job_count,
     resolved_lit_filter,
+    seed_lit_priority_test_times,
+)
 )
 from coverage.line_coverage_summary import write_line_coverage_summary_splits
 from coverage.sancov import Sancov
@@ -54,6 +61,7 @@ class TestRunner:
         jobs: int | None = None,
         lit_verbose: bool = False,
         lit_allow_failures: bool = False,
+        lit_priority_slow_tests: bool = True,
         require_sancov: bool = True,
         candidate_tests_limit: int | None = None,
         timeout: int = 5,
@@ -65,6 +73,7 @@ class TestRunner:
         self.jobs = jobs
         self.lit_verbose = lit_verbose
         self.lit_allow_failures = lit_allow_failures
+        self.lit_priority_slow_tests = lit_priority_slow_tests
         self.require_sancov = require_sancov
         self.debug = debug
 
@@ -127,6 +136,19 @@ class TestRunner:
 
         llvm_lit = self.filepaths.llvm_lit
         lit_site_cfg = ensure_lit_sancov_env_forwarding(llvm_lit)
+        if self.lit_priority_slow_tests:
+            priority_tests = filter_existing_lit_priority_tests(
+                llvm_lit,
+                BASELINE_LIT_PRIORITY_TESTS,
+            )
+            if priority_tests:
+                seed_lit_priority_test_times(llvm_lit, priority_tests)
+            else:
+                print(
+                    "warning: no configured lit priority tests exist in the LLVM "
+                    "source tree; skipping .lit_test_times.txt seeding",
+                    flush=True,
+                )
         lit_suite = lit_test_suite_path(llvm_lit)
         if not lit_suite.is_dir():
             raise FileNotFoundError(
@@ -143,6 +165,7 @@ class TestRunner:
             str(lit_suite),
             f"--filter={self._lit_filter}",
             f"-j{lit_jobs}",
+            "--time-tests",
             "-o",
             str(lit_report_path),
             "--report-failures-only",
