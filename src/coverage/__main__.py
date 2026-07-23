@@ -101,10 +101,10 @@ def main():
         action="append",
         dest="lit_filters",
         default=None,
-        metavar="DIR",
+        metavar="REGEX",
         help=(
-            "LIT directory prefix; repeat for multiple prefixes "
-            "(OR'd into one llvm-lit --filter= regex)."
+            "llvm-lit --filter= regex; repeat for multiple fragments "
+            "(OR'd into one --filter= value)."
         ),
     )
     p_baseline.add_argument("-j", "--jobs", type=int, default=None,
