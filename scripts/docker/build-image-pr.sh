@@ -12,6 +12,7 @@ image_tag=""
 allowlist=""
 ninja_jobs=""
 keep_clone=0
+no_cache=0
 
 usage() {
     cat <<EOF
@@ -33,6 +34,7 @@ Options:
   --keep-clone           Keep this run's llvm-project clone after a successful
                          build (default: remove it)
   --keep-worktree        Alias for --keep-clone
+  --no-cache             Pass --no-cache to docker build (ignore layer cache)
   --help, -h             Show this help
 
 Standalone llvm-project clones are created at:
@@ -154,6 +156,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --keep-clone|--keep-worktree)
             keep_clone=1
+            shift
+            ;;
+        --no-cache)
+            no_cache=1
             shift
             ;;
         --help|-h)
@@ -311,6 +317,9 @@ fi
 build_args=(--llvm-dir "$docker_llvm_path" --tag "$image_tag" --allowlist "$allowlist")
 if [[ -n "$ninja_jobs" ]]; then
     build_args+=(-j "$ninja_jobs")
+fi
+if [[ "$no_cache" -eq 1 ]]; then
+    build_args+=(--no-cache)
 fi
 
 echo "Building Docker image ${IMAGE_NAME:-fuzz-fill-test}:${image_tag}"
