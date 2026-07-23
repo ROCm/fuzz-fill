@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 LLVM_REPO="${LLVM_REPO:-$(cd "${REPO_ROOT}/../llvm-project" && pwd)}"
 LLVM_BIN="${LLVM_BIN:-${LLVM_REPO}/build/bin}"
 INSTRUMENTED_BIN_DIR="${INSTRUMENTED_BIN_DIR:-${LLVM_REPO}/build-amdgpu-bb/bin}"
-OUTPUT_DIR="${REPO_ROOT}/data/coverage_output/bb_coverage_080726_no_prune"
+OUTPUT_DIR="${REPO_ROOT}/data/coverage_output/bb_coverage_amdgpu_230726_full_filter"
 BASELINE_OUTPUT_DIR=$OUTPUT_DIR/baseline
 CANDIDATE_TESTS_OUTPUT_DIR=$OUTPUT_DIR/candidate_tests
 INCREMENTAL_OUTPUT_DIR=$OUTPUT_DIR/incremental
@@ -27,7 +27,8 @@ python -m coverage baseline \
     --llvm-lit "$INSTRUMENTED_BIN_DIR/llvm-lit" \
     --llc "$INSTRUMENTED_BIN_DIR/llc" \
     --opt "$INSTRUMENTED_BIN_DIR/opt" \
-    --lit-filter "$FILTER"
+    --lit-filter "$FILTER" \
+    --lit-allow-failures
 
 python -m coverage candidate-test \
     --output-dir $CANDIDATE_TESTS_OUTPUT_DIR \

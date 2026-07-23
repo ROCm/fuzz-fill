@@ -1,0 +1,13 @@
+# MC layer — llvm-mc / disassembler / object emission (not opt/llc codegen)
+src:*/lib/Target/AMDGPU/AsmParser/*
+src:*/lib/Target/AMDGPU/Disassembler/*
+src:*/lib/Target/AMDGPU/MCTargetDesc/*
+src:*/lib/Target/AMDGPU/MCA/*
+src:*/lib/Target/AMDGPU/TargetInfo/*
+# Utils used mainly by MC / PAL / asm (keep Utils/AMDGPUBaseInfo.cpp)
+src:*/lib/Target/AMDGPU/Utils/AMDKernelCodeTUtils.cpp
+src:*/lib/Target/AMDGPU/Utils/AMDGPUPALMetadata.cpp
+src:*/lib/Target/AMDGPU/Utils/AMDGPUAsmUtils.cpp
+src:*/lib/Target/AMDGPU/Utils/AMDGPUDelayedMCExpr.cpp
+# IR module splitting — tools/llvm-split only, not opt/llc
+src:*/lib/Target/AMDGPU/AMDGPUSplitModule.cpp
