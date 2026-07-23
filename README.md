@@ -95,6 +95,8 @@ You need an official **LLVM GitHub release** as bootstrap and one **SanitizerCov
 
 `build-llvm-sancov.sh` runs two partial builds from the same source: **`llvm-tblgen` is built from the source tree first**, then a **Release** tree for target-agnostic LIT helpers plus **`sancov`**, and a **Debug** SanitizerCoverage tree for **`llc`**, **`opt`**, and target-linked helpers (`llvm-mc`, `llvm-objdump`, …). Release tools are copied into the instrumented tree's `bin/`; `llvm-lit` is generated there by cmake. The bootstrap release supplies **clang/clang++ only** (TableGen must match the source).
 
+For AMDGPU builds, [`scripts/ignorelist-amdgpu.txt`](scripts/ignorelist-amdgpu.txt) is applied automatically when using [`scripts/allowlist-amdgpu.txt`](scripts/allowlist-amdgpu.txt). It excludes MC-layer code (AsmParser, Disassembler, MCTargetDesc, MCA, TargetInfo), selected Utils used mainly by MC/PAL/asm, and `AMDGPUSplitModule.cpp` from instrumentation — keeping opt/llc codegen paths covered. SPIRV builds do not use an ignorelist. Override with `--ignorelist <file>` or omit auto-discovery by using a differently named allowlist.
+
 **`python -m coverage baseline`** patches **`<instrumented-build>/test/lit.site.cfg.py`** so LIT forwards **`UBSAN_OPTIONS`** to every test subprocess. The patch is idempotent and is re-applied if CMake regenerates that file.
 
 The example scripts below assume paths like:
@@ -344,7 +346,7 @@ By default the image is tagged `fuzz-fill-test:latest`. LLVM source is downloade
 | `--llvm-dir <path>` | Use a local `llvm-project` checkout instead of downloading tagged source |
 | `--llvm-release-version <ver>` | Official LLVM release for bootstrap toolchain (default: `22.1.8`) |
 | `--tag <tag>` | Docker image tag (default: `latest`) |
-| `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist baked into the instrumented build (default: `amdgpu`) |
+| `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist baked into the instrumented build (default: `amdgpu`; AMDGPU also applies [`scripts/ignorelist-amdgpu.txt`](scripts/ignorelist-amdgpu.txt)) |
 | `-j <n>`, `--jobs <n>` | Limit ninja parallelism for the sancov build (default: unconstrained) |
 
 Examples:

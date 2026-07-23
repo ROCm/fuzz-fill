@@ -6,6 +6,7 @@
 #   Download LLVM release and checkout llvm-project at the matching tag, then:
 #   ./scripts/build-llvm-sancov.sh scripts/allowlist-amdgpu.txt llvm-project \
 #       llvm-project/build-sancov --bootstrap-bin /path/to/LLVM-22.1.8/bin
+#   (ignorelist-amdgpu.txt is applied automatically for allowlist-amdgpu.txt)
 #
 # Usage:
 #   ./scripts/corpus_vs_suite_coverage.sh
