@@ -36,7 +36,6 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.request import Request, urlopen
 
 QUARTZ_DIR = Path(__file__).resolve().parent.parent
 
@@ -45,6 +44,7 @@ sys.path.insert(0, str(QUARTZ_DIR / "build_tools"))
 from github_actions_api import (  # noqa: E402
     gha_append_step_summary,
     gha_load_github_event,
+    gha_open_https_url,
     gha_set_output,
 )
 
@@ -173,7 +173,7 @@ def _ensure_trivy() -> Path:
         tarball_path = Path(tmp.name)
     try:
         with (
-            urlopen(Request(url), timeout=_DOWNLOAD_TIMEOUT_SECONDS) as resp,
+            gha_open_https_url(url, timeout=_DOWNLOAD_TIMEOUT_SECONDS) as resp,
             open(tarball_path, "wb") as out,
         ):
             shutil.copyfileobj(resp, out)
