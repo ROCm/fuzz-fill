@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 
 from coverage.constants import DEFAULT_LIT_FILTER_DIRS, MAX_LIT_JOBS
@@ -84,28 +83,14 @@ def resolve_lit_job_count(requested: int | None, *, max_jobs: int = MAX_LIT_JOBS
     return effective
 
 
-def _lit_filter_prefix_to_regex(prefix: str) -> str:
-    """Turn a path prefix into an llvm-lit ``--filter=`` regex fragment.
-
-    ``*`` matches one path component (e.g. ``Analysis/*/AMDGPU`` →
-    ``Analysis/[^/]+/AMDGPU``).
-    """
-    if "*" not in prefix:
-        return prefix
-    return "[^/]+".join(re.escape(part) for part in prefix.split("*"))
-
-
 def build_lit_filter_regex(lit_filters: list[str]) -> str:
-    """Combine one or more LIT directory prefixes into an llvm-lit ``--filter=`` regex."""
+    """Combine one or more llvm-lit ``--filter=`` regex fragments."""
     normalized = [prefix.strip().strip("/") for prefix in lit_filters if prefix.strip().strip("/")]
     if not normalized:
         raise ValueError("lit_filters must not be empty")
     if len(normalized) == 1:
-        return _lit_filter_prefix_to_regex(normalized[0])
-    return "|".join(
-        _lit_filter_prefix_to_regex(p) if "*" in p else re.escape(p)
-        for p in normalized
-    )
+        return normalized[0]
+    return "|".join(normalized)
 
 
 def resolved_lit_filter(lit_filters: list[str] | None) -> str:
