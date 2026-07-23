@@ -44,7 +44,7 @@ Options:
   --backend-tests <target> amdgpu or spirv (required with --build-image)
   --github-repo <owner/repo>
                            GitHub repo hosting the PR (default: llvm/llvm-project)
-  --lit-filter <dir>       LIT directory prefix; repeat for multiple (default: scripts/lit-filters-amdgpu.sh for amdgpu, CodeGen/SPIRV for spirv)
+  --lit-filter <dir>       LIT directory prefix; repeat for multiple (default values available in: scripts/lit-filters-amdgpu.sh for amdgpu, CodeGen/SPIRV for spirv)
   --image-name <name>      Image name when using --pr-id (default: fuzz-fill-test)
   --commit <rev>           Revision for added_lines (default: HEAD in image llvm-project)
   -j <n>, --jobs <n>       Parallel jobs for llvm-lit; with --build-image, also for ninja
