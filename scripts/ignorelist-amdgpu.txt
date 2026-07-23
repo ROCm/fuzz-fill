@@ -1,3 +1,7 @@
+# We ignore these files that may be reachable from LLVM tools other than opt or llc
+# since we do not currently process coverage profiles for other tools.
+# This is so that we do not incorrectly report lines covered by those other tools 
+# as uncovered.
 # MC layer — llvm-mc / disassembler / object emission (not opt/llc codegen)
 src:*/lib/Target/AMDGPU/AsmParser/*
 src:*/lib/Target/AMDGPU/Disassembler/*
