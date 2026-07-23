@@ -7,6 +7,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 image_ref=""
 pr_id=""
@@ -43,7 +44,7 @@ Options:
   --backend-tests <target> amdgpu or spirv (required with --build-image)
   --github-repo <owner/repo>
                            GitHub repo hosting the PR (default: llvm/llvm-project)
-  --lit-filter <dir>       LIT directory prefix; repeat for multiple (default: from allowlist)
+  --lit-filter <dir>       LIT directory prefix; repeat for multiple (default: scripts/lit-filters-amdgpu.sh for amdgpu, CodeGen/SPIRV for spirv)
   --image-name <name>      Image name when using --pr-id (default: fuzz-fill-test)
   --commit <rev>           Revision for added_lines (default: HEAD in image llvm-project)
   -j <n>, --jobs <n>       Parallel jobs for llvm-lit; with --build-image, also for ninja
@@ -54,17 +55,23 @@ Examples:
       --backend-tests amdgpu --output-dir ./data/pr-cov-gaps-203468 -j "\$(nproc)"
   $(basename "$0") --pr-id 203468 --output-dir ./data/pr-cov-gaps-203468
   $(basename "$0") --pr-id 203468 --output-dir ./data/pr-cov-gaps-203468 \\
-      --lit-filter AMDGPU -j "\$(nproc)"
+      --lit-filter CodeGen/AMDGPU -j "\$(nproc)"
 EOF
 }
 
-lit_filter_for_allowlist() {
+default_lit_filters_for_allowlist() {
     case "$1" in
-        amdgpu) echo "AMDGPU" ;;
-        spirv) echo "CodeGen/SPIRV" ;;
+        amdgpu)
+            # shellcheck source=scripts/lit-filters-amdgpu.sh
+            source "${REPO_ROOT}/scripts/lit-filters-amdgpu.sh"
+            printf '%s\n' "${AMDGPU_LIT_FILTERS[@]}"
+            ;;
+        spirv)
+            printf '%s\n' "CodeGen/SPIRV"
+            ;;
         *)
             echo "error: unsupported image allowlist: ${1} (expected amdgpu or spirv)" >&2
-            exit 1
+            return 1
             ;;
     esac
 }
@@ -279,14 +286,17 @@ fi
 
 if [[ ${#lit_filters[@]} -eq 0 ]]; then
     image_allowlist="$(read_image_allowlist)"
-    lit_filters=("$(lit_filter_for_allowlist "$image_allowlist")")
-    echo "Image allowlist: ${image_allowlist} -> lit-filter: ${lit_filters[*]}"
+    mapfile -t lit_filters < <(default_lit_filters_for_allowlist "$image_allowlist")
+    echo "Image allowlist: ${image_allowlist} -> ${#lit_filters[@]} lit-filter prefix(es)"
 fi
 
 mkdir -p "$output_dir"
 output_dir="$(realpath "$output_dir")"
 
-docker_env=(-e "LIT_FILTERS=${lit_filters[*]}")
+lit_filters_file="${output_dir}/.lit-filters"
+printf '%s\n' "${lit_filters[@]}" > "$lit_filters_file"
+
+docker_env=()
 if [[ -n "$commit_rev" ]]; then
     docker_env+=(-e "COMMIT_REV=${commit_rev}")
 fi
@@ -304,19 +314,21 @@ set -euo pipefail
 
 commit="${COMMIT_REV:-$(git -C /work/llvm-project rev-parse HEAD)}"
 
+mapfile -t lit_filters < /mounted-output/.lit-filters
+
 baseline_args=(
     python -m coverage baseline
     --output-dir /mounted-output/baseline
     --lit-allow-failures
 )
-for lit_filter in ${LIT_FILTERS}; do
+for lit_filter in "${lit_filters[@]}"; do
     baseline_args+=(--lit-filter "${lit_filter}")
 done
 if [[ -n "${JOBS:-}" ]]; then
     baseline_args+=(-j "${JOBS}")
 fi
 
-echo "=== coverage baseline (lit-filters=${LIT_FILTERS}) ==="
+echo "=== coverage baseline (${#lit_filters[@]} lit-filter prefix(es)) ==="
 "${baseline_args[@]}"
 
 echo "=== added_lines (commit=${commit}) ==="

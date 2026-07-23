@@ -22,20 +22,9 @@ INCREMENTAL_OUTPUT_DIR="$OUTPUT_DIR/incremental"
 TESTS_DIR="${TESTS_DIR:-${REPO_ROOT}/../irtests/bitcode/amdgpu/all}"
 CORPUS_N="${CORPUS_N:-100}"
 
-LIT_FILTERS=(
-    CodeGen/AMDGPU
-    Analysis/*/AMDGPU
-    Transforms/*/AMDGPU
-    Verifier/*/AMDGPU
-    Instrumentation/*/AMDGPU
-    CodeGen/MIR/AMDGPU
-    MachineVerifier/AMDGPU
-    DebugInfo/AMDGPU
-    MachineVerifier/*/AMDGPU
-    tools/llvm-objdump/ELF/AMDGPU
-    ThinLTO/AMDGPU
-    LTO/AMDGPU
-)
+# shellcheck source=scripts/lit-filters-amdgpu.sh
+source "${SCRIPT_DIR}/lit-filters-amdgpu.sh"
+LIT_FILTERS=("${AMDGPU_LIT_FILTERS[@]}")
 
 require_bin() {
     local dir="$1" tool="$2"

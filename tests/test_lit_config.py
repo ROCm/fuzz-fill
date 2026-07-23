@@ -55,6 +55,7 @@ class TestBuildLitFilterRegex(unittest.TestCase):
         )
 
     def test_amdgpu_workflow_filters(self) -> None:
+        # Keep in sync with scripts/lit-filters-amdgpu.sh
         filters = [
             "CodeGen/AMDGPU",
             "Analysis/*/AMDGPU",

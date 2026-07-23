@@ -377,7 +377,7 @@ For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov
 
 ### Workflow 2: PR coverage gap detection
 
-[`scripts/docker/pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. The lit filter defaults from the image's `/work/.sancov-allowlist`; override with one or more `--lit-filter` directory prefixes.
+[`scripts/docker/pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. For AMDGPU images, the baseline defaults to the twelve LIT prefixes in [`scripts/lit-filters-amdgpu.sh`](scripts/lit-filters-amdgpu.sh) (same as [`scripts/test_coverage_amdgpu_workflow1.sh`](scripts/test_coverage_amdgpu_workflow1.sh)); SPIRV defaults to `CodeGen/SPIRV`. Override with one or more `--lit-filter` directory prefixes.
 
 ```bash
 ./scripts/docker/pr-cov-gaps-detection.sh \
@@ -397,7 +397,7 @@ For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov
 | `--pr-id <n>` | PR number (image tag `llvm-pr-<n>`) |
 | `--output-dir <path>` | Host output directory |
 | `-j <n>`, `--jobs <n>` | Parallel jobs (ninja when building, llvm-lit when detecting) |
-| `--lit-filter <dir>` | LIT directory prefix; repeat for multiple (default from allowlist) |
+| `--lit-filter <dir>` | LIT directory prefix; repeat for multiple (default: [`scripts/lit-filters-amdgpu.sh`](scripts/lit-filters-amdgpu.sh) for AMDGPU, `CodeGen/SPIRV` for SPIRV) |
 | `--github-repo <owner/repo>` | Optional; default `llvm/llvm-project` when building |
 
 If the image `fuzz-fill-test:llvm-pr-<n>` already exists, omit `--build-image` to run detection only.
