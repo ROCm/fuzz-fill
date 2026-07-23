@@ -144,7 +144,7 @@ Then run from the fuzz-fill repo root:
 ./scripts/test_coverage.sh
 ```
 
-For a multi-prefix AMDGPU baseline (CodeGen, Analysis, Transforms, Verifier, …), use [`scripts/test_coverage_amdgpu_workflow1.sh`](scripts/test_coverage_amdgpu_workflow1.sh) instead — it passes twelve `--lit-filter` prefixes with glob `*` support.
+The default LIT filter is the tests in the `CodeGen/AMDGPU` directory. A different set of tests can be specified using multiple paths, for example see [`scripts/test_coverage_amdgpu_workflow1.sh`](scripts/test_coverage_amdgpu_workflow1.sh).
 
 By default the script runs only **`baseline`**. Uncomment the **`candidate-test`** and **`incremental`** blocks when you are ready for the full pipeline.
 
