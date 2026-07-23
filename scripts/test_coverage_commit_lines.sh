@@ -16,7 +16,7 @@ ADDED_LINES_DIR=$OUTPUT_DIR/added-lines
 TARGET_LINES_REPORT_DIR=$OUTPUT_DIR/target_lines_report
 
 # Faster CodeGen-only subset: FILTER=CodeGen/AMDGPU
-FILTER="${FILTER:-(^|/)AMDGPU/}"
+FILTER="${FILTER:-AMDGPU}"
 
 COMMIT=b01fe4e
 

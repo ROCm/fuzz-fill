@@ -36,6 +36,45 @@ class TestBuildLitFilterRegex(unittest.TestCase):
             "CodeGen/AMDGPU",
         )
 
+    def test_glob_star_single(self) -> None:
+        self.assertEqual(
+            build_lit_filter_regex(["Analysis/*/AMDGPU"]),
+            "Analysis/[^/]+/AMDGPU",
+        )
+
+    def test_glob_star_multiple(self) -> None:
+        self.assertEqual(
+            build_lit_filter_regex(["CodeGen/AMDGPU", "Analysis/*/AMDGPU"]),
+            "CodeGen/AMDGPU|Analysis/[^/]+/AMDGPU",
+        )
+
+    def test_glob_star_strips_slashes(self) -> None:
+        self.assertEqual(
+            build_lit_filter_regex(["/Transforms/*/AMDGPU/"]),
+            "Transforms/[^/]+/AMDGPU",
+        )
+
+    def test_amdgpu_workflow_filters(self) -> None:
+        filters = [
+            "CodeGen/AMDGPU",
+            "Analysis/*/AMDGPU",
+            "Transforms/*/AMDGPU",
+            "Verifier/*/AMDGPU",
+            "Instrumentation/*/AMDGPU",
+            "CodeGen/MIR/AMDGPU",
+            "MachineVerifier/AMDGPU",
+            "DebugInfo/AMDGPU",
+            "MachineVerifier/*/AMDGPU",
+            "tools/llvm-objdump/ELF/AMDGPU",
+            "ThinLTO/AMDGPU",
+            "LTO/AMDGPU",
+        ]
+        combined = build_lit_filter_regex(filters)
+        self.assertNotIn(r"\*", combined)
+        self.assertIn("Analysis/[^/]+/AMDGPU", combined)
+        self.assertIn("CodeGen/AMDGPU", combined)
+        self.assertIn("LTO/AMDGPU", combined)
+
 
 class TestResolvedLitFilter(unittest.TestCase):
     def test_default(self) -> None:

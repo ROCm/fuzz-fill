@@ -4,8 +4,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Default LIT directory prefixes when none are passed (combined into one --filter= regex).
 DEFAULT_LIT_FILTER_DIRS = ["AMDGPU"]
-# Resolved default for callers still using a single regex string (see lit_config.resolved_lit_filter).
-DEFAULT_LIT_FILTER = "AMDGPU"
 # Default symcov source-path substring for coverage CSVs.
 DEFAULT_SOURCE_CODE_FILTER = "llvm/lib"
 

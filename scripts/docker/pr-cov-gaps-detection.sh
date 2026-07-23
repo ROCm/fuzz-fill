@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 image_ref=""
 pr_id=""
 output_dir=""
-lit_filter=""
+lit_filters=()
 image_name="${IMAGE_NAME:-fuzz-fill-test}"
 commit_rev=""
 jobs=""
@@ -43,7 +43,7 @@ Options:
   --backend-tests <target> amdgpu or spirv (required with --build-image)
   --github-repo <owner/repo>
                            GitHub repo hosting the PR (default: llvm/llvm-project)
-  --lit-filter <regex>     llvm-lit --filter= regex or prefix (default: from allowlist)
+  --lit-filter <dir>       LIT directory prefix; repeat for multiple (default: from allowlist)
   --image-name <name>      Image name when using --pr-id (default: fuzz-fill-test)
   --commit <rev>           Revision for added_lines (default: HEAD in image llvm-project)
   -j <n>, --jobs <n>       Parallel jobs for llvm-lit; with --build-image, also for ninja
@@ -54,13 +54,13 @@ Examples:
       --backend-tests amdgpu --output-dir ./data/pr-cov-gaps-203468 -j "\$(nproc)"
   $(basename "$0") --pr-id 203468 --output-dir ./data/pr-cov-gaps-203468
   $(basename "$0") --pr-id 203468 --output-dir ./data/pr-cov-gaps-203468 \\
-      --lit-filter '(^|/)AMDGPU/' -j "\$(nproc)"
+      --lit-filter AMDGPU -j "\$(nproc)"
 EOF
 }
 
 lit_filter_for_allowlist() {
     case "$1" in
-        amdgpu) echo "(^|/)AMDGPU/" ;;
+        amdgpu) echo "AMDGPU" ;;
         spirv) echo "CodeGen/SPIRV" ;;
         *)
             echo "error: unsupported image allowlist: ${1} (expected amdgpu or spirv)" >&2
@@ -140,7 +140,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --lit-filter)
             [[ $# -ge 2 ]] || { echo "error: --lit-filter requires a value" >&2; exit 2; }
-            lit_filter="$2"
+            lit_filters+=("$2")
             shift 2
             ;;
         --image-name)
@@ -277,16 +277,16 @@ if ! docker image inspect "${image_ref}" >/dev/null 2>&1; then
     exit 1
 fi
 
-if [[ -z "$lit_filter" ]]; then
+if [[ ${#lit_filters[@]} -eq 0 ]]; then
     image_allowlist="$(read_image_allowlist)"
-    lit_filter="$(lit_filter_for_allowlist "$image_allowlist")"
-    echo "Image allowlist: ${image_allowlist} -> lit-filter: ${lit_filter}"
+    lit_filters=("$(lit_filter_for_allowlist "$image_allowlist")")
+    echo "Image allowlist: ${image_allowlist} -> lit-filter: ${lit_filters[*]}"
 fi
 
 mkdir -p "$output_dir"
 output_dir="$(realpath "$output_dir")"
 
-docker_env=(-e "LIT_FILTER=${lit_filter}")
+docker_env=(-e "LIT_FILTERS=${lit_filters[*]}")
 if [[ -n "$commit_rev" ]]; then
     docker_env+=(-e "COMMIT_REV=${commit_rev}")
 fi
@@ -307,14 +307,16 @@ commit="${COMMIT_REV:-$(git -C /work/llvm-project rev-parse HEAD)}"
 baseline_args=(
     python -m coverage baseline
     --output-dir /mounted-output/baseline
-    --lit-filter "${LIT_FILTER}"
     --lit-allow-failures
 )
+for lit_filter in ${LIT_FILTERS}; do
+    baseline_args+=(--lit-filter "${lit_filter}")
+done
 if [[ -n "${JOBS:-}" ]]; then
     baseline_args+=(-j "${JOBS}")
 fi
 
-echo "=== coverage baseline (lit-filter=${LIT_FILTER}) ==="
+echo "=== coverage baseline (lit-filters=${LIT_FILTERS}) ==="
 "${baseline_args[@]}"
 
 echo "=== added_lines (commit=${commit}) ==="
@@ -332,7 +334,7 @@ python -m coverage target-lines \
 report="${output_dir}/commit_lines_report/target_lines_uncovered.csv"
 echo "Wrote ${report}"
 echo "Image: ${image_ref}"
-echo "LIT filter: ${lit_filter}"
+echo "LIT filters: ${lit_filters[*]}"
 
 lit_failures_json="${output_dir}/baseline/lit_failures.json"
 warning_file="${output_dir}/README-WARNING"

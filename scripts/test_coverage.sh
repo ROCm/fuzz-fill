@@ -12,7 +12,7 @@ CANDIDATE_TESTS_OUTPUT_DIR=$OUTPUT_DIR/candidate_tests
 INCREMENTAL_OUTPUT_DIR=$OUTPUT_DIR/incremental
 TESTS_DIR="${TESTS_DIR:-${REPO_ROOT}/../irtests/bitcode/amdgpu/all}"
 
-FILTER="${FILTER:-(^|/)AMDGPU/}"
+FILTER="${FILTER:-AMDGPU}"
 
 # Clear old output directories
 rm -rf $BASELINE_OUTPUT_DIR

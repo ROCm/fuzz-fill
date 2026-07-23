@@ -3,7 +3,7 @@
 # COM: candidate-test prerequisite uses explicit flags (not under test here).
 
 # RUN: rm -rf %t && mkdir -p %t/{baseline,candidate,incremental}
-# RUN: env FUZZ_FILL_SANCOV=%sancov FUZZ_FILL_LLVM_LIT=%llvm-lit FUZZ_FILL_LLC=%sancov-llc FUZZ_FILL_OPT=%sancov-opt %coverage baseline --output-dir %t/baseline --lit-filter 'CodeGen/AMDGPU/loop-live-out-copy-undef-subrange\.ll$' -j1
+# RUN: env FUZZ_FILL_SANCOV=%sancov FUZZ_FILL_LLVM_LIT=%llvm-lit FUZZ_FILL_LLC=%sancov-llc FUZZ_FILL_OPT=%sancov-opt %coverage baseline --output-dir %t/baseline --lit-filter CodeGen/AMDGPU/loop-live-out-copy-undef-subrange.ll -j1
 # RUN: test -f %t/baseline/line_coverage_summary.csv
 # RUN: test -f %t/baseline/line_coverage_covered.csv
 # RUN: test -f %t/baseline/line_coverage_partially.csv

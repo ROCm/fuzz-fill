@@ -3,7 +3,7 @@
 # COM: --lit-allow-failures. Validate baseline coverage artifacts are produced.
 
 # RUN: rm -rf %t && mkdir -p %t/baseline
-# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter 'CodeGen/AMDGPU/loop-live-out-copy-undef-subrange\.ll$' --lit-verbose --lit-allow-failures | tee %t/baseline.log
+# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter CodeGen/AMDGPU/loop-live-out-copy-undef-subrange.ll --lit-verbose --lit-allow-failures | tee %t/baseline.log
 
 # COM: --lit-verbose forwards -vv to llvm-lit; expect per-test PASS output.
 # RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=VERBOSE

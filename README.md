@@ -134,13 +134,15 @@ Edit the variables at the top of `scripts/test_coverage.sh`:
 | `INSTRUMENTED_BIN_DIR` | Instrumented `bin` directory |
 | `OUTPUT_DIR` | Root for all artifacts from this workflow |
 | `TESTS_DIR` | Directory of fuzz-generated `.ll` / `.bc` files to scan |
-| `FILTER` | llvm-lit `--filter=` regex or prefix (default: `(^|/)AMDGPU/` for all AMDGPU folders; use `CodeGen/AMDGPU` for CodeGen only) |
+| `FILTER` | LIT directory prefix for baseline (default: `AMDGPU`; repeat on CLI with multiple `--lit-filter`) |
 
 Then run from the fuzz-fill repo root:
 
 ```bash
 ./scripts/test_coverage.sh
 ```
+
+For a multi-prefix AMDGPU baseline (CodeGen, Analysis, Transforms, Verifier, …), use [`scripts/test_coverage_amdgpu_workflow1.sh`](scripts/test_coverage_amdgpu_workflow1.sh) instead — it passes twelve `--lit-filter` prefixes with glob `*` support.
 
 By default the script runs only **`baseline`**. Uncomment the **`candidate-test`** and **`incremental`** blocks when you are ready for the full pipeline.
 
@@ -190,7 +192,7 @@ Edit the variables at the top of `scripts/test_coverage_commit_lines.sh`:
 | `LLVM` | `llvm-project` checkout (same tree `added-lines` diffs against) |
 | `LLVM_BIN` / `INSTRUMENTED_BIN_DIR` | Same as Workflow 1 |
 | `OUTPUT_DIR` | Root for all artifacts |
-| `FILTER` | llvm-lit `--filter=` regex or prefix for the baseline run |
+| `FILTER` | LIT directory prefix for the baseline run (default in commit-lines script: `CodeGen/SPIRV`) |
 | `COMMIT` | Revision to analyse (`HEAD`, a hash, `main~3`, …) |
 
 Then run from the fuzz-fill repo root:
@@ -251,9 +253,11 @@ The workflows above call these modules. Use `--help` on any command for the full
 
 | Flag | Meaning |
 |------|---------|
-| `--lit-filter` | Regex or path prefix for llvm-lit `--filter=` (default: `(^|/)AMDGPU/`) |
+| `--lit-filter DIR` | LIT directory prefix; **repeat** for multiple prefixes (OR'd into one llvm-lit `--filter=` regex) |
 
-Baseline symcov CSVs always include source paths under `llvm/lib` (see `DEFAULT_SOURCE_CODE_FILTER` in [`src/coverage/constants.py`](src/coverage/constants.py)). Constants: `DEFAULT_LIT_FILTER`, `DEFAULT_SOURCE_CODE_FILTER`.
+Default when omitted: `AMDGPU` (see `DEFAULT_LIT_FILTER_DIRS` in [`src/coverage/constants.py`](src/coverage/constants.py)).
+
+Baseline symcov CSVs always include source paths under `llvm/lib` (see `DEFAULT_SOURCE_CODE_FILTER` in [`src/coverage/constants.py`](src/coverage/constants.py)).
 
 ### Environment variables
 
@@ -285,7 +289,7 @@ python -m coverage baseline \
 python -m added_lines --commit HEAD
 ```
 
-By default, `coverage baseline` uses `--lit-filter '(^|/)AMDGPU/'` (all LIT tests under an `AMDGPU/` directory). For a faster CodeGen-only run:
+By default, `coverage baseline` uses `--lit-filter AMDGPU` (all LIT tests whose path contains `AMDGPU`). For a faster CodeGen-only run:
 
 ```bash
 python -m coverage baseline \
@@ -293,16 +297,17 @@ python -m coverage baseline \
   --lit-filter CodeGen/AMDGPU
 ```
 
-Explicit full-folder baseline (same as default):
+Multiple directory prefixes:
 
 ```bash
 python -m coverage baseline \
-  --output-dir data/baseline-amdgpu-dirs \
-  --lit-filter '(^|/)AMDGPU/' \
+  --output-dir data/baseline-multi \
+  --lit-filter CodeGen/AMDGPU \
+  --lit-filter MC/AMDGPU \
   -j "$(nproc)"
 ```
 
-Or via [`scripts/test_coverage.sh`](scripts/test_coverage.sh) (defaults match the above):
+Or via [`scripts/test_coverage.sh`](scripts/test_coverage.sh) (default `FILTER=AMDGPU`):
 
 ```bash
 ./scripts/test_coverage.sh
@@ -312,6 +317,7 @@ CodeGen-only via script:
 
 ```bash
 FILTER=CodeGen/AMDGPU ./scripts/test_coverage.sh
+```
 
 Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `INSTRUMENTED_BIN_DIR`, …); only the `FUZZ_FILL_*` variables are read by the Python CLIs.
 
@@ -369,7 +375,7 @@ For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov
 
 ### Workflow 2: PR coverage gap detection
 
-[`scripts/docker/pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. The lit filter defaults from the image's `/work/.sancov-allowlist`; override with `--lit-filter` (regex or prefix).
+[`scripts/docker/pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. The lit filter defaults from the image's `/work/.sancov-allowlist`; override with one or more `--lit-filter` directory prefixes.
 
 ```bash
 ./scripts/docker/pr-cov-gaps-detection.sh \
@@ -389,7 +395,7 @@ For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov
 | `--pr-id <n>` | PR number (image tag `llvm-pr-<n>`) |
 | `--output-dir <path>` | Host output directory |
 | `-j <n>`, `--jobs <n>` | Parallel jobs (ninja when building, llvm-lit when detecting) |
-| `--lit-filter <regex>` | llvm-lit `--filter=` regex or prefix (default from allowlist) |
+| `--lit-filter <dir>` | LIT directory prefix; repeat for multiple (default from allowlist) |
 | `--github-repo <owner/repo>` | Optional; default `llvm/llvm-project` when building |
 
 If the image `fuzz-fill-test:llvm-pr-<n>` already exists, omit `--build-image` to run detection only.
