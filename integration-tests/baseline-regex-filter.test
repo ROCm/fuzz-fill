@@ -1,0 +1,40 @@
+# COM: Run `coverage baseline` with a --lit-filter regex (not a literal path).
+# COM: loop-live-out-copy-undef-subrange[^/]*.ll uses [^/]* (zero or more path chars) in
+# COM: the same place as a glob-style * before .ll. Here [^/]* matches empty; if the
+# COM: filter were treated as a literal string, llvm-lit would match no tests.
+
+# RUN: rm -rf %t && mkdir -p %t/baseline
+# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter 'CodeGen/AMDGPU/loop-live-out-copy-undef-subrange[^/]*.ll' --lit-verbose --lit-allow-failures -j1 | tee %t/baseline.log
+
+# COM: --lit-verbose forwards -vv to llvm-lit; expect exactly one PASS line.
+# RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=REGEX_PASS
+# REGEX_PASS-COUNT-1: PASS:
+# REGEX_PASS: loop-live-out-copy-undef-subrange.ll
+# REGEX_PASS-NOT: loop-idiom.ll
+# REGEX_PASS-NOT: loop_break.ll
+
+# COM: --lit-allow-failures must not warn when llvm-lit succeeds.
+# RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=ALLOW_OK
+# ALLOW_OK-NOT: warning: llvm-lit exited with code
+
+# COM: A successful single-test suite run must emit the baseline artifacts.
+# RUN: test -f %t/baseline/line_coverage_summary.csv
+# RUN: test -f %t/baseline/line_coverage_covered.csv
+# RUN: test -f %t/baseline/line_coverage_partially.csv
+# RUN: test -f %t/baseline/line_coverage_uncovered.csv
+# RUN: test -f %t/baseline/llc_address_line_map.csv
+# RUN: test -f %t/baseline/lit_failures.json
+# RUN: test -f %t/baseline/llc_line_point_summary.csv
+# RUN: test -f %t/baseline/opt_line_point_summary.csv
+
+# COM: lit_failures.json is always written; with no lit failures the tests array is empty.
+# RUN: %FileCheck %s --input-file=%t/baseline/lit_failures.json --check-prefix=LIT_FAILURES
+# LIT_FAILURES: "__version__":
+# LIT_FAILURES: "elapsed":
+# LIT_FAILURES: "tests": []
+# LIT_FAILURES-NOT: "code":
+
+# COM: Verify the test actually executed by confirming non-empty coverage.
+# RUN: %FileCheck %s --input-file=%t/baseline/llc_address_line_map.csv --check-prefix=COVERAGE
+# COVERAGE: file,line,point
+# COVERAGE: {{.*}}/AMDGPU/{{.*}}.cpp,{{[0-9]+}},0x{{[0-9a-f]+}}
