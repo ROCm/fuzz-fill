@@ -14,8 +14,8 @@ from coverage.lit_config import (
     ensure_lit_sancov_env_forwarding,
     lit_test_suite_path,
     resolve_lit_job_count,
+    resolved_lit_filter,
 )
-from coverage.run_config import build_run_config, resolved_lit_filter, write_run_config
 from coverage.line_coverage_summary import write_line_coverage_summary_splits
 from coverage.sancov import Sancov
 from fuzz_fill.log import get_logger, log_timing, run_subprocess
@@ -50,7 +50,7 @@ class TestRunner:
         self,
         mode: str,
         filepaths: Filepaths,
-        lit_filter: str | None = None,
+        lit_filters: list[str] | None = None,
         jobs: int | None = None,
         lit_verbose: bool = False,
         lit_allow_failures: bool = False,
@@ -71,10 +71,7 @@ class TestRunner:
         self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
 
         if self.mode == "lit":
-            self._lit_filter = resolved_lit_filter(lit_filter)
-            run_config = build_run_config(lit_filter=lit_filter)
-            self._path_filter = run_config["path_filter"]
-            write_run_config(self.filepaths.output_dir, lit_filter=lit_filter)
+            self._lit_filter = resolved_lit_filter(lit_filters)
             self.raw_sancov_output_dir.mkdir(parents=True, exist_ok=True)
             self._symbolize_jobs = min(jobs, 2) if jobs is not None else 2
 
@@ -313,7 +310,7 @@ class TestRunner:
                     future.result()
 
         sancovs = [llc_sancov, opt_sancov]
-        coverage_dfs = Sancov.load_coverage_dfs_from_sancovs(sancovs, self._path_filter)
+        coverage_dfs = Sancov.load_coverage_dfs_from_sancovs(sancovs)
         address_line_maps, line_point_summaries, coverage = Sancov.get_joint_coverage(
             coverage_dfs
         )

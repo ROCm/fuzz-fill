@@ -96,8 +96,17 @@ def main():
         default=None,
         help=f"Path to the instrumented opt executable (or set {FUZZ_FILL_OPT}).",
     )
-    p_baseline.add_argument("--lit-filter", type=str, default=None,
-        help="Prefix passed to llvm-lit as --filter=<PREFIX> (also selects symcov path scope).")
+    p_baseline.add_argument(
+        "--lit-filter",
+        action="append",
+        dest="lit_filters",
+        default=None,
+        metavar="REGEX",
+        help=(
+            "llvm-lit --filter= regex; repeat for multiple fragments "
+            "(OR'd into one --filter= value)."
+        ),
+    )
     p_baseline.add_argument("-j", "--jobs", type=int, default=None,
         help=(
             "Number of parallel jobs forwarded to llvm-lit as -j<N>. "
@@ -224,7 +233,7 @@ def main():
                 test_runner = TestRunner(
                     mode="lit",
                     filepaths=filepaths,
-                    lit_filter=args.lit_filter,
+                    lit_filters=args.lit_filters,
                     jobs=args.jobs,
                     lit_verbose=args.lit_verbose,
                     lit_allow_failures=args.lit_allow_failures,

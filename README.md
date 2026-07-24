@@ -91,9 +91,11 @@ You need an official **LLVM GitHub release** as bootstrap and one **SanitizerCov
 | Component | Purpose | How |
 |-----------|---------|-----|
 | **Release bootstrap** | `clang`, `clang++` for compiling LLVM | Download [LLVM release](https://github.com/llvm/llvm-project/releases) (e.g. `LLVM-22.1.8-Linux-X64.tar.xz`) |
-| **SanitizerCoverage** | Unified build tree: instrumented `llc`/`opt`, Release LIT helpers, `llvm-lit`, `sancov` | `./scripts/build-llvm-sancov.sh ./scripts/allowlist-amdgpu.txt llvm-project llvm-project/build-sancov --bootstrap-bin /path/to/LLVM-22.1.8/bin` |
+| **SanitizerCoverage** | Unified build tree: instrumented `llc`/`opt`, Release LIT helpers, `llvm-lit`, `sancov` | `./scripts/build-llvm-sancov.sh ./scripts/allowlist-amdgpu.txt llvm-project llvm-project/build-sancov --bootstrap-bin /path/to/LLVM-22.1.8/bin --ignorelist ./scripts/ignorelist-amdgpu.txt` |
 
 `build-llvm-sancov.sh` runs two partial builds from the same source: **`llvm-tblgen` is built from the source tree first**, then a **Release** tree for target-agnostic LIT helpers plus **`sancov`**, and a **Debug** SanitizerCoverage tree for **`llc`**, **`opt`**, and target-linked helpers (`llvm-mc`, `llvm-objdump`, …). Release tools are copied into the instrumented tree's `bin/`; `llvm-lit` is generated there by cmake. The bootstrap release supplies **clang/clang++ only** (TableGen must match the source).
+
+For AMDGPU builds, pass [`scripts/ignorelist-amdgpu.txt`](scripts/ignorelist-amdgpu.txt) with `--ignorelist`. It excludes MC-layer code (AsmParser, Disassembler, MCTargetDesc, MCA, TargetInfo), selected Utils used mainly by MC/PAL/asm, and `AMDGPUSplitModule.cpp` from instrumentation — keeping opt/llc codegen paths covered. SPIRV builds do not use an ignorelist.
 
 **`python -m coverage baseline`** patches **`<instrumented-build>/test/lit.site.cfg.py`** so LIT forwards **`UBSAN_OPTIONS`** to every test subprocess. The patch is idempotent and is re-applied if CMake regenerates that file.
 
@@ -134,13 +136,15 @@ Edit the variables at the top of `scripts/test_coverage.sh`:
 | `INSTRUMENTED_BIN_DIR` | Instrumented `bin` directory |
 | `OUTPUT_DIR` | Root for all artifacts from this workflow |
 | `TESTS_DIR` | Directory of fuzz-generated `.ll` / `.bc` files to scan |
-| `FILTER` | LIT `--filter=` prefix (e.g. `CodeGen/AMDGPU`) |
+| `FILTER` | LIT directory prefix for baseline (default: `AMDGPU`; repeat on CLI with multiple `--lit-filter`) |
 
 Then run from the fuzz-fill repo root:
 
 ```bash
 ./scripts/test_coverage.sh
 ```
+
+The default LIT filter is the tests in the `CodeGen/AMDGPU` directory. A different set of tests can be specified using multiple paths, for example see [`scripts/test_coverage_amdgpu_workflow1.sh`](scripts/test_coverage_amdgpu_workflow1.sh).
 
 By default the script runs only **`baseline`**. Uncomment the **`candidate-test`** and **`incremental`** blocks when you are ready for the full pipeline.
 
@@ -190,7 +194,7 @@ Edit the variables at the top of `scripts/test_coverage_commit_lines.sh`:
 | `LLVM` | `llvm-project` checkout (same tree `added-lines` diffs against) |
 | `LLVM_BIN` / `INSTRUMENTED_BIN_DIR` | Same as Workflow 1 |
 | `OUTPUT_DIR` | Root for all artifacts |
-| `FILTER` | LIT filter for the baseline run |
+| `FILTER` | LIT directory prefix for the baseline run (default in commit-lines script: `CodeGen/SPIRV`) |
 | `COMMIT` | Revision to analyse (`HEAD`, a hash, `main~3`, …) |
 
 Then run from the fuzz-fill repo root:
@@ -247,6 +251,16 @@ The workflows above call these modules. Use `--help` on any command for the full
 | `python -m added_lines` | Lines added by a git commit (Workflow 2) |
 | `python -m reduce` | Testcase reduction |
 
+### `coverage baseline` filters
+
+| Flag | Meaning |
+|------|---------|
+| `--lit-filter DIR` | LIT directory prefix; **repeat** for multiple prefixes (OR'd into one llvm-lit `--filter=` regex) |
+
+Default when omitted: `AMDGPU` (see `DEFAULT_LIT_FILTER_DIRS` in [`src/coverage/constants.py`](src/coverage/constants.py)).
+
+Baseline symcov CSVs always include source paths under `llvm/lib` (see `DEFAULT_SOURCE_CODE_FILTER` in [`src/coverage/constants.py`](src/coverage/constants.py)).
+
 ### Environment variables
 
 Several commands accept LLVM tool paths via environment variables when the matching CLI flag is omitted. A flag on the command line always wins.
@@ -272,8 +286,39 @@ export FUZZ_FILL_LLC=/work/llvm-build-sancov/bin/llc
 export FUZZ_FILL_OPT=/work/llvm-build-sancov/bin/opt
 export FUZZ_FILL_LLVM_REPO=/work/llvm-project
 
-python -m coverage baseline --output-dir data/baseline --lit-filter CodeGen/AMDGPU
+python -m coverage baseline \
+  --output-dir data/baseline
 python -m added_lines --commit HEAD
+```
+
+By default, `coverage baseline` uses `--lit-filter AMDGPU` (all LIT tests whose path contains `AMDGPU`). For a faster CodeGen-only run:
+
+```bash
+python -m coverage baseline \
+  --output-dir data/baseline-codegen \
+  --lit-filter CodeGen/AMDGPU
+```
+
+Multiple directory prefixes:
+
+```bash
+python -m coverage baseline \
+  --output-dir data/baseline-multi \
+  --lit-filter CodeGen/AMDGPU \
+  --lit-filter MC/AMDGPU \
+  -j "$(nproc)"
+```
+
+Or via [`scripts/test_coverage.sh`](scripts/test_coverage.sh) (default `FILTER=AMDGPU`):
+
+```bash
+./scripts/test_coverage.sh
+```
+
+CodeGen-only via script:
+
+```bash
+FILTER=CodeGen/AMDGPU ./scripts/test_coverage.sh
 ```
 
 Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `INSTRUMENTED_BIN_DIR`, …); only the `FUZZ_FILL_*` variables are read by the Python CLIs.
@@ -301,7 +346,7 @@ By default the image is tagged `fuzz-fill-test:latest`. LLVM source is downloade
 | `--llvm-dir <path>` | Use a local `llvm-project` checkout instead of downloading tagged source |
 | `--llvm-release-version <ver>` | Official LLVM release for bootstrap toolchain (default: `22.1.8`) |
 | `--tag <tag>` | Docker image tag (default: `latest`) |
-| `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist baked into the instrumented build (default: `amdgpu`) |
+| `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist baked into the instrumented build (default: `amdgpu`; AMDGPU also applies [`scripts/ignorelist-amdgpu.txt`](scripts/ignorelist-amdgpu.txt)) |
 | `-j <n>`, `--jobs <n>` | Limit ninja parallelism for the sancov build (default: unconstrained) |
 
 Examples:
@@ -332,7 +377,7 @@ For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov
 
 ### Workflow 2: PR coverage gap detection
 
-[`scripts/docker/pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. The LIT filter defaults to the image's `/work/.sancov-allowlist` (set at build time via `--backend-tests`); override with `--lit-filter` if needed.
+[`scripts/docker/pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. For AMDGPU images, the baseline defaults to the twelve LIT prefixes in [`scripts/lit-filters-amdgpu.sh`](scripts/lit-filters-amdgpu.sh) (same as [`scripts/test_coverage_amdgpu_workflow1.sh`](scripts/test_coverage_amdgpu_workflow1.sh)); SPIRV defaults to `CodeGen/SPIRV`. Override with one or more `--lit-filter` directory prefixes.
 
 ```bash
 ./scripts/docker/pr-cov-gaps-detection.sh \
@@ -352,7 +397,7 @@ For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov
 | `--pr-id <n>` | PR number (image tag `llvm-pr-<n>`) |
 | `--output-dir <path>` | Host output directory |
 | `-j <n>`, `--jobs <n>` | Parallel jobs (ninja when building, llvm-lit when detecting) |
-| `--lit-filter <prefix>` | Optional LIT filter override |
+| `--lit-filter <dir>` | LIT directory prefix; repeat for multiple (default: [`scripts/lit-filters-amdgpu.sh`](scripts/lit-filters-amdgpu.sh) for AMDGPU, `CodeGen/SPIRV` for SPIRV) |
 | `--github-repo <owner/repo>` | Optional; default `llvm/llvm-project` when building |
 
 If the image `fuzz-fill-test:llvm-pr-<n>` already exists, omit `--build-image` to run detection only.

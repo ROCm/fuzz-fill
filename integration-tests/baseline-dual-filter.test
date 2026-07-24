@@ -1,19 +1,24 @@
-# COM: Run `coverage baseline` with a filter that matches exactly one lit test,
-# COM: without -j (llvm-lit picks its own default), and with --lit-verbose and
-# COM: --lit-allow-failures. Validate baseline coverage artifacts are produced.
+# COM: Run `coverage baseline` with two --lit-filter flags that each match exactly
+# COM: one lit test. Verify llvm-lit runs both tests (OR'd filter) and baseline
+# COM: coverage artifacts are produced.
 
 # RUN: rm -rf %t && mkdir -p %t/baseline
-# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter CodeGen/AMDGPU/loop-live-out-copy-undef-subrange.ll --lit-verbose --lit-allow-failures | tee %t/baseline.log
+# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter CodeGen/AMDGPU/loop-live-out-copy-undef-subrange.ll --lit-filter CodeGen/AMDGPU/loop-idiom.ll --lit-verbose --lit-allow-failures -j1 | tee %t/baseline.log
 
-# COM: --lit-verbose forwards -vv to llvm-lit; expect per-test PASS output.
-# RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=VERBOSE
-# VERBOSE: PASS:
+# COM: --lit-verbose forwards -vv to llvm-lit; expect exactly two PASS lines.
+# RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=DUAL_PASS
+# DUAL_PASS-DAG: loop-live-out-copy-undef-subrange.ll
+# DUAL_PASS-DAG: loop-idiom.ll
+# DUAL_PASS-NOT: loop_break.ll
+
+# RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=PASS_COUNT
+# PASS_COUNT-COUNT-2: PASS:
 
 # COM: --lit-allow-failures must not warn when llvm-lit succeeds.
 # RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=ALLOW_OK
 # ALLOW_OK-NOT: warning: llvm-lit exited with code
 
-# COM: A successful single-test suite run must emit the baseline artifacts.
+# COM: A successful dual-test suite run must emit the baseline artifacts.
 # RUN: test -f %t/baseline/line_coverage_summary.csv
 # RUN: test -f %t/baseline/line_coverage_covered.csv
 # RUN: test -f %t/baseline/line_coverage_partially.csv
@@ -30,7 +35,7 @@
 # LIT_FAILURES: "tests": []
 # LIT_FAILURES-NOT: "code":
 
-# COM: Verify the test actually executed by confirming non-empty coverage: the
+# COM: Verify the tests actually executed by confirming non-empty coverage: the
 # COM: address map must contain at least one real data row (an AMDGPU source path with a
 # COM: line number and llc point), not just the header.
 # RUN: %FileCheck %s --input-file=%t/baseline/llc_address_line_map.csv --check-prefix=COVERAGE

@@ -10,6 +10,7 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
   llvm_dir          LLVM source tree (directory containing llvm/)
   sancov_build_dir  Output directory for the SanitizerCoverage-instrumented LLVM build
   --bootstrap-bin   Directory with clang and clang++ (e.g. official LLVM release bin/)
+  --ignorelist      Sanitizer coverage ignorelist file (optional)
   ninja_jobs        Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
 
 Builds llvm-tblgen from the source tree, then instrumented llc/opt (Debug + SanitizerCoverage)
@@ -22,6 +23,7 @@ ALLOWLIST=""
 LLVM_DIR=""
 SANCOV_BUILD_DIR=""
 BOOTSTRAP_BIN=""
+IGNORELIST=""
 NINJA_JOBS=""
 
 while [[ $# -gt 0 ]]; do
@@ -33,6 +35,15 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             BOOTSTRAP_BIN="$2"
+            shift 2
+            ;;
+        --ignorelist)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --ignorelist requires a value" >&2
+                usage >&2
+                exit 1
+            fi
+            IGNORELIST="$2"
             shift 2
             ;;
         --help|-h)
@@ -82,6 +93,14 @@ ALLOWLIST="$(realpath "$ALLOWLIST")"
 LLVM_DIR="$(realpath "$LLVM_DIR")"
 BOOTSTRAP_BIN="$(realpath "$BOOTSTRAP_BIN")"
 
+if [[ -n "$IGNORELIST" ]]; then
+    if [[ ! -f "$IGNORELIST" ]]; then
+        echo "Error: ignorelist file not found: $IGNORELIST" >&2
+        exit 1
+    fi
+    IGNORELIST="$(realpath "$IGNORELIST")"
+fi
+
 if [[ ! -d "$BOOTSTRAP_BIN" ]]; then
     echo "Error: bootstrap bin directory not found: $BOOTSTRAP_BIN" >&2
     exit 1
@@ -129,6 +148,9 @@ SANCOV_BIN="$SANCOV_BUILD_DIR/bin"
 HELPERS_BIN="$HELPERS_BUILD_DIR/bin"
 
 SANCOV_FLAGS="-fno-inline -fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=bb,trace-pc-guard"
+if [[ -n "$IGNORELIST" ]]; then
+    SANCOV_FLAGS+=" -fsanitize-coverage-ignorelist=$IGNORELIST"
+fi
 
 LLVM_CMAKE_BASE=(
     -G Ninja
@@ -151,6 +173,9 @@ fi
 
 echo "Building LLVM for fuzz-fill (Release helpers + instrumented tree)..."
 echo "  Allowlist:        $ALLOWLIST"
+if [[ -n "$IGNORELIST" ]]; then
+    echo "  Ignorelist:       $IGNORELIST"
+fi
 echo "  LLVM source:      $LLVM_DIR"
 echo "  Sancov build:     $SANCOV_BUILD_DIR"
 echo "  Helpers build:    $HELPERS_BUILD_DIR"

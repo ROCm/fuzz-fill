@@ -85,24 +85,36 @@ RUN --mount=type=bind,from=llvm,source=.,target=/llvm-src,ro \
 COPY scripts/build-llvm-sancov.sh /usr/local/bin/
 COPY scripts/allowlist-amdgpu.txt /work/allowlist-amdgpu.txt
 COPY scripts/allowlist-spirv.txt /work/allowlist-spirv.txt
+COPY scripts/ignorelist-amdgpu.txt /work/ignorelist-amdgpu.txt
 RUN chmod +x /usr/local/bin/build-llvm-sancov.sh
 
 ARG SANCOV_ALLOWLIST=amdgpu
 ARG NINJA_JOBS=""
 RUN case "${SANCOV_ALLOWLIST}" in \
-        amdgpu) allowlist=/work/allowlist-amdgpu.txt ;; \
-        spirv) allowlist=/work/allowlist-spirv.txt ;; \
+        amdgpu) allowlist=/work/allowlist-amdgpu.txt; ignorelist=/work/ignorelist-amdgpu.txt ;; \
+        spirv) allowlist=/work/allowlist-spirv.txt; ignorelist="" ;; \
         *) echo "error: unsupported SANCOV_ALLOWLIST: ${SANCOV_ALLOWLIST} (expected amdgpu or spirv)" >&2; exit 1 ;; \
     esac \
  && echo "${SANCOV_ALLOWLIST}" > /work/.sancov-allowlist \
  && echo "=== fuzz-fill: SanitizerCoverage allowlist = ${SANCOV_ALLOWLIST} ===" \
+ && if [ -n "${ignorelist}" ]; then echo "=== fuzz-fill: SanitizerCoverage ignorelist = ${ignorelist} ==="; fi \
  && llvm_build_start=$(date +%s) \
- && /usr/local/bin/build-llvm-sancov.sh \
-        "${allowlist}" \
-        /work/llvm-project \
-        /work/llvm-build-sancov \
-        --bootstrap-bin /work/llvm-release/bin \
-        "${NINJA_JOBS}" \
+ && if [ -n "${ignorelist}" ]; then \
+        /usr/local/bin/build-llvm-sancov.sh \
+            "${allowlist}" \
+            /work/llvm-project \
+            /work/llvm-build-sancov \
+            --bootstrap-bin /work/llvm-release/bin \
+            --ignorelist "${ignorelist}" \
+            "${NINJA_JOBS}"; \
+    else \
+        /usr/local/bin/build-llvm-sancov.sh \
+            "${allowlist}" \
+            /work/llvm-project \
+            /work/llvm-build-sancov \
+            --bootstrap-bin /work/llvm-release/bin \
+            "${NINJA_JOBS}"; \
+    fi \
  && llvm_build_secs=$(( $(date +%s) - llvm_build_start )) \
  && echo "${llvm_build_secs}" > /work/.llvm-build-time \
  && echo "=== fuzz-fill: LLVM build wall time: ${llvm_build_secs}s ==="

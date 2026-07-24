@@ -12,7 +12,7 @@
 #
 # Example (AMDGPU):
 #   BUILD_SCRIPT=build-amdgpu-bb.sh BUILD_DIR=build-amdgpu-bb \
-#     FILTER=CodeGen/AMDGPU \
+#     FILTER='CodeGen/AMDGPU' \
 #     COMMITS_FILE=commits.txt ./run_commit_lines_coverage_for_commits.sh
 #
 # Optional environment:
@@ -20,7 +20,7 @@
 #   LLVM_REPO          — llvm-project path (default: sibling of fuzz-fill)
 #   OUTPUT_ROOT_BASE   — under this, each run uses bb_coverage_commit_lines_<short_sha>/
 #                        (default: $FUZZ_FILL_ROOT/data/coverage_output)
-#   FILTER             — lit filter (default: CodeGen/SPIRV); symcov path scope is derived
+#   FILTER             — LIT directory prefix for baseline (default: CodeGen/SPIRV)
 #   LLVM_BIN           — dir with clang for LIT (default: $LLVM_REPO/build/bin)
 #   BUILD_SCRIPT       — BB build script under llvm-project (default: build-spirv-bb.sh)
 #   BUILD_DIR          — instrumented build tree name/dir under llvm-project (default: build-spirv-bb)

@@ -13,7 +13,6 @@
 # RUN: %coverage incremental --output-dir %t/incremental --sancov %sancov --line-coverage-uncovered-csv %t/baseline/line_coverage_uncovered.csv --llc-address-line-map-csv %t/baseline/llc_address_line_map.csv --candidate-tests-output-dir %t/candidate_tests
 # RUN: %coverage target-lines --output-dir %t/target_lines --line-coverage-uncovered-csv %t/baseline/line_coverage_uncovered.csv --llvm-repo %llvm-repo --target-lines-csv %S/fixtures/target-lines-sample.csv
 
-# RUN: test -f %t/baseline/run_config.json
 # RUN: test -f %t/baseline/line_coverage_summary.csv
 # RUN: test -f %t/baseline/line_coverage_covered.csv
 # RUN: test -f %t/baseline/line_coverage_partially.csv
