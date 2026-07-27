@@ -120,6 +120,7 @@ SANCOV_INSTRUMENTED_TARGETS=(
     opt
     llvm-debuginfo-analyzer
     llvm-dwarfdump
+    llvm-lto
     llvm-lto2
     llvm-mc
     llvm-objdump
@@ -139,6 +140,7 @@ HELPER_RELEASE_TARGETS=(
     llvm-readelf
     llvm-readobj
     llvm-strip
+    yaml2obj
 )
 
 mkdir -p "$SANCOV_BUILD_DIR"
