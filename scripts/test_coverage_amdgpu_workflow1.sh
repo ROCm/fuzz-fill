@@ -113,7 +113,8 @@ if [[ -z "${SKIP_INCREMENTAL:-}" ]]; then
     python -m coverage incremental \
         --output-dir "$INCREMENTAL_OUTPUT_DIR" \
         --sancov "$LLVM_BIN/sancov" \
-        --baseline-output-dir "$BASELINE_OUTPUT_DIR" \
+        --line-coverage-uncovered-csv "$BASELINE_OUTPUT_DIR/line_coverage_uncovered.csv" \
+        --llc-address-line-map-csv "$BASELINE_OUTPUT_DIR/llc_address_line_map.csv" \
         --candidate-tests-output-dir "$CANDIDATE_TESTS_OUTPUT_DIR"
 else
     echo ">>> Step 3/3: skipped (SKIP_INCREMENTAL=1)"

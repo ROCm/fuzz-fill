@@ -6,9 +6,9 @@
 # the host at run time (first N .ll/.bc files only) and bind-mounted read-only
 # at /mounted-candidate-tests — nothing is baked into the image.
 #
-# The coverage profile (line_coverage_uncovered.csv + llc_address_line_map.csv)
-# can come from a baseline run in this invocation, from a prior Workflow 1 run,
-# or from the baseline/ output of a Workflow 2 PR detection run.
+# The coverage profile is passed as explicit CSV paths (same flags as
+# ``coverage incremental``). Pass --bind-repo to run the local fuzz-fill checkout
+# instead of the copy baked into the image at build time.
 
 set -euo pipefail
 
@@ -21,7 +21,7 @@ image_tag="${IMAGE_TAG:-latest}"
 image_ref=""
 pr_id=""
 output_dir=""
-baseline_dir=""
+llc_address_line_map_csv=""
 line_coverage_uncovered_csv=""
 lit_filter=""
 jobs=""
@@ -52,12 +52,15 @@ Modes (pick one):
 
 Coverage profile (for candidate-test + incremental):
   By default, baseline runs in this invocation and writes to <output-dir>/baseline/.
-  Re-use an existing profile instead (from Workflow 1 baseline-only or Workflow 2):
-  --baseline-dir <path>         Host directory with line_coverage_uncovered.csv and
-                                llc_address_line_map.csv (mounted read-only)
+  Re-use an existing profile instead (same CSV flags as ``coverage incremental``):
   --line-coverage-uncovered-csv <path>
-                                Override uncovered-lines CSV (default:
-                                <baseline-dir>/line_coverage_uncovered.csv or output baseline)
+                                Baseline uncovered-lines CSV (``file``, ``line`` columns)
+  --llc-address-line-map-csv <path>
+                                Baseline LLC address-to-line map CSV
+                                Both profile CSV flags are required together when skipping
+                                baseline. Example Workflow 2 paths under <wf2-output>/:
+                                  <wf2-output>/baseline/llc_address_line_map.csv
+                                  <wf2-output>/commit_lines_report/target_lines_uncovered.csv
 
 Image (one of):
   --image <ref>                 Docker image ref (default: \${IMAGE_NAME:-fuzz-fill-test}:\${IMAGE_TAG:-latest})
@@ -83,10 +86,12 @@ Examples:
   $(basename "$0") --build-image --llvm-repo /path/llvm-project --pr-id 203468 \\
       --backend-tests amdgpu --baseline-only --output-dir ./data/wf1-pr-baseline -j "\$(nproc)"
   $(basename "$0") --output-dir ./data/wf1-100 \\
-      --baseline-dir ./data/pr-cov-gaps-203468/baseline \\
+      --line-coverage-uncovered-csv ./data/pr-cov-gaps-203468/baseline/line_coverage_uncovered.csv \\
+      --llc-address-line-map-csv ./data/pr-cov-gaps-203468/baseline/llc_address_line_map.csv \\
       --candidate-tests-dir /path/to/irtests/bitcode/amdgpu/all -n 100 -j "\$(nproc)"
   $(basename "$0") --pr-id 203468 --output-dir ./data/wf1-pr-100 \\
-      --baseline-dir ./data/pr-cov-gaps-203468/baseline \\
+      --line-coverage-uncovered-csv ./data/pr-cov-gaps-203468/commit_lines_report/target_lines_uncovered.csv \\
+      --llc-address-line-map-csv ./data/pr-cov-gaps-203468/baseline/llc_address_line_map.csv \\
       --candidate-tests-dir /path/to/irtests/bitcode/amdgpu/all -n 100 -j "\$(nproc)"
 EOF
 }
@@ -138,34 +143,29 @@ read_image_allowlist() {
     printf '%s' "$allowlist"
 }
 
-validate_baseline_profile_dir() {
-    local dir="$1"
-    if [[ ! -d "$dir" ]]; then
-        echo "error: --baseline-dir is not a directory: ${dir}" >&2
-        exit 1
-    fi
-    if [[ ! -f "${dir}/llc_address_line_map.csv" ]]; then
-        echo "error: missing llc_address_line_map.csv under --baseline-dir: ${dir}" >&2
+validate_profile_csv() {
+    local flag_name="$1"
+    local path="$2"
+    if [[ ! -f "$path" ]]; then
+        echo "error: ${flag_name} not found: ${path}" >&2
         exit 1
     fi
 }
 
-resolve_uncovered_csv_path() {
-    local profile_dir="$1"
+resolve_profile_csv_paths() {
+    if [[ -n "$line_coverage_uncovered_csv" && -z "$llc_address_line_map_csv" ]]; then
+        echo "error: --line-coverage-uncovered-csv requires --llc-address-line-map-csv" >&2
+        exit 1
+    fi
+    if [[ -z "$line_coverage_uncovered_csv" && -n "$llc_address_line_map_csv" ]]; then
+        echo "error: --llc-address-line-map-csv requires --line-coverage-uncovered-csv" >&2
+        exit 1
+    fi
     if [[ -n "$line_coverage_uncovered_csv" ]]; then
-        if [[ ! -f "$line_coverage_uncovered_csv" ]]; then
-            echo "error: --line-coverage-uncovered-csv not found: ${line_coverage_uncovered_csv}" >&2
-            exit 1
-        fi
-        realpath "$line_coverage_uncovered_csv"
-    elif [[ -n "$profile_dir" ]]; then
-        if [[ ! -f "${profile_dir}/line_coverage_uncovered.csv" ]]; then
-            echo "error: missing line_coverage_uncovered.csv under --baseline-dir: ${profile_dir}" >&2
-            exit 1
-        fi
-        realpath "${profile_dir}/line_coverage_uncovered.csv"
-    else
-        echo ""
+        validate_profile_csv "--line-coverage-uncovered-csv" "$line_coverage_uncovered_csv"
+        validate_profile_csv "--llc-address-line-map-csv" "$llc_address_line_map_csv"
+        line_coverage_uncovered_csv="$(realpath "$line_coverage_uncovered_csv")"
+        llc_address_line_map_csv="$(realpath "$llc_address_line_map_csv")"
     fi
 }
 
@@ -224,14 +224,14 @@ while [[ $# -gt 0 ]]; do
             output_dir="$2"
             shift 2
             ;;
-        --baseline-dir)
-            [[ $# -ge 2 ]] || { echo "error: --baseline-dir requires a value" >&2; exit 2; }
-            baseline_dir="$2"
-            shift 2
-            ;;
         --line-coverage-uncovered-csv)
             [[ $# -ge 2 ]] || { echo "error: --line-coverage-uncovered-csv requires a value" >&2; exit 2; }
             line_coverage_uncovered_csv="$2"
+            shift 2
+            ;;
+        --llc-address-line-map-csv)
+            [[ $# -ge 2 ]] || { echo "error: --llc-address-line-map-csv requires a value" >&2; exit 2; }
+            llc_address_line_map_csv="$2"
             shift 2
             ;;
         --lit-filter)
@@ -377,8 +377,8 @@ if [[ "$baseline_only" -eq 1 ]]; then
         echo "error: --candidate-tests-dir and -n cannot be used with --baseline-only" >&2
         exit 1
     fi
-    if [[ -n "$baseline_dir" || -n "$line_coverage_uncovered_csv" ]]; then
-        echo "error: --baseline-dir and --line-coverage-uncovered-csv cannot be used with --baseline-only" >&2
+    if [[ -n "$line_coverage_uncovered_csv" || -n "$llc_address_line_map_csv" ]]; then
+        echo "error: profile CSV flags cannot be used with --baseline-only" >&2
         exit 1
     fi
 else
@@ -392,10 +392,7 @@ else
         echo "error: --candidate-tests-dir is not a directory: ${candidate_tests_dir}" >&2
         exit 1
     fi
-    if [[ -n "$line_coverage_uncovered_csv" && -z "$baseline_dir" ]]; then
-        echo "error: --line-coverage-uncovered-csv requires --baseline-dir (for llc_address_line_map.csv)" >&2
-        exit 1
-    fi
+    resolve_profile_csv_paths
 fi
 
 validate_jobs
@@ -434,33 +431,22 @@ if ! docker image inspect "${image_ref}" >/dev/null 2>&1; then
 fi
 
 skip_baseline=0
-baseline_profile_dir=""
-uncovered_csv_host=""
-llc_map_host=""
-uncovered_mount=()
-baseline_mount=()
+profile_mount=()
+lit_failures_json=""
 
-if [[ -n "$baseline_dir" ]]; then
+if [[ -n "$line_coverage_uncovered_csv" ]]; then
     skip_baseline=1
-    validate_baseline_profile_dir "$baseline_dir"
-    baseline_profile_dir="$(realpath "$baseline_dir")"
-    uncovered_csv_host="$(resolve_uncovered_csv_path "$baseline_profile_dir")"
-    llc_map_host="${baseline_profile_dir}/llc_address_line_map.csv"
-    baseline_mount=(-v "${baseline_profile_dir}:/mounted-baseline:ro")
+    container_uncovered_csv="/mounted-profile/line_coverage_uncovered.csv"
+    container_llc_map_csv="/mounted-profile/llc_address_line_map.csv"
+    profile_mount=(
+        -v "${line_coverage_uncovered_csv}:${container_uncovered_csv}:ro"
+        -v "${llc_address_line_map_csv}:${container_llc_map_csv}:ro"
+    )
+    lit_failures_json="$(dirname "$llc_address_line_map_csv")/lit_failures.json"
 
-    baseline_dir_real="$(realpath "$(dirname "$uncovered_csv_host")")"
-    if [[ "$baseline_dir_real" == "$baseline_profile_dir" ]]; then
-        container_uncovered_csv="/mounted-baseline/$(basename "$uncovered_csv_host")"
-        container_llc_map_csv="/mounted-baseline/llc_address_line_map.csv"
-    else
-        container_uncovered_csv="/mounted-uncovered-lines.csv"
-        uncovered_mount=(-v "${uncovered_csv_host}:${container_uncovered_csv}:ro")
-        container_llc_map_csv="/mounted-baseline/llc_address_line_map.csv"
-    fi
-
-    echo "Using external coverage profile: ${baseline_profile_dir}"
-    echo "  uncovered lines: ${uncovered_csv_host}"
-    echo "  address map:     ${llc_map_host}"
+    echo "Using external coverage profile:"
+    echo "  uncovered lines: ${line_coverage_uncovered_csv}"
+    echo "  address map:     ${llc_address_line_map_csv}"
 elif [[ "$baseline_only" -eq 0 ]]; then
     container_uncovered_csv="/mounted-output/baseline/line_coverage_uncovered.csv"
     container_llc_map_csv="/mounted-output/baseline/llc_address_line_map.csv"
@@ -520,8 +506,7 @@ fi
 
 docker run --rm \
     -v "${output_dir}:/mounted-output" \
-    "${baseline_mount[@]}" \
-    "${uncovered_mount[@]}" \
+    "${profile_mount[@]}" \
     "${candidate_mount[@]}" \
     "${repo_mount[@]}" \
     "${docker_env[@]}" \
@@ -582,9 +567,7 @@ else
     echo "Wrote ${report}"
 fi
 
-if [[ "$skip_baseline" -eq 1 ]]; then
-    lit_failures_json="${baseline_profile_dir}/lit_failures.json"
-else
+if [[ "$skip_baseline" -eq 0 ]]; then
     lit_failures_json="${output_dir}/baseline/lit_failures.json"
 fi
 warning_file="${output_dir}/README-WARNING"
