@@ -72,7 +72,8 @@ To **fill** those gaps with fuzz tests, chain [gap filling](#gap-filling) after 
 - [Gap finding (baseline)](#gap-finding-baseline)
 - [Gap finding (PR)](#gap-finding-pr)
 - [Gap filling](#gap-filling)
-- [Chaining gap finding and filling](#chaining-gap-finding-and-filling)
+- [Gap reducing](#gap-reducing)
+- [Chaining gap finding, filling, and reducing](#chaining-gap-finding-filling-and-reducing)
 - [Reduce interesting tests](#reduce-interesting-tests)
 - [CLI reference](#cli-reference)
   - [Uncovered-lines CSV contract](#uncovered-lines-csv-contract)
@@ -84,6 +85,7 @@ To **fill** those gaps with fuzz tests, chain [gap filling](#gap-filling) after 
   - [Gap finding (baseline) in Docker](#gap-finding-baseline-in-docker)
   - [Gap finding (PR) in Docker](#gap-finding-pr-in-docker)
   - [Gap filling in Docker](#gap-filling-in-docker)
+  - [Gap reducing in Docker](#gap-reducing-in-docker)
   - [Run integration tests](#run-integration-tests)
   - [Run a container](#run-a-container)
 - [Tests](#tests)
@@ -233,13 +235,14 @@ Under `$OUTPUT_DIR`:
 ### What it does
 
 ```text
-candidate-test  →  incremental  →  reduce
-(fuzz corpus)      (gaps filled)   (minimal LIT tests)
+candidate-test  →  incremental
+(fuzz corpus)      (gaps filled)
 ```
 
 1. **`candidate-test`** — run a directory of fuzz-generated tests (`.ll` / `.bc`) through instrumented `llc` and collect coverage.
 2. **`incremental`** — report fuzz tests that fully cover lines in the gap list. A test qualifies only when the line appears in the uncovered-lines CSV passed to `incremental`.
-3. **`reduce`** — shrink promising tests (see [Reduce interesting tests](#reduce-interesting-tests)).
+
+Gap filling stops at `incremental/new_coverage.csv`. Run [gap reducing](#gap-reducing) next to shrink one promising row into a minimal testcase.
 
 The local AMDGPU script can run baseline inline (step 1/3) or reuse an existing gap list (`SKIP_BASELINE=1`). The [Docker gap-filling runner](#gap-filling-in-docker) always requires explicit profile CSV paths.
 
@@ -264,11 +267,52 @@ Under `$OUTPUT_DIR`:
 | Path | Contents |
 |------|----------|
 | `candidate_tests/raw_sancov/` | Per-test raw sancov shards |
-| `incremental/new_coverage.csv` | **Main result** — `test`, `file`, `line`, `covered-points` |
+| `incremental/new_coverage.csv` | **Main result** — `test_name`, `file`, `line`, `covered-points` |
 
 ---
 
-## Chaining gap finding and filling
+## Gap reducing
+
+**When to use this:** you have `new_coverage.csv` from gap filling and want to reduce **one row** into a minimal testcase (example / smoke run, not a full batch).
+
+**Reference script:** [`scripts/gap-reducing-amdgpu.sh`](scripts/gap-reducing-amdgpu.sh)
+
+### What it does
+
+```text
+new_coverage.csv + candidate_tests/  →  reduce (one row)
+                                       →  reduced/t-00001-*/
+```
+
+Wraps [`scripts/batch_reduce_using_coverage.py`](scripts/batch_reduce_using_coverage.py) with `--n 1`. Default pipeline: **`llvm_reduce_ir`** only (fast). Append creduce with `WITH_CREDUCE=1` or `--pipeline llvm_reduce_ir,creduce`.
+
+### Configure and run
+
+```bash
+# after gap-filling wrote ./data/my_run/incremental/new_coverage.csv
+./scripts/gap-reducing-amdgpu.sh --output-dir ./data/my_run
+
+# harness only (no llvm-reduce run)
+./scripts/gap-reducing-amdgpu.sh --output-dir ./data/my_run --prepare-only
+
+# second row, with creduce
+./scripts/gap-reducing-amdgpu.sh --output-dir ./data/my_run --row 2
+WITH_CREDUCE=1 ./scripts/gap-reducing-amdgpu.sh --output-dir ./data/my_run
+```
+
+Requires under `--output-dir`:
+
+| Path | Role |
+|------|------|
+| `incremental/new_coverage.csv` | Input CSV (from gap filling) |
+| `candidate_tests/` | Per-test dirs with `test.sh` (from gap filling) |
+| `reduced/` | **Output** — one case dir per invocation |
+
+For batch reduction of many rows, use [`scripts/batch_reduce_using_coverage.sh`](scripts/batch_reduce_using_coverage.sh) directly.
+
+---
+
+## Chaining gap finding, filling, and reducing
 
 Typical end-to-end flow:
 
@@ -310,11 +354,20 @@ The LLC map must come from the **same** baseline run (and LIT filters / Docker i
 
 **Image selection:** gap-finding and gap-filling Docker runners accept `--pr-id` (PR LLVM image), `--image` (local or custom tag), or default `fuzz-fill-test:latest`. PR gap finding additionally supports `--build-image` + `--llvm-repo` + `--pr-id`; local commits use `build-image.sh` then `--image fuzz-fill-test:latest --commit <rev>`.
 
+**Reduce one row** after gap filling (same `--output-dir`):
+
+```bash
+./scripts/docker/gap-reducing.sh --output-dir ./data/fill-100
+./scripts/docker/gap-reducing.sh --bind-repo --output-dir ./data/fill-100 --prepare-only
+```
+
+See [Gap reducing in Docker](#gap-reducing-in-docker).
+
 ---
 
 ## Reduce interesting tests
 
-Once you have `new_coverage.csv` from gap filling (or a specific uncovered line to target), use the **`reduce`** module to shrink a testcase while preserving coverage or crash behaviour.
+Once you have `new_coverage.csv` from gap filling, use [gap reducing](#gap-reducing) for a single-row example, or the **`reduce`** module directly for custom configs.
 
 Each row in `new_coverage.csv` maps a test file to a source location and SanitizerCoverage point ids (`covered-points`). Turn a row into a reduction job with a JSON config, `file` / `line`, and an interestingness script that checks the coverage address.
 
@@ -430,7 +483,7 @@ Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `IN
 
 The Docker image bundles an official LLVM release bootstrap, a dual-build SanitizerCoverage LLVM tree (instrumented `llc`/`opt` plus Release helpers), and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
 
-**Scripts** (under [`scripts/docker/`](scripts/docker/)): [`build-image.sh`](scripts/docker/build-image.sh), [`build-image-pr.sh`](scripts/docker/build-image-pr.sh), [`ensure-image.sh`](scripts/docker/ensure-image.sh), [`gap-finding-baseline.sh`](scripts/docker/gap-finding-baseline.sh), [`gap-finding-pr.sh`](scripts/docker/gap-finding-pr.sh), [`gap-filling.sh`](scripts/docker/gap-filling.sh), [`test-image.sh`](scripts/docker/test-image.sh), [`tmp-container.sh`](scripts/docker/tmp-container.sh)
+**Scripts** (under [`scripts/docker/`](scripts/docker/)): [`build-image.sh`](scripts/docker/build-image.sh), [`build-image-pr.sh`](scripts/docker/build-image-pr.sh), [`ensure-image.sh`](scripts/docker/ensure-image.sh), [`gap-finding-baseline.sh`](scripts/docker/gap-finding-baseline.sh), [`gap-finding-pr.sh`](scripts/docker/gap-finding-pr.sh), [`gap-filling.sh`](scripts/docker/gap-filling.sh), [`gap-reducing.sh`](scripts/docker/gap-reducing.sh), [`test-image.sh`](scripts/docker/test-image.sh), [`tmp-container.sh`](scripts/docker/tmp-container.sh)
 
 The image bakes a copy of fuzz-fill at `/work/fuzz-fill` when built. Pass **`--bind-repo`** on a docker runner to mount your local checkout over that path (venv stays at `/work/fuzz-fill-venv`) when you need code that is newer than the image.
 
@@ -613,6 +666,30 @@ PR gap list (use `target_lines_uncovered.csv` as the uncovered-lines CSV):
 | `-j <n>`, `--jobs <n>` | Parallel jobs |
 
 Main output: `<output-dir>/incremental/new_coverage.csv`.
+
+### Gap reducing in Docker
+
+[`scripts/docker/gap-reducing.sh`](scripts/docker/gap-reducing.sh) reduces **one row** from a prior gap-filling run. Mounts `--output-dir` at `/mounted-output/` (must already contain `incremental/new_coverage.csv` and `candidate_tests/`).
+
+```bash
+./scripts/docker/gap-reducing.sh --output-dir ./data/fill-100
+./scripts/docker/gap-reducing.sh --pr-id 203468 --output-dir ./data/fill-100 --row 1
+./scripts/docker/gap-reducing.sh --bind-repo --output-dir ./data/fill-100 --prepare-only
+```
+
+| Option | Meaning |
+|--------|---------|
+| `--output-dir <path>` | Gap-fill output directory (required) |
+| `--row <n>` | CSV row to reduce (default: 1) |
+| `--prepare-only` | Create harness under `reduced/` without running reduce |
+| `--pipeline <ids>` | Reduce pipeline (default: `llvm_reduce_ir`) |
+| `--with-creduce` | Append creduce to the pipeline |
+| `--image <ref>` / `--pr-id <n>` | Docker image (same as gap filling) |
+| `--bind-repo` | Mount local fuzz-fill checkout |
+
+Default pipeline is `llvm_reduce_ir` only (no creduce). The image includes `llvm-reduce` and `creduce` ([`Dockerfile`](Dockerfile)).
+
+Main output: `<output-dir>/reduced/t-00001-*/` (case harness; reduced artifacts under `reduced/` inside that dir when not using `--prepare-only`).
 
 ### Run integration tests
 
