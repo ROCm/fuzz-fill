@@ -11,7 +11,7 @@ See [here](#contributions) for a list of tests contributed to LLVM.
 
 ## Quick start (Docker)
 
-Try [Workflow 2](#workflow-2-uncovered-lines-in-a-commit), which reports lines added as part of a commit that the LLVM test suite does not cover.
+The following steps report lines added as part of a commit that the LLVM test suite does not cover.
 
 Prerequisites:
 - [Docker](https://docs.docker.com/)
@@ -22,7 +22,9 @@ git clone https://github.com/ROCm/fuzz-fill.git
 cd fuzz-fill
 ```
 
-**LLVM pull request** — requires [GitHub CLI](https://cli.github.com/) (`gh`). Builds a PR image and runs detection in one step (first build compiles LLVM in Docker and can take a while):
+**LLVM pull request** — requires [GitHub CLI](https://cli.github.com/) (`gh`) with read-only permissions. It builds a PR image and runs detection in one step (first build compiles LLVM in Docker and can take a while). It is not necessary to mount anything within Docker before running this step, the script takes care of everthing.
+
+The PR commits will be squashed onto the baseline commit associated with that PR, so that the resulting line numbers match those that appear in git.
 
 ```bash
 ./scripts/docker/pr-cov-gaps-detection.sh \
@@ -51,6 +53,8 @@ Use `spirv` instead of `amdgpu` for SPIR-V backend tests.
 Replace `HEAD` with a hash, branch, or `main~3` as needed.
 
 **Result (both paths):** `<output-dir>/commit_lines_report/target_lines_uncovered.csv` — added source lines that are not covered by the test suite. See [Workflow 2](#workflow-2-uncovered-lines-in-a-commit) and [Docker test image](#docker-test-image) for more options.
+
+This quick start guide maps to [Workflow 2](#workflow-2-uncovered-lines-in-a-commit).
 
 ## Table of Contents
 
