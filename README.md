@@ -210,10 +210,10 @@ Under `$OUTPUT_DIR`:
 | Path | Contents |
 |------|----------|
 | `added-lines/added-lines.csv` | Added lines from the commit (`path`, `line_no`, `text`) |
-| `test_suite/line_coverage_uncovered.csv` | Baseline uncovered lines — **required by `target-lines`** |
+| `baseline/line_coverage_uncovered.csv` | Baseline uncovered lines — **required by `target-lines`** |
 | `baseline/lit_failures.json` | Failed lit tests from the baseline run (llvm-lit `--report-failures-only` JSON: `name`, `code`, `output`, `elapsed`) |
 | `baseline/processed_sancov/` | Merged symcov (still produced for debugging; not read by `target-lines`) |
-| `target_lines_report/target_lines_uncovered.csv` | **Main result** — added lines where every suite point on that line is off |
+| `commit_lines_report/target_lines_uncovered.csv` | **Main result** — PR-added lines still uncovered (`file`, `line`, optional `text`; absolute paths matching the baseline CSVs) |
 
 ---
 
@@ -250,6 +250,27 @@ The workflows above call these modules. Use `--help` on any command for the full
 | `python -m coverage target-lines` | Uncovered target lines vs `line_coverage_uncovered.csv` (Workflow 2) |
 | `python -m added_lines` | Lines added by a git commit (Workflow 2) |
 | `python -m reduce` | Testcase reduction |
+
+### Uncovered-lines CSV contract
+
+`coverage incremental` and the Workflow 2 report both consume a baseline uncovered-lines CSV with columns **`file`** and **`line`**. Paths are **absolute** and must match those in `llc_address_line_map.csv` (as produced by `coverage baseline`).
+
+| File | Role |
+|------|------|
+| `line_coverage_uncovered.csv` | Full suite baseline gaps (Workflow 1) |
+| `target_lines_uncovered.csv` | PR-added lines that are still uncovered (Workflow 2); same `file`/`line` schema, optional `text` column |
+
+Workflow 2 input to `target-lines` remains `added-lines.csv` (`path`, `line_no`, `text` with git-relative paths). The **output** report uses the shared contract above.
+
+`coverage incremental` requires explicit CSV paths (not a baseline output directory):
+
+```bash
+python -m coverage incremental \
+  --output-dir data/incremental \
+  --line-coverage-uncovered-csv data/baseline/line_coverage_uncovered.csv \
+  --llc-address-line-map-csv data/baseline/llc_address_line_map.csv \
+  --candidate-tests-output-dir data/candidate_tests
+```
 
 ### `coverage baseline` filters
 
@@ -329,7 +350,9 @@ Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `IN
 
 The Docker image bundles an official LLVM release bootstrap, a dual-build SanitizerCoverage LLVM tree (instrumented `llc`/`opt` plus Release helpers), and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
 
-**Scripts** (under [`scripts/docker/`](scripts/docker/)): [`build-image.sh`](scripts/docker/build-image.sh), [`build-image-pr.sh`](scripts/docker/build-image-pr.sh), [`baseline-coverage-gap-fill.sh`](scripts/docker/baseline-coverage-gap-fill.sh), [`pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh), [`test-image.sh`](scripts/docker/test-image.sh), [`tmp-container.sh`](scripts/docker/tmp-container.sh)
+**Scripts** (under [`scripts/docker/`](scripts/docker/)): [`build-image.sh`](scripts/docker/build-image.sh), [`build-image-pr.sh`](scripts/docker/build-image-pr.sh), [`ensure-image.sh`](scripts/docker/ensure-image.sh), [`baseline-coverage-gap-fill.sh`](scripts/docker/baseline-coverage-gap-fill.sh), [`pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh), [`test-image.sh`](scripts/docker/test-image.sh), [`tmp-container.sh`](scripts/docker/tmp-container.sh)
+
+The image bakes a copy of fuzz-fill at `/work/fuzz-fill` when built. Pass **`--bind-repo`** on a docker runner to mount your local checkout over that path (venv stays at `/work/fuzz-fill-venv`) when you need code that is newer than the image.
 
 ### Build
 
@@ -375,6 +398,31 @@ Examples:
 
 For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov-gaps-detection.sh --build-image`](#workflow-2-pr-coverage-gap-detection) instead.
 
+### PR image build and reuse
+
+Both docker runners ([`baseline-coverage-gap-fill.sh`](#workflow-1-baseline-coverage-gap-fill), [`pr-cov-gaps-detection.sh`](#workflow-2-pr-coverage-gap-detection)) share [`ensure-image.sh`](scripts/docker/ensure-image.sh) for PR images tagged `fuzz-fill-test:llvm-pr-<n>`:
+
+| Flag | Meaning |
+|------|---------|
+| `--build-image` | Build via `build-image-pr.sh` when the tag is missing |
+| `--force-build` | Rebuild even when the tag already exists |
+| `--keep-image` | Do not remove the image after a `--build-image` run (default: remove) |
+| `--pr-id <n>` | Select `fuzz-fill-test:llvm-pr-<n>` |
+| `--llvm-repo <path>` | Required with `--build-image` |
+| `--backend-tests amdgpu\|spirv` | Required with `--build-image` |
+
+Build once, then reuse on later runs (omit `--build-image`):
+
+```bash
+./scripts/docker/pr-cov-gaps-detection.sh \
+  --build-image --keep-image \
+  --llvm-repo /path/llvm-project --pr-id 203468 \
+  --backend-tests amdgpu --output-dir ./data/pr-cov-gaps-203468 -j "$(nproc)"
+
+./scripts/docker/pr-cov-gaps-detection.sh \
+  --pr-id 203468 --output-dir ./data/pr-cov-gaps-203468
+```
+
 ### Workflow 1: Baseline coverage gap fill
 
 [`scripts/docker/baseline-coverage-gap-fill.sh`](scripts/docker/baseline-coverage-gap-fill.sh) runs Workflow 1 in Docker (baseline → `candidate-test` → `incremental`). Candidate tests are **not** baked into the image: at run time the script stages only the first `--n` `.ll`/`.bc` files from `--candidate-tests-dir` on the host and bind-mounts them read-only into the container.
@@ -398,22 +446,47 @@ For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov
   -j "$(nproc)"
 ```
 
+**Reuse a coverage profile** (skip in-container baseline; same CSV flags as `coverage incremental`):
+
+```bash
+# Workflow 1 baseline from a prior run
+./scripts/docker/baseline-coverage-gap-fill.sh \
+  --output-dir ./data/wf1-100 \
+  --line-coverage-uncovered-csv ./data/wf1-baseline/baseline/line_coverage_uncovered.csv \
+  --llc-address-line-map-csv ./data/wf1-baseline/baseline/llc_address_line_map.csv \
+  --candidate-tests-dir /path/to/irtests/bitcode/amdgpu/all -n 100 -j "$(nproc)"
+
+# Workflow 2 PR gaps — fill uncovered added lines from target_lines_uncovered.csv
+./scripts/docker/baseline-coverage-gap-fill.sh \
+  --pr-id 203468 \
+  --output-dir ./data/wf1-pr-100 \
+  --line-coverage-uncovered-csv ./data/pr-cov-gaps-203468/commit_lines_report/target_lines_uncovered.csv \
+  --llc-address-line-map-csv ./data/pr-cov-gaps-203468/baseline/llc_address_line_map.csv \
+  --candidate-tests-dir /path/to/irtests/bitcode/amdgpu/all -n 100 -j "$(nproc)"
+```
+
+The LLC map must come from the **same** baseline run (and LIT filters / image) as the uncovered-lines CSV.
+
 | Option | Meaning |
 |--------|---------|
 | `--output-dir <path>` | Host output directory (required) |
 | `--baseline-only` | Run only `coverage baseline` |
 | `--candidate-tests-dir <path>` | Host corpus root (required for full pipeline) |
 | `-n <N>`, `--n <N>` | Stage and run only the first N candidate tests (required for full pipeline) |
+| `--line-coverage-uncovered-csv <path>` | External uncovered-lines CSV (with `--llc-address-line-map-csv`; skips baseline) |
+| `--llc-address-line-map-csv <path>` | External LLC address map CSV (with `--line-coverage-uncovered-csv`; skips baseline) |
 | `--image <ref>` | Docker image (default: `fuzz-fill-test:latest`) |
-| `--bind-repo` | Mount the local fuzz-fill checkout over `/work/fuzz-fill` (venv stays at `/work/fuzz-fill-venv`) |
+| `--pr-id <n>` | PR image `fuzz-fill-test:llvm-pr-<n>` |
+| `--build-image` | Build PR image when missing (see [PR image build and reuse](#pr-image-build-and-reuse)) |
+| `--bind-repo` | Mount the local fuzz-fill checkout over `/work/fuzz-fill` |
 | `--lit-filter <prefix>` | LIT filter override (default: from image `/work/.sancov-allowlist`) |
-| `-j <n>`, `--jobs <n>` | Parallel jobs for llvm-lit and candidate-test |
+| `-j <n>`, `--jobs <n>` | Parallel jobs for llvm-lit, candidate-test, and ninja (when building) |
 
 Main output for the full pipeline: `<output-dir>/incremental/new_coverage.csv`. See [Workflow 1](#workflow-1-fill-suite-coverage-gaps-with-fuzz-generated-tests) for report semantics.
 
 ### Workflow 2: PR coverage gap detection
 
-[`scripts/docker/pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image and run detection in one step. For AMDGPU images, the baseline defaults to the twelve LIT prefixes in [`scripts/lit-filters-amdgpu.sh`](scripts/lit-filters-amdgpu.sh) (same as [`scripts/test_coverage_amdgpu_workflow1.sh`](scripts/test_coverage_amdgpu_workflow1.sh)); SPIRV defaults to `CodeGen/SPIRV`. Override with one or more `--lit-filter` directory prefixes.
+[`scripts/docker/pr-cov-gaps-detection.sh`](scripts/docker/pr-cov-gaps-detection.sh) runs Workflow 2 in Docker (baseline → `added_lines` → `target-lines`). Use `--build-image` to build the PR image when it is missing; add `--keep-image` to retain it for later runs (see [PR image build and reuse](#pr-image-build-and-reuse)). For AMDGPU images, the baseline defaults to the twelve LIT prefixes in [`scripts/lit-filters-amdgpu.sh`](scripts/lit-filters-amdgpu.sh) (same as [`scripts/test_coverage_amdgpu_workflow1.sh`](scripts/test_coverage_amdgpu_workflow1.sh)); SPIRV defaults to `CodeGen/SPIRV`. Override with one or more `--lit-filter` directory prefixes.
 
 ```bash
 ./scripts/docker/pr-cov-gaps-detection.sh \
@@ -427,7 +500,9 @@ Main output for the full pipeline: `<output-dir>/incremental/new_coverage.csv`. 
 
 | Option | Meaning |
 |--------|---------|
-| `--build-image` | Build PR image first via `scripts/docker/build-image-pr.sh` |
+| `--build-image` | Build PR image when missing (via `build-image-pr.sh`) |
+| `--force-build` | Rebuild PR image even when the tag exists |
+| `--keep-image` | Keep PR image after run (default: remove when `--build-image`) |
 | `--llvm-repo <path>` | Required with `--build-image` |
 | `--backend-tests amdgpu\|spirv` | Required with `--build-image` |
 | `--pr-id <n>` | PR number (image tag `llvm-pr-<n>`) |
@@ -436,7 +511,7 @@ Main output for the full pipeline: `<output-dir>/incremental/new_coverage.csv`. 
 | `--lit-filter <dir>` | LIT directory prefix; repeat for multiple (default: [`scripts/lit-filters-amdgpu.sh`](scripts/lit-filters-amdgpu.sh) for AMDGPU, `CodeGen/SPIRV` for SPIRV) |
 | `--github-repo <owner/repo>` | Optional; default `llvm/llvm-project` when building |
 
-If the image `fuzz-fill-test:llvm-pr-<n>` already exists, omit `--build-image` to run detection only.
+If `fuzz-fill-test:llvm-pr-<n>` already exists, omit `--build-image` to run detection only.
 
 Main output: `<output-dir>/commit_lines_report/target_lines_uncovered.csv`. See [Workflow 2](#workflow-2-uncovered-lines-in-a-commit) for report semantics.
 
