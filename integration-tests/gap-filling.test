@@ -1,0 +1,41 @@
+# COM: Gap filling: candidate-test -> incremental using explicit profile CSVs
+# COM: (mirrors Docker gap-filling.sh). Scenario A uses baseline gap list; scenario B
+# COM: uses target_lines_uncovered.csv from target-lines as the PR gap list.
+
+# RUN: rm -rf %t && mkdir -p %t/profile %t/candidate_tests %t/incremental %t/pr_gaps %t/candidate_tests_pr %t/incremental_pr
+# RUN: %coverage baseline --output-dir %t/profile --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter CodeGen/AMDGPU/loop -j2
+
+# COM: Scenario A — baseline gap fill
+# RUN: %coverage candidate-test --output-dir %t/candidate_tests --llc %sancov-llc --candidate-tests-dir %S/fixtures/coverage-new-tests --n 1
+# RUN: %coverage incremental --output-dir %t/incremental --sancov %sancov --line-coverage-uncovered-csv %t/profile/line_coverage_uncovered.csv --llc-address-line-map-csv %t/profile/llc_address_line_map.csv --candidate-tests-output-dir %t/candidate_tests
+
+# RUN: test -f %t/incremental/new_coverage.csv
+# RUN: %FileCheck %s --input-file=%t/incremental/new_coverage.csv --check-prefix=GAP_CSV
+# GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUAsmPrinter.cpp,211,
+# GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUAsmPrinter.cpp,222,
+# GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUAsmPrinter.cpp,581,
+# GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUHSAMetadataStreamer.cpp,590,
+# GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUHSAMetadataStreamer.cpp,680,
+
+# RUN: %FileCheck %s --input-file=%t/incremental/new_coverage.csv --check-prefix=NO_BASELINE_GAIN
+# NO_BASELINE_GAIN-NOT: /AMDGPUAlwaysInlinePass.cpp,160,
+
+# COM: Scenario B — PR gap fill (target_lines_uncovered.csv as gap list)
+# RUN: %coverage target-lines --output-dir %t/pr_gaps --line-coverage-uncovered-csv %t/profile/line_coverage_uncovered.csv --llvm-repo %llvm-repo --target-lines-csv %S/fixtures/target-lines-sample.csv
+# RUN: test -f %t/pr_gaps/target_lines_uncovered.csv
+# RUN: %FileCheck %s --input-file=%t/pr_gaps/target_lines_uncovered.csv --check-prefix=PR_TARGET_CSV
+# PR_TARGET_CSV-DAG: file,line,text
+
+# RUN: %coverage candidate-test --output-dir %t/candidate_tests_pr --llc %sancov-llc --candidate-tests-dir %S/fixtures/coverage-new-tests --n 1
+# RUN: %coverage incremental --output-dir %t/incremental_pr --sancov %sancov --line-coverage-uncovered-csv %t/pr_gaps/target_lines_uncovered.csv --llc-address-line-map-csv %t/profile/llc_address_line_map.csv --candidate-tests-output-dir %t/candidate_tests_pr
+
+# RUN: test -f %t/incremental_pr/new_coverage.csv
+# RUN: %FileCheck %s --input-file=%t/incremental_pr/new_coverage.csv --check-prefix=PR_GAP_CSV
+# PR_GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUAsmPrinter.cpp,211,
+# PR_GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUAsmPrinter.cpp,222,
+# PR_GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUAsmPrinter.cpp,581,
+# PR_GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUHSAMetadataStreamer.cpp,590,
+# PR_GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUHSAMetadataStreamer.cpp,680,
+
+# RUN: %FileCheck %s --input-file=%t/incremental_pr/new_coverage.csv --check-prefix=PR_GAP_CSV_NOT
+# PR_GAP_CSV_NOT-NOT: /AMDGPUAliasAnalysis.cpp,103,
