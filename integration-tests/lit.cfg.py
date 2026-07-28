@@ -83,8 +83,12 @@ def _tool(bin_dir: str, name: str) -> str:
 
 
 _llvm_build_dir = os.path.dirname(_llvm_bin_dir)
+_repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _venv_cmd = f". {shlex.quote(_venv_activate)}"
 _venv_python = shlex.quote(os.path.join(_venv_dir, "bin", "python"))
+_batch_reduce = shlex.quote(
+    os.path.join(_repo_root, "scripts", "batch_reduce_using_coverage.py")
+)
 
 config.name = "fuzz-fill-integration-tests"
 config.suffixes = [".test"]
@@ -103,6 +107,7 @@ config.substitutions.extend(
         ("%venv", _venv_cmd),
         ("%coverage", f"{_venv_python} -m coverage"),
         ("%reduce", f"{_venv_python} -m reduce"),
+        ("%batch-reduce", f"{_venv_python} {_batch_reduce}"),
         ("%added-lines", f"{_venv_cmd} && python -m added_lines"),
     ]
 )
