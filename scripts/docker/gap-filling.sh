@@ -1,0 +1,367 @@
+#!/usr/bin/env bash
+# Gap filling: candidate-test -> incremental inside a one-shot Docker container.
+#
+# Requires a gap list from gap finding (baseline or PR), passed as explicit CSV
+# paths (same flags as ``coverage incremental``). Candidate tests are staged on
+# the host at run time (first N .ll/.bc files only) and bind-mounted read-only
+# at /mounted-candidate-tests — nothing is baked into the image.
+#
+# Pass --bind-repo to run the local fuzz-fill checkout instead of the copy baked
+# into the image at build time.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/docker/ensure-image.sh
+source "${SCRIPT_DIR}/ensure-image.sh"
+CONTAINER_WORKDIR="/work/fuzz-fill"
+
+image_name="${IMAGE_NAME:-fuzz-fill-test}"
+image_tag="${IMAGE_TAG:-latest}"
+image_ref=""
+pr_id=""
+output_dir=""
+llc_address_line_map_csv=""
+line_coverage_uncovered_csv=""
+jobs=""
+bind_repo=0
+candidate_tests_dir=""
+candidate_n=""
+build_image=0
+keep_image=0
+force_build=0
+llvm_repo=""
+backend_tests=""
+github_repo=""
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") --output-dir <path> [options]
+
+Run candidate-test and incremental in a temporary container.
+Artifacts are written under --output-dir (mounted at /mounted-output/).
+
+Required:
+  --output-dir <path>           Host output directory (created if missing)
+  --line-coverage-uncovered-csv <path>
+                                Uncovered-lines CSV (``file``, ``line`` columns)
+  --llc-address-line-map-csv <path>
+                                LLC address-to-line map CSV from the same baseline run
+  --candidate-tests-dir <path>  Host corpus root
+  -n <N>, --n <N>               Stage and run only the first N candidate tests
+
+Image (one of):
+  --image <ref>                 Docker image ref (default: \${IMAGE_NAME:-fuzz-fill-test}:\${IMAGE_TAG:-latest})
+  --pr-id <n>                   Use \${IMAGE_NAME:-fuzz-fill-test}:llvm-pr-<n>
+
+Image build (optional; reuses existing image when omitted):
+  --build-image                 Build PR image via build-image-pr.sh when missing
+  --force-build                 Rebuild PR image even when the tag already exists
+  --keep-image                  Keep PR image after run (default: remove when --build-image)
+  --llvm-repo <path>            Local llvm-project clone (required with --build-image)
+  --backend-tests <target>      amdgpu or spirv (required with --build-image)
+  --github-repo <owner/repo>    GitHub repo hosting the PR (default: llvm/llvm-project)
+  --image-name <name>           Image name when using --pr-id (default: fuzz-fill-test)
+
+Options:
+  --bind-repo                   Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
+  -j <n>, --jobs <n>            Parallel jobs for candidate-test and ninja (build)
+  --help, -h                    Show this help
+
+Examples:
+  $(basename "$0") --output-dir ./data/fill-100 \\
+      --line-coverage-uncovered-csv ./data/baseline-run/baseline/line_coverage_uncovered.csv \\
+      --llc-address-line-map-csv ./data/baseline-run/baseline/llc_address_line_map.csv \\
+      --candidate-tests-dir /path/to/irtests/bitcode/amdgpu/all -n 100 -j "\$(nproc)"
+  $(basename "$0") --pr-id 203468 --output-dir ./data/pr-fill-100 \\
+      --line-coverage-uncovered-csv ./data/gap-finding-pr-203468/commit_lines_report/target_lines_uncovered.csv \\
+      --llc-address-line-map-csv ./data/gap-finding-pr-203468/baseline/llc_address_line_map.csv \\
+      --candidate-tests-dir /path/to/irtests/bitcode/amdgpu/all -n 100 -j "\$(nproc)"
+EOF
+}
+
+validate_jobs() {
+    if [[ -n "$jobs" ]] && { [[ ! "$jobs" =~ ^[0-9]+$ ]] || [[ "$jobs" -eq 0 ]]; }; then
+        echo "error: -j/--jobs must be a positive integer: ${jobs}" >&2
+        exit 1
+    fi
+}
+
+validate_candidate_n() {
+    if [[ ! "$candidate_n" =~ ^[0-9]+$ ]] || [[ "$candidate_n" -eq 0 ]]; then
+        echo "error: -n/--n must be a positive integer: ${candidate_n}" >&2
+        exit 1
+    fi
+}
+
+validate_profile_csv() {
+    local flag_name="$1"
+    local path="$2"
+    if [[ ! -f "$path" ]]; then
+        echo "error: ${flag_name} not found: ${path}" >&2
+        exit 1
+    fi
+}
+
+resolve_profile_csv_paths() {
+    if [[ -z "$line_coverage_uncovered_csv" ]]; then
+        echo "error: --line-coverage-uncovered-csv is required" >&2
+        exit 1
+    fi
+    if [[ -z "$llc_address_line_map_csv" ]]; then
+        echo "error: --llc-address-line-map-csv is required" >&2
+        exit 1
+    fi
+    validate_profile_csv "--line-coverage-uncovered-csv" "$line_coverage_uncovered_csv"
+    validate_profile_csv "--llc-address-line-map-csv" "$llc_address_line_map_csv"
+    line_coverage_uncovered_csv="$(realpath "$line_coverage_uncovered_csv")"
+    llc_address_line_map_csv="$(realpath "$llc_address_line_map_csv")"
+}
+
+# Enumerate .ll/.bc under src (recursive), sorted — matches TestRunner.collect_llc_input_files().
+collect_candidate_inputs() {
+    local src="$1"
+    find "$src" -type f \( -name '*.ll' -o -name '*.bc' \) | LC_ALL=C sort
+}
+
+# Copy the first n candidate inputs into staging_dir, preserving relative paths.
+stage_candidate_tests() {
+    local src="$1"
+    local n="$2"
+    local staging_dir="$3"
+    local src_real count rel dest_parent
+
+    src_real="$(realpath "$src")"
+    mapfile -t candidate_files < <(collect_candidate_inputs "$src_real")
+
+    if [[ "${#candidate_files[@]}" -eq 0 ]]; then
+        echo "error: no .ll or .bc files under --candidate-tests-dir: ${src_real}" >&2
+        exit 1
+    fi
+
+    count="$n"
+    if [[ "${#candidate_files[@]}" -lt "$count" ]]; then
+        count="${#candidate_files[@]}"
+        echo "note: corpus has ${#candidate_files[@]} file(s); staging all of them (requested ${n})"
+    fi
+
+    local i
+    for (( i = 0; i < count; i++ )); do
+        rel="${candidate_files[$i]#"${src_real}/"}"
+        dest_parent="${staging_dir}/$(dirname "$rel")"
+        mkdir -p "$dest_parent"
+        cp -- "${candidate_files[$i]}" "${staging_dir}/${rel}"
+    done
+
+    echo "Staged ${count} candidate test file(s) under ${staging_dir}"
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --image)
+            [[ $# -ge 2 ]] || { echo "error: --image requires a value" >&2; exit 2; }
+            image_ref="$2"
+            shift 2
+            ;;
+        --pr-id)
+            [[ $# -ge 2 ]] || { echo "error: --pr-id requires a value" >&2; exit 2; }
+            pr_id="$2"
+            shift 2
+            ;;
+        --output-dir)
+            [[ $# -ge 2 ]] || { echo "error: --output-dir requires a value" >&2; exit 2; }
+            output_dir="$2"
+            shift 2
+            ;;
+        --line-coverage-uncovered-csv)
+            [[ $# -ge 2 ]] || { echo "error: --line-coverage-uncovered-csv requires a value" >&2; exit 2; }
+            line_coverage_uncovered_csv="$2"
+            shift 2
+            ;;
+        --llc-address-line-map-csv)
+            [[ $# -ge 2 ]] || { echo "error: --llc-address-line-map-csv requires a value" >&2; exit 2; }
+            llc_address_line_map_csv="$2"
+            shift 2
+            ;;
+        --bind-repo)
+            bind_repo=1
+            shift
+            ;;
+        --build-image)
+            build_image=1
+            shift
+            ;;
+        --keep-image)
+            keep_image=1
+            shift
+            ;;
+        --force-build)
+            force_build=1
+            shift
+            ;;
+        --llvm-repo)
+            [[ $# -ge 2 ]] || { echo "error: --llvm-repo requires a value" >&2; exit 2; }
+            llvm_repo="$2"
+            shift 2
+            ;;
+        --backend-tests)
+            [[ $# -ge 2 ]] || { echo "error: --backend-tests requires a value" >&2; exit 2; }
+            backend_tests="$2"
+            shift 2
+            ;;
+        --github-repo)
+            [[ $# -ge 2 ]] || { echo "error: --github-repo requires a value" >&2; exit 2; }
+            github_repo="$2"
+            shift 2
+            ;;
+        --image-name)
+            [[ $# -ge 2 ]] || { echo "error: --image-name requires a value" >&2; exit 2; }
+            image_name="$2"
+            shift 2
+            ;;
+        --candidate-tests-dir)
+            [[ $# -ge 2 ]] || { echo "error: --candidate-tests-dir requires a value" >&2; exit 2; }
+            candidate_tests_dir="$2"
+            shift 2
+            ;;
+        -n|--n)
+            [[ $# -ge 2 ]] || { echo "error: $1 requires a value" >&2; exit 2; }
+            candidate_n="$2"
+            shift 2
+            ;;
+        -j|--jobs)
+            [[ $# -ge 2 ]] || { echo "error: $1 requires a value" >&2; exit 2; }
+            jobs="$2"
+            shift 2
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            echo "error: unknown option: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+        *)
+            echo "error: unexpected argument: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [[ $# -gt 0 ]]; then
+    echo "error: unexpected argument: $1" >&2
+    usage >&2
+    exit 2
+fi
+
+if [[ -z "$output_dir" ]]; then
+    echo "error: --output-dir is required" >&2
+    usage >&2
+    exit 1
+fi
+
+if [[ -z "$candidate_tests_dir" || -z "$candidate_n" ]]; then
+    echo "error: --candidate-tests-dir and -n are required" >&2
+    usage >&2
+    exit 1
+fi
+
+validate_candidate_n
+if [[ ! -d "$candidate_tests_dir" ]]; then
+    echo "error: --candidate-tests-dir is not a directory: ${candidate_tests_dir}" >&2
+    exit 1
+fi
+
+resolve_profile_csv_paths
+validate_jobs
+
+docker_image_validate_build_flags
+docker_image_normalize_backend_tests
+docker_image_validate_pr_id
+docker_image_resolve_ref
+
+DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --backend-tests"
+docker_image_ensure
+
+container_uncovered_csv="/mounted-profile/line_coverage_uncovered.csv"
+container_llc_map_csv="/mounted-profile/llc_address_line_map.csv"
+profile_mount=(
+    -v "${line_coverage_uncovered_csv}:${container_uncovered_csv}:ro"
+    -v "${llc_address_line_map_csv}:${container_llc_map_csv}:ro"
+)
+
+echo "Using coverage profile:"
+echo "  uncovered lines: ${line_coverage_uncovered_csv}"
+echo "  address map:     ${llc_address_line_map_csv}"
+
+mkdir -p "$output_dir"
+output_dir="$(realpath "$output_dir")"
+
+candidate_staging_dir="$(mktemp -d -t fuzz-fill-candidate-tests.XXXXXX)"
+cleanup_staging() {
+    rm -rf "${candidate_staging_dir}"
+}
+trap cleanup_staging EXIT
+stage_candidate_tests "$candidate_tests_dir" "$candidate_n" "$candidate_staging_dir"
+candidate_mount=(-v "${candidate_staging_dir}:/mounted-candidate-tests:ro")
+
+rm -rf "${output_dir}/candidate_tests" "${output_dir}/incremental"
+
+docker_env=(
+    -e "CANDIDATE_N=${candidate_n}"
+    -e "UNCOVERED_CSV=${container_uncovered_csv}"
+    -e "LLC_MAP_CSV=${container_llc_map_csv}"
+)
+if [[ -n "$jobs" ]]; then
+    docker_env+=(-e "JOBS=${jobs}")
+fi
+
+repo_mount=()
+if [[ "${bind_repo}" -eq 1 ]]; then
+    repo_mount=(-v "${REPO_ROOT}:${CONTAINER_WORKDIR}")
+    echo "Using local fuzz-fill checkout: ${REPO_ROOT}"
+fi
+
+docker run --rm \
+    -v "${output_dir}:/mounted-output" \
+    "${profile_mount[@]}" \
+    "${candidate_mount[@]}" \
+    "${repo_mount[@]}" \
+    "${docker_env[@]}" \
+    -w "${CONTAINER_WORKDIR}" \
+    "${image_ref}" \
+    bash -lc '
+set -euo pipefail
+
+candidate_args=(
+    python -m coverage candidate-test
+    --output-dir /mounted-output/candidate_tests
+    --candidate-tests-dir /mounted-candidate-tests
+    --n "${CANDIDATE_N}"
+)
+if [[ -n "${JOBS:-}" ]]; then
+    candidate_args+=(-j "${JOBS}")
+fi
+
+echo "=== coverage candidate-test (n=${CANDIDATE_N}) ==="
+"${candidate_args[@]}"
+
+echo "=== coverage incremental ==="
+python -m coverage incremental \
+    --output-dir /mounted-output/incremental \
+    --line-coverage-uncovered-csv "${UNCOVERED_CSV}" \
+    --llc-address-line-map-csv "${LLC_MAP_CSV}" \
+    --candidate-tests-output-dir /mounted-output/candidate_tests
+'
+
+echo "Image: ${image_ref}"
+report="${output_dir}/incremental/new_coverage.csv"
+echo "Wrote ${report}"
