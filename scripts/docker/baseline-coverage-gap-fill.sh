@@ -14,6 +14,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/docker/ensure-image.sh
+source "${SCRIPT_DIR}/ensure-image.sh"
 CONTAINER_WORKDIR="/work/fuzz-fill"
 
 image_name="${IMAGE_NAME:-fuzz-fill-test}"
@@ -31,6 +33,7 @@ candidate_tests_dir=""
 candidate_n=""
 build_image=0
 keep_image=0
+force_build=0
 llvm_repo=""
 backend_tests=""
 github_repo=""
@@ -67,7 +70,8 @@ Image (one of):
   --pr-id <n>                   Use \${IMAGE_NAME:-fuzz-fill-test}:llvm-pr-<n>
 
 Image build (optional; reuses existing image when omitted):
-  --build-image                 Build PR image via build-image-pr.sh before running
+  --build-image                 Build PR image via build-image-pr.sh when missing
+  --force-build                 Rebuild PR image even when the tag already exists
   --keep-image                  Keep PR image after run (default: remove when --build-image)
   --llvm-repo <path>            Local llvm-project clone (required with --build-image)
   --backend-tests <target>      amdgpu or spirv (required with --build-image)
@@ -119,28 +123,6 @@ validate_candidate_n() {
         echo "error: -n/--n must be a positive integer: ${candidate_n}" >&2
         exit 1
     fi
-}
-
-cleanup_built_image() {
-    if [[ "${build_image:-0}" -eq 1 && "${keep_image:-0}" -eq 0 && -n "${image_ref:-}" ]]; then
-        if docker image inspect "${image_ref}" >/dev/null 2>&1; then
-            echo "Removing Docker image ${image_ref}"
-            docker rmi "${image_ref}"
-        fi
-    fi
-}
-
-read_image_allowlist() {
-    local allowlist
-    if ! allowlist="$(docker run --rm --entrypoint cat "${image_ref}" /work/.sancov-allowlist 2>/dev/null | tr -d '[:space:]')"; then
-        echo "error: failed to read /work/.sancov-allowlist from image: ${image_ref}" >&2
-        exit 1
-    fi
-    if [[ -z "$allowlist" ]]; then
-        echo "error: /work/.sancov-allowlist is empty in image: ${image_ref}" >&2
-        exit 1
-    fi
-    printf '%s' "$allowlist"
 }
 
 validate_profile_csv() {
@@ -255,6 +237,10 @@ while [[ $# -gt 0 ]]; do
             keep_image=1
             shift
             ;;
+        --force-build)
+            force_build=1
+            shift
+            ;;
         --llvm-repo)
             [[ $# -ge 2 ]] || { echo "error: --llvm-repo requires a value" >&2; exit 2; }
             llvm_repo="$2"
@@ -323,54 +309,10 @@ if [[ -z "$output_dir" ]]; then
     exit 1
 fi
 
-if [[ -n "$image_ref" && -n "$pr_id" ]]; then
-    echo "error: pass only one of --image or --pr-id" >&2
-    exit 1
-fi
-
-if [[ -n "$image_ref" && "$build_image" -eq 1 ]]; then
-    echo "error: --build-image cannot be used with --image" >&2
-    exit 1
-fi
-
-if [[ "$build_image" -eq 0 ]]; then
-    if [[ -n "$llvm_repo" || -n "$backend_tests" || -n "$github_repo" || "$keep_image" -eq 1 ]]; then
-        echo "error: --llvm-repo, --backend-tests, --github-repo, and --keep-image require --build-image" >&2
-        exit 1
-    fi
-else
-    if [[ -z "$llvm_repo" ]]; then
-        echo "error: --llvm-repo is required with --build-image" >&2
-        exit 1
-    fi
-    if [[ -z "$pr_id" ]]; then
-        echo "error: --pr-id is required with --build-image" >&2
-        exit 1
-    fi
-    if [[ -z "$backend_tests" ]]; then
-        echo "error: --backend-tests is required with --build-image" >&2
-        exit 1
-    fi
-fi
-
-if [[ -n "$backend_tests" ]]; then
-    backend_tests="$(printf '%s' "$backend_tests" | tr '[:upper:]' '[:lower:]')"
-    case "$backend_tests" in
-        amdgpu|spirv) ;;
-        *)
-            echo "error: --backend-tests must be amdgpu or spirv: ${backend_tests}" >&2
-            exit 1
-            ;;
-    esac
-fi
-
-if [[ -n "$pr_id" ]]; then
-    if [[ ! "$pr_id" =~ ^[0-9]+$ ]] || [[ "$pr_id" -eq 0 ]]; then
-        echo "error: --pr-id must be a positive integer: ${pr_id}" >&2
-        exit 1
-    fi
-    image_ref="${image_name}:llvm-pr-${pr_id}"
-fi
+docker_image_validate_build_flags
+docker_image_normalize_backend_tests
+docker_image_validate_pr_id
+docker_image_resolve_ref
 
 if [[ "$baseline_only" -eq 1 ]]; then
     if [[ -n "$candidate_tests_dir" || -n "$candidate_n" ]]; then
@@ -397,38 +339,8 @@ fi
 
 validate_jobs
 
-if [[ -z "$image_ref" ]]; then
-    image_ref="${image_name}:${image_tag}"
-fi
-
-if [[ "$build_image" -eq 1 && "$keep_image" -eq 0 ]]; then
-    trap cleanup_built_image EXIT
-fi
-
-if [[ "$build_image" -eq 1 ]]; then
-    build_args=(
-        --llvm-repo "$llvm_repo"
-        --pr-id "$pr_id"
-        --allowlist "$backend_tests"
-    )
-    if [[ -n "$github_repo" ]]; then
-        build_args+=(--github-repo "$github_repo")
-    fi
-    if [[ -n "$jobs" ]]; then
-        build_args+=(-j "$jobs")
-    fi
-
-    echo "=== build PR image ==="
-    "${SCRIPT_DIR}/build-image-pr.sh" "${build_args[@]}"
-fi
-
-if ! docker image inspect "${image_ref}" >/dev/null 2>&1; then
-    echo "error: image not found: ${image_ref}" >&2
-    if [[ "$build_image" -eq 0 ]]; then
-        echo "hint: build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --backend-tests" >&2
-    fi
-    exit 1
-fi
+DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --backend-tests"
+docker_image_ensure
 
 skip_baseline=0
 profile_mount=()
@@ -453,7 +365,7 @@ elif [[ "$baseline_only" -eq 0 ]]; then
 fi
 
 if [[ -z "$lit_filter" && "$skip_baseline" -eq 0 ]]; then
-    image_allowlist="$(read_image_allowlist)"
+    image_allowlist="$(docker_image_read_allowlist)"
     lit_filter="$(lit_filter_for_allowlist "$image_allowlist")"
     echo "Image allowlist: ${image_allowlist} -> lit-filter: ${lit_filter}"
 fi
