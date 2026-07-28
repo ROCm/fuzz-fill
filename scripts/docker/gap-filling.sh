@@ -2,9 +2,10 @@
 # Gap filling: candidate-test -> incremental inside a one-shot Docker container.
 #
 # Requires a gap list from gap finding (baseline or PR), passed as explicit CSV
-# paths (same flags as ``coverage incremental``). Candidate tests are staged on
-# the host at run time (first N .ll/.bc files only) and bind-mounted read-only
-# at /mounted-candidate-tests — nothing is baked into the image.
+# paths (same flags as ``coverage incremental``). By default the host corpus is
+# bind-mounted read-only at /mounted-candidate-tests (no copy); -n limits work
+# inside candidate-test. Pass --stage-candidate-tests to copy the first N inputs
+# into a temp dir before mounting. Nothing is baked into the image.
 #
 # Pass --bind-repo to run the local fuzz-fill checkout instead of the copy baked
 # into the image at build time.
@@ -26,6 +27,7 @@ llc_address_line_map_csv=""
 line_coverage_uncovered_csv=""
 jobs=""
 bind_repo=0
+stage_candidate_tests=0
 candidate_tests_dir=""
 candidate_n=""
 build_image=0
@@ -48,8 +50,8 @@ Required:
                                 Uncovered-lines CSV (``file``, ``line`` columns)
   --llc-address-line-map-csv <path>
                                 LLC address-to-line map CSV from the same baseline run
-  --candidate-tests-dir <path>  Host corpus root
-  -n <N>, --n <N>               Stage and run only the first N candidate tests
+  --candidate-tests-dir <path>  Host corpus root (bind-mounted read-only by default)
+  -n <N>, --n <N>               Run only the first N candidate tests (.ll/.bc, sorted)
 
 Image (one of):
   --image <ref>                 Docker image ref (default: \${IMAGE_NAME:-fuzz-fill-test}:\${IMAGE_TAG:-latest})
@@ -66,6 +68,8 @@ Image build (optional; reuses existing image when omitted):
 
 Options:
   --bind-repo                   Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
+  --stage-candidate-tests       Copy the first N inputs to a temp dir before mounting
+                                (default: bind-mount the full --candidate-tests-dir)
   -j <n>, --jobs <n>            Parallel jobs for candidate-test and ninja (build)
   --help, -h                    Show this help
 
@@ -188,6 +192,10 @@ while [[ $# -gt 0 ]]; do
             bind_repo=1
             shift
             ;;
+        --stage-candidate-tests)
+            stage_candidate_tests=1
+            shift
+            ;;
         --build-image)
             build_image=1
             shift
@@ -304,14 +312,25 @@ echo "  address map:     ${llc_address_line_map_csv}"
 
 mkdir -p "$output_dir"
 output_dir="$(realpath "$output_dir")"
+candidate_tests_dir="$(realpath "$candidate_tests_dir")"
 
-candidate_staging_dir="$(mktemp -d -t fuzz-fill-candidate-tests.XXXXXX)"
-cleanup_staging() {
-    rm -rf "${candidate_staging_dir}"
-}
-trap cleanup_staging EXIT
-stage_candidate_tests "$candidate_tests_dir" "$candidate_n" "$candidate_staging_dir"
-candidate_mount=(-v "${candidate_staging_dir}:/mounted-candidate-tests:ro")
+if [[ "${stage_candidate_tests}" -eq 1 ]]; then
+    candidate_staging_dir="$(mktemp -d -t fuzz-fill-candidate-tests.XXXXXX)"
+    cleanup_staging() {
+        rm -rf "${candidate_staging_dir}"
+    }
+    trap cleanup_staging EXIT
+    stage_candidate_tests "$candidate_tests_dir" "$candidate_n" "$candidate_staging_dir"
+    candidate_mount=(-v "${candidate_staging_dir}:/mounted-candidate-tests:ro")
+else
+    mapfile -t candidate_files < <(collect_candidate_inputs "$candidate_tests_dir")
+    if [[ "${#candidate_files[@]}" -eq 0 ]]; then
+        echo "error: no .ll or .bc files under --candidate-tests-dir: ${candidate_tests_dir}" >&2
+        exit 1
+    fi
+    candidate_mount=(-v "${candidate_tests_dir}:/mounted-candidate-tests:ro")
+    echo "Bind-mounting candidate corpus (no copy): ${candidate_tests_dir}"
+fi
 
 rm -rf "${output_dir}/candidate_tests" "${output_dir}/incremental"
 
