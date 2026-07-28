@@ -5,6 +5,10 @@
 # Host output is bind-mounted at /mounted-output/. Candidate tests are staged on
 # the host at run time (first N .ll/.bc files only) and bind-mounted read-only
 # at /mounted-candidate-tests — nothing is baked into the image.
+#
+# The coverage profile (line_coverage_uncovered.csv + llc_address_line_map.csv)
+# can come from a baseline run in this invocation, from a prior Workflow 1 run,
+# or from the baseline/ output of a Workflow 2 PR detection run.
 
 set -euo pipefail
 
@@ -15,13 +19,21 @@ CONTAINER_WORKDIR="/work/fuzz-fill"
 image_name="${IMAGE_NAME:-fuzz-fill-test}"
 image_tag="${IMAGE_TAG:-latest}"
 image_ref=""
+pr_id=""
 output_dir=""
+baseline_dir=""
+line_coverage_uncovered_csv=""
 lit_filter=""
 jobs=""
 baseline_only=0
 bind_repo=0
 candidate_tests_dir=""
 candidate_n=""
+build_image=0
+keep_image=0
+llvm_repo=""
+backend_tests=""
+github_repo=""
 
 usage() {
     cat <<EOF
@@ -35,20 +47,46 @@ Required:
 
 Modes (pick one):
   --baseline-only               Run only coverage baseline (no candidate corpus)
-  --candidate-tests-dir <path>  Host corpus root; with -n, runs the full pipeline
+  --candidate-tests-dir <path>  Host corpus root; with -n, runs candidate-test + incremental
   -n <N>, --n <N>               Stage and run only the first N candidate tests
 
-Options:
+Coverage profile (for candidate-test + incremental):
+  By default, baseline runs in this invocation and writes to <output-dir>/baseline/.
+  Re-use an existing profile instead (from Workflow 1 baseline-only or Workflow 2):
+  --baseline-dir <path>         Host directory with line_coverage_uncovered.csv and
+                                llc_address_line_map.csv (mounted read-only)
+  --line-coverage-uncovered-csv <path>
+                                Override uncovered-lines CSV (default:
+                                <baseline-dir>/line_coverage_uncovered.csv or output baseline)
+
+Image (one of):
   --image <ref>                 Docker image ref (default: \${IMAGE_NAME:-fuzz-fill-test}:\${IMAGE_TAG:-latest})
+  --pr-id <n>                   Use \${IMAGE_NAME:-fuzz-fill-test}:llvm-pr-<n>
+
+Image build (optional; reuses existing image when omitted):
+  --build-image                 Build PR image via build-image-pr.sh before running
+  --keep-image                  Keep PR image after run (default: remove when --build-image)
+  --llvm-repo <path>            Local llvm-project clone (required with --build-image)
+  --backend-tests <target>      amdgpu or spirv (required with --build-image)
+  --github-repo <owner/repo>    GitHub repo hosting the PR (default: llvm/llvm-project)
+  --image-name <name>           Image name when using --pr-id (default: fuzz-fill-test)
+
+Options:
   --bind-repo                   Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
   --lit-filter <prefix>         LIT --filter= prefix (default: from image /work/.sancov-allowlist)
-  -j <n>, --jobs <n>            Parallel jobs for llvm-lit and candidate-test
+  -j <n>, --jobs <n>            Parallel jobs for llvm-lit, candidate-test, and ninja (build)
   --help, -h                    Show this help
 
 Examples:
   $(basename "$0") --baseline-only --output-dir ./data/wf1-baseline -j "\$(nproc)"
-  $(basename "$0") --bind-repo --baseline-only --output-dir ./data/wf1-baseline -j "\$(nproc)"
+  $(basename "$0") --pr-id 203468 --output-dir ./data/wf1-pr-baseline --baseline-only -j "\$(nproc)"
+  $(basename "$0") --build-image --llvm-repo /path/llvm-project --pr-id 203468 \\
+      --backend-tests amdgpu --baseline-only --output-dir ./data/wf1-pr-baseline -j "\$(nproc)"
   $(basename "$0") --output-dir ./data/wf1-100 \\
+      --baseline-dir ./data/pr-cov-gaps-203468/baseline \\
+      --candidate-tests-dir /path/to/irtests/bitcode/amdgpu/all -n 100 -j "\$(nproc)"
+  $(basename "$0") --pr-id 203468 --output-dir ./data/wf1-pr-100 \\
+      --baseline-dir ./data/pr-cov-gaps-203468/baseline \\
       --candidate-tests-dir /path/to/irtests/bitcode/amdgpu/all -n 100 -j "\$(nproc)"
 EOF
 }
@@ -78,6 +116,15 @@ validate_candidate_n() {
     fi
 }
 
+cleanup_built_image() {
+    if [[ "${build_image:-0}" -eq 1 && "${keep_image:-0}" -eq 0 && -n "${image_ref:-}" ]]; then
+        if docker image inspect "${image_ref}" >/dev/null 2>&1; then
+            echo "Removing Docker image ${image_ref}"
+            docker rmi "${image_ref}"
+        fi
+    fi
+}
+
 read_image_allowlist() {
     local allowlist
     if ! allowlist="$(docker run --rm --entrypoint cat "${image_ref}" /work/.sancov-allowlist 2>/dev/null | tr -d '[:space:]')"; then
@@ -89,6 +136,37 @@ read_image_allowlist() {
         exit 1
     fi
     printf '%s' "$allowlist"
+}
+
+validate_baseline_profile_dir() {
+    local dir="$1"
+    if [[ ! -d "$dir" ]]; then
+        echo "error: --baseline-dir is not a directory: ${dir}" >&2
+        exit 1
+    fi
+    if [[ ! -f "${dir}/llc_address_line_map.csv" ]]; then
+        echo "error: missing llc_address_line_map.csv under --baseline-dir: ${dir}" >&2
+        exit 1
+    fi
+}
+
+resolve_uncovered_csv_path() {
+    local profile_dir="$1"
+    if [[ -n "$line_coverage_uncovered_csv" ]]; then
+        if [[ ! -f "$line_coverage_uncovered_csv" ]]; then
+            echo "error: --line-coverage-uncovered-csv not found: ${line_coverage_uncovered_csv}" >&2
+            exit 1
+        fi
+        realpath "$line_coverage_uncovered_csv"
+    elif [[ -n "$profile_dir" ]]; then
+        if [[ ! -f "${profile_dir}/line_coverage_uncovered.csv" ]]; then
+            echo "error: missing line_coverage_uncovered.csv under --baseline-dir: ${profile_dir}" >&2
+            exit 1
+        fi
+        realpath "${profile_dir}/line_coverage_uncovered.csv"
+    else
+        echo ""
+    fi
 }
 
 # Enumerate .ll/.bc under src (recursive), sorted — matches TestRunner.collect_llc_input_files().
@@ -136,9 +214,24 @@ while [[ $# -gt 0 ]]; do
             image_ref="$2"
             shift 2
             ;;
+        --pr-id)
+            [[ $# -ge 2 ]] || { echo "error: --pr-id requires a value" >&2; exit 2; }
+            pr_id="$2"
+            shift 2
+            ;;
         --output-dir)
             [[ $# -ge 2 ]] || { echo "error: --output-dir requires a value" >&2; exit 2; }
             output_dir="$2"
+            shift 2
+            ;;
+        --baseline-dir)
+            [[ $# -ge 2 ]] || { echo "error: --baseline-dir requires a value" >&2; exit 2; }
+            baseline_dir="$2"
+            shift 2
+            ;;
+        --line-coverage-uncovered-csv)
+            [[ $# -ge 2 ]] || { echo "error: --line-coverage-uncovered-csv requires a value" >&2; exit 2; }
+            line_coverage_uncovered_csv="$2"
             shift 2
             ;;
         --lit-filter)
@@ -153,6 +246,34 @@ while [[ $# -gt 0 ]]; do
         --bind-repo)
             bind_repo=1
             shift
+            ;;
+        --build-image)
+            build_image=1
+            shift
+            ;;
+        --keep-image)
+            keep_image=1
+            shift
+            ;;
+        --llvm-repo)
+            [[ $# -ge 2 ]] || { echo "error: --llvm-repo requires a value" >&2; exit 2; }
+            llvm_repo="$2"
+            shift 2
+            ;;
+        --backend-tests)
+            [[ $# -ge 2 ]] || { echo "error: --backend-tests requires a value" >&2; exit 2; }
+            backend_tests="$2"
+            shift 2
+            ;;
+        --github-repo)
+            [[ $# -ge 2 ]] || { echo "error: --github-repo requires a value" >&2; exit 2; }
+            github_repo="$2"
+            shift 2
+            ;;
+        --image-name)
+            [[ $# -ge 2 ]] || { echo "error: --image-name requires a value" >&2; exit 2; }
+            image_name="$2"
+            shift 2
             ;;
         --candidate-tests-dir)
             [[ $# -ge 2 ]] || { echo "error: --candidate-tests-dir requires a value" >&2; exit 2; }
@@ -202,9 +323,62 @@ if [[ -z "$output_dir" ]]; then
     exit 1
 fi
 
+if [[ -n "$image_ref" && -n "$pr_id" ]]; then
+    echo "error: pass only one of --image or --pr-id" >&2
+    exit 1
+fi
+
+if [[ -n "$image_ref" && "$build_image" -eq 1 ]]; then
+    echo "error: --build-image cannot be used with --image" >&2
+    exit 1
+fi
+
+if [[ "$build_image" -eq 0 ]]; then
+    if [[ -n "$llvm_repo" || -n "$backend_tests" || -n "$github_repo" || "$keep_image" -eq 1 ]]; then
+        echo "error: --llvm-repo, --backend-tests, --github-repo, and --keep-image require --build-image" >&2
+        exit 1
+    fi
+else
+    if [[ -z "$llvm_repo" ]]; then
+        echo "error: --llvm-repo is required with --build-image" >&2
+        exit 1
+    fi
+    if [[ -z "$pr_id" ]]; then
+        echo "error: --pr-id is required with --build-image" >&2
+        exit 1
+    fi
+    if [[ -z "$backend_tests" ]]; then
+        echo "error: --backend-tests is required with --build-image" >&2
+        exit 1
+    fi
+fi
+
+if [[ -n "$backend_tests" ]]; then
+    backend_tests="$(printf '%s' "$backend_tests" | tr '[:upper:]' '[:lower:]')"
+    case "$backend_tests" in
+        amdgpu|spirv) ;;
+        *)
+            echo "error: --backend-tests must be amdgpu or spirv: ${backend_tests}" >&2
+            exit 1
+            ;;
+    esac
+fi
+
+if [[ -n "$pr_id" ]]; then
+    if [[ ! "$pr_id" =~ ^[0-9]+$ ]] || [[ "$pr_id" -eq 0 ]]; then
+        echo "error: --pr-id must be a positive integer: ${pr_id}" >&2
+        exit 1
+    fi
+    image_ref="${image_name}:llvm-pr-${pr_id}"
+fi
+
 if [[ "$baseline_only" -eq 1 ]]; then
     if [[ -n "$candidate_tests_dir" || -n "$candidate_n" ]]; then
         echo "error: --candidate-tests-dir and -n cannot be used with --baseline-only" >&2
+        exit 1
+    fi
+    if [[ -n "$baseline_dir" || -n "$line_coverage_uncovered_csv" ]]; then
+        echo "error: --baseline-dir and --line-coverage-uncovered-csv cannot be used with --baseline-only" >&2
         exit 1
     fi
 else
@@ -218,6 +392,10 @@ else
         echo "error: --candidate-tests-dir is not a directory: ${candidate_tests_dir}" >&2
         exit 1
     fi
+    if [[ -n "$line_coverage_uncovered_csv" && -z "$baseline_dir" ]]; then
+        echo "error: --line-coverage-uncovered-csv requires --baseline-dir (for llc_address_line_map.csv)" >&2
+        exit 1
+    fi
 fi
 
 validate_jobs
@@ -226,13 +404,69 @@ if [[ -z "$image_ref" ]]; then
     image_ref="${image_name}:${image_tag}"
 fi
 
+if [[ "$build_image" -eq 1 && "$keep_image" -eq 0 ]]; then
+    trap cleanup_built_image EXIT
+fi
+
+if [[ "$build_image" -eq 1 ]]; then
+    build_args=(
+        --llvm-repo "$llvm_repo"
+        --pr-id "$pr_id"
+        --allowlist "$backend_tests"
+    )
+    if [[ -n "$github_repo" ]]; then
+        build_args+=(--github-repo "$github_repo")
+    fi
+    if [[ -n "$jobs" ]]; then
+        build_args+=(-j "$jobs")
+    fi
+
+    echo "=== build PR image ==="
+    "${SCRIPT_DIR}/build-image-pr.sh" "${build_args[@]}"
+fi
+
 if ! docker image inspect "${image_ref}" >/dev/null 2>&1; then
     echo "error: image not found: ${image_ref}" >&2
-    echo "hint: build it with: ${SCRIPT_DIR}/build-image.sh" >&2
+    if [[ "$build_image" -eq 0 ]]; then
+        echo "hint: build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --backend-tests" >&2
+    fi
     exit 1
 fi
 
-if [[ -z "$lit_filter" ]]; then
+skip_baseline=0
+baseline_profile_dir=""
+uncovered_csv_host=""
+llc_map_host=""
+uncovered_mount=()
+baseline_mount=()
+
+if [[ -n "$baseline_dir" ]]; then
+    skip_baseline=1
+    validate_baseline_profile_dir "$baseline_dir"
+    baseline_profile_dir="$(realpath "$baseline_dir")"
+    uncovered_csv_host="$(resolve_uncovered_csv_path "$baseline_profile_dir")"
+    llc_map_host="${baseline_profile_dir}/llc_address_line_map.csv"
+    baseline_mount=(-v "${baseline_profile_dir}:/mounted-baseline:ro")
+
+    baseline_dir_real="$(realpath "$(dirname "$uncovered_csv_host")")"
+    if [[ "$baseline_dir_real" == "$baseline_profile_dir" ]]; then
+        container_uncovered_csv="/mounted-baseline/$(basename "$uncovered_csv_host")"
+        container_llc_map_csv="/mounted-baseline/llc_address_line_map.csv"
+    else
+        container_uncovered_csv="/mounted-uncovered-lines.csv"
+        uncovered_mount=(-v "${uncovered_csv_host}:${container_uncovered_csv}:ro")
+        container_llc_map_csv="/mounted-baseline/llc_address_line_map.csv"
+    fi
+
+    echo "Using external coverage profile: ${baseline_profile_dir}"
+    echo "  uncovered lines: ${uncovered_csv_host}"
+    echo "  address map:     ${llc_map_host}"
+elif [[ "$baseline_only" -eq 0 ]]; then
+    container_uncovered_csv="/mounted-output/baseline/line_coverage_uncovered.csv"
+    container_llc_map_csv="/mounted-output/baseline/llc_address_line_map.csv"
+fi
+
+if [[ -z "$lit_filter" && "$skip_baseline" -eq 0 ]]; then
     image_allowlist="$(read_image_allowlist)"
     lit_filter="$(lit_filter_for_allowlist "$image_allowlist")"
     echo "Image allowlist: ${image_allowlist} -> lit-filter: ${lit_filter}"
@@ -253,20 +487,29 @@ if [[ "$baseline_only" -eq 0 ]]; then
     candidate_mount=(-v "${candidate_staging_dir}:/mounted-candidate-tests:ro")
 fi
 
-rm -rf "${output_dir}/baseline"
+if [[ "$skip_baseline" -eq 0 ]]; then
+    rm -rf "${output_dir}/baseline"
+fi
 if [[ "$baseline_only" -eq 0 ]]; then
     rm -rf "${output_dir}/candidate_tests" "${output_dir}/incremental"
 fi
 
 docker_env=(
-    -e "LIT_FILTER=${lit_filter}"
     -e "BASELINE_ONLY=${baseline_only}"
+    -e "SKIP_BASELINE=${skip_baseline}"
 )
+if [[ "$skip_baseline" -eq 0 ]]; then
+    docker_env+=(-e "LIT_FILTER=${lit_filter}")
+fi
 if [[ -n "$jobs" ]]; then
     docker_env+=(-e "JOBS=${jobs}")
 fi
 if [[ "$baseline_only" -eq 0 ]]; then
-    docker_env+=(-e "CANDIDATE_N=${candidate_n}")
+    docker_env+=(
+        -e "CANDIDATE_N=${candidate_n}"
+        -e "UNCOVERED_CSV=${container_uncovered_csv}"
+        -e "LLC_MAP_CSV=${container_llc_map_csv}"
+    )
 fi
 
 repo_mount=()
@@ -277,6 +520,8 @@ fi
 
 docker run --rm \
     -v "${output_dir}:/mounted-output" \
+    "${baseline_mount[@]}" \
+    "${uncovered_mount[@]}" \
     "${candidate_mount[@]}" \
     "${repo_mount[@]}" \
     "${docker_env[@]}" \
@@ -285,18 +530,22 @@ docker run --rm \
     bash -lc '
 set -euo pipefail
 
-baseline_args=(
-    python -m coverage baseline
-    --output-dir /mounted-output/baseline
-    --lit-filter "${LIT_FILTER}"
-    --lit-allow-failures
-)
-if [[ -n "${JOBS:-}" ]]; then
-    baseline_args+=(-j "${JOBS}")
-fi
+if [[ "${SKIP_BASELINE}" -eq 0 ]]; then
+    baseline_args=(
+        python -m coverage baseline
+        --output-dir /mounted-output/baseline
+        --lit-filter "${LIT_FILTER}"
+        --lit-allow-failures
+    )
+    if [[ -n "${JOBS:-}" ]]; then
+        baseline_args+=(-j "${JOBS}")
+    fi
 
-echo "=== coverage baseline (lit-filter=${LIT_FILTER}) ==="
-"${baseline_args[@]}"
+    echo "=== coverage baseline (lit-filter=${LIT_FILTER}) ==="
+    "${baseline_args[@]}"
+else
+    echo "=== coverage baseline (skipped; using mounted profile) ==="
+fi
 
 if [[ "${BASELINE_ONLY}" -ne 1 ]]; then
     candidate_args=(
@@ -315,13 +564,16 @@ if [[ "${BASELINE_ONLY}" -ne 1 ]]; then
     echo "=== coverage incremental ==="
     python -m coverage incremental \
         --output-dir /mounted-output/incremental \
-        --baseline-output-dir /mounted-output/baseline \
+        --line-coverage-uncovered-csv "${UNCOVERED_CSV}" \
+        --llc-address-line-map-csv "${LLC_MAP_CSV}" \
         --candidate-tests-output-dir /mounted-output/candidate_tests
 fi
 '
 
 echo "Image: ${image_ref}"
-echo "LIT filter: ${lit_filter}"
+if [[ "$skip_baseline" -eq 0 ]]; then
+    echo "LIT filter: ${lit_filter}"
+fi
 
 if [[ "$baseline_only" -eq 1 ]]; then
     echo "Wrote ${output_dir}/baseline/"
@@ -330,7 +582,11 @@ else
     echo "Wrote ${report}"
 fi
 
-lit_failures_json="${output_dir}/baseline/lit_failures.json"
+if [[ "$skip_baseline" -eq 1 ]]; then
+    lit_failures_json="${baseline_profile_dir}/lit_failures.json"
+else
+    lit_failures_json="${output_dir}/baseline/lit_failures.json"
+fi
 warning_file="${output_dir}/README-WARNING"
 
 fail_count=0
