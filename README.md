@@ -306,6 +306,8 @@ gap finding (baseline or PR)  →  gap filling  →  reduce
 
 The LLC map must come from the **same** baseline run (and LIT filters / Docker image) as the uncovered-lines CSV.
 
+**Candidate corpus:** pass an external path such as `irtests/bitcode/amdgpu/all` via `--candidate-tests-dir`. The directory is bind-mounted read-only at run time (not copied into the image). `-n` limits how many tests `candidate-test` processes.
+
 **Image selection:** gap-finding and gap-filling Docker runners accept `--pr-id` (PR LLVM image), `--image` (local or custom tag), or default `fuzz-fill-test:latest`. PR gap finding additionally supports `--build-image` + `--llvm-repo` + `--pr-id`; local commits use `build-image.sh` then `--image fuzz-fill-test:latest --commit <rev>`.
 
 ---
@@ -569,7 +571,9 @@ Main output: `<output-dir>/commit_lines_report/target_lines_uncovered.csv`.
 
 ### Gap filling in Docker
 
-[`scripts/docker/gap-filling.sh`](scripts/docker/gap-filling.sh) runs `candidate-test` → `incremental`. Candidate tests are **not** baked into the image: the script stages the first `--n` `.ll`/`.bc` files from `--candidate-tests-dir` and bind-mounts them read-only.
+[`scripts/docker/gap-filling.sh`](scripts/docker/gap-filling.sh) runs `candidate-test` → `incremental`.
+
+**Candidate tests are not baked into the image.** By default, `--candidate-tests-dir` is bind-mounted read-only from the host (e.g. an external `irtests` corpus). No host-side copy is made; `-n` limits how many `.ll`/`.bc` files `candidate-test` processes (sorted path order). Pass **`--stage-candidate-tests`** to copy the first N inputs into a temp dir before mounting instead (previous behaviour).
 
 **Requires** both profile CSV flags (gap list + LLC map from the same baseline run):
 
@@ -600,8 +604,9 @@ PR gap list (use `target_lines_uncovered.csv` as the uncovered-lines CSV):
 | `--output-dir <path>` | Host output directory (required) |
 | `--line-coverage-uncovered-csv <path>` | Gap list CSV (required) |
 | `--llc-address-line-map-csv <path>` | LLC map from same baseline (required) |
-| `--candidate-tests-dir <path>` | Host corpus root (required) |
-| `-n <N>`, `--n <N>` | First N candidate tests (required) |
+| `--candidate-tests-dir <path>` | Host corpus root, bind-mounted read-only (required) |
+| `-n <N>`, `--n <N>` | First N candidate tests to run (required) |
+| `--stage-candidate-tests` | Copy first N inputs to a temp dir before mounting (default: bind-mount full dir) |
 | `--image <ref>` / `--pr-id <n>` | Docker image |
 | `--build-image` | Build PR image when missing |
 | `--bind-repo` | Mount local fuzz-fill checkout |
