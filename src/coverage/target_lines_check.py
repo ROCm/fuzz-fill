@@ -11,15 +11,24 @@ from fuzz_fill.log import get_logger
 logger = get_logger("coverage.target_lines")
 
 
-def _match_symcov_file(rel_path: str, summary_files: set[str]) -> str | None:
-    """Map git-style relative path to an absolute path string present in the summary."""
-    rel_parts = Path(rel_path).as_posix().split("/")
-    n = len(rel_parts)
-    for abs_f in summary_files:
+def _build_symcov_suffix_index(
+    summary_files: set[str],
+) -> dict[tuple[str, ...], str]:
+    """Index summary file paths by every trailing path-component suffix."""
+    index: dict[tuple[str, ...], str] = {}
+    for abs_f in sorted(summary_files):
         parts = Path(abs_f).as_posix().split("/")
-        if len(parts) >= n and parts[-n:] == rel_parts:
-            return abs_f
-    return None
+        for n in range(1, len(parts) + 1):
+            index.setdefault(tuple(parts[-n:]), abs_f)
+    return index
+
+
+def _match_symcov_file(
+    rel_path: str, symcov_suffix_index: dict[tuple[str, ...], str]
+) -> str | None:
+    """Map git-style relative path to an absolute path string present in the summary."""
+    rel_parts = tuple(Path(rel_path).as_posix().split("/"))
+    return symcov_suffix_index.get(rel_parts)
 
 
 def run_target_lines_check(
@@ -37,6 +46,7 @@ def run_target_lines_check(
     """
     uncovered_lines = load_uncovered_lines_csv(line_coverage_uncovered_csv)
     summary_files: set[str] = {file for file, _ in uncovered_lines}
+    symcov_suffix_index = _build_symcov_suffix_index(summary_files)
 
     llvm_repo = llvm_repo.resolve()
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -67,7 +77,7 @@ def run_target_lines_check(
                 ) from e
             text = row.get("text", "")
 
-            sym_file = _match_symcov_file(rel, summary_files)
+            sym_file = _match_symcov_file(rel, symcov_suffix_index)
             if sym_file is None:
                 cand = (llvm_repo / rel).resolve()
                 if str(cand) in summary_files:
