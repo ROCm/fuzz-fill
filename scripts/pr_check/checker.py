@@ -711,14 +711,20 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    github_repo_parent = argparse.ArgumentParser(add_help=False)
+    github_repo_parent.add_argument(
         "--github-repo",
         default=DEFAULT_GITHUB_REPO,
         help=f"GitHub repo hosting PRs (default: {DEFAULT_GITHUB_REPO})",
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
 
-    discover_parser = subparsers.add_parser("discover", help="List open target PRs")
+    discover_parser = subparsers.add_parser(
+        "discover",
+        help="List open target PRs",
+        parents=[github_repo_parent],
+    )
     discover_parser.add_argument(
         "--limit",
         type=int,
@@ -727,7 +733,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     discover_parser.set_defaults(func=cmd_discover)
 
-    plan_parser = subparsers.add_parser("plan", help="List PR/backend pairs needing a run")
+    plan_parser = subparsers.add_parser(
+        "plan",
+        help="List PR/backend pairs needing a run",
+        parents=[github_repo_parent],
+    )
     plan_parser.add_argument(
         "--state-file",
         type=Path,
@@ -772,7 +782,11 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("--output-dir", type=Path, required=True)
     evaluate_parser.set_defaults(func=cmd_evaluate_output)
 
-    report_parser = subparsers.add_parser("report", help="Write latest.json and latest.md from state")
+    report_parser = subparsers.add_parser(
+        "report",
+        help="Write latest.json and latest.md from state",
+        parents=[github_repo_parent],
+    )
     report_parser.add_argument("--state-file", type=Path, required=True)
     report_parser.add_argument(
         "--report-dir",
