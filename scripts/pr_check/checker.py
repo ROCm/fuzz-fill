@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import subprocess
 import sys
@@ -28,6 +29,7 @@ BACKEND_SEARCH_QUERIES: dict[str, str] = {
 
 SEARCH_JSON_FIELDS = ["number", "title", "updatedAt"]
 PR_VIEW_JSON_FIELDS = ["number", "title", "headRefOid", "updatedAt"]
+LIT_FAILURE_CODES = frozenset({"FAIL", "TIMEOUT", "UNRESOLVED", "XPASS"})
 
 
 class PrCheckerError(Exception):
@@ -359,6 +361,53 @@ def _work_to_json(work: list[WorkItem]) -> list[dict[str, Any]]:
     return [asdict(item) for item in work]
 
 
+def count_csv_data_rows(path: Path) -> int:
+    """Return the number of data rows in a CSV file (excluding the header)."""
+    if not path.is_file():
+        return 0
+
+    with path.open(encoding="utf-8", newline="") as handle:
+        reader = csv.reader(handle)
+        next(reader, None)
+        return sum(1 for _ in reader)
+
+
+def count_lit_failures(path: Path) -> int:
+    """Count LIT tests that failed during baseline collection."""
+    if not path.is_file():
+        return 0
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return 0
+
+    tests = payload.get("tests", [])
+    if not isinstance(tests, list):
+        return 0
+
+    return sum(
+        1
+        for test in tests
+        if isinstance(test, dict) and test.get("code") in LIT_FAILURE_CODES
+    )
+
+
+def evaluate_output_dir(output_dir: Path) -> dict[str, Any]:
+    """Summarize a completed pr-cov-gaps-detection output directory."""
+    gap_csv = output_dir / "commit_lines_report" / "target_lines_uncovered.csv"
+    lit_failures_json = output_dir / "baseline" / "lit_failures.json"
+    gap_count = count_csv_data_rows(gap_csv)
+    lit_failure_count = count_lit_failures(lit_failures_json)
+    return {
+        "gap_count": gap_count,
+        "lit_failure_count": lit_failure_count,
+        "status": "gaps" if gap_count > 0 else "clean",
+        "gap_report": str(gap_csv),
+        "lit_failures_json": str(lit_failures_json),
+    }
+
+
 def cmd_discover(args: argparse.Namespace) -> int:
     discovered = discover_prs(github_repo=args.github_repo, limit=args.limit)
     payload = _discovered_to_json(discovered)
@@ -391,6 +440,12 @@ def cmd_record(args: argparse.Namespace) -> int:
         error=args.error,
     )
     save_state(args.state_file, state)
+    return 0
+
+
+def cmd_evaluate_output(args: argparse.Namespace) -> int:
+    payload = evaluate_output_dir(args.output_dir)
+    print(json.dumps(payload, indent=2))
     return 0
 
 
@@ -449,6 +504,13 @@ def build_parser() -> argparse.ArgumentParser:
     record_parser.add_argument("--output-dir", required=True)
     record_parser.add_argument("--error", default=None)
     record_parser.set_defaults(func=cmd_record)
+
+    evaluate_parser = subparsers.add_parser(
+        "evaluate-output",
+        help="Summarize gap and LIT failure counts from a run output directory",
+    )
+    evaluate_parser.add_argument("--output-dir", type=Path, required=True)
+    evaluate_parser.set_defaults(func=cmd_evaluate_output)
 
     return parser
 
