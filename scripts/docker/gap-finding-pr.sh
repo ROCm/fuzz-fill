@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Run PR coverage-gap detection inside a one-shot Docker container:
-#   coverage baseline (allow failures) -> added_lines -> target-lines
+# Gap finding (PR): baseline -> added_lines -> target-lines in a one-shot Docker container.
 #
 # Host output is bind-mounted at /mounted-output/ in the container.
 
@@ -8,16 +7,20 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/docker/ensure-image.sh
+source "${SCRIPT_DIR}/ensure-image.sh"
 
 image_ref=""
 pr_id=""
 output_dir=""
 lit_filters=()
 image_name="${IMAGE_NAME:-fuzz-fill-test}"
+image_tag="${IMAGE_TAG:-latest}"
 commit_rev=""
 jobs=""
 build_image=0
 keep_image=0
+force_build=0
 llvm_repo=""
 backend_tests=""
 github_repo=""
@@ -37,7 +40,8 @@ Required:
   --output-dir <path>      Host output directory (created if missing)
 
 Options:
-  --build-image            Build PR image via build-image-pr.sh before detection
+  --build-image            Build PR image via build-image-pr.sh when missing
+  --force-build            Rebuild PR image even when the tag already exists
   --keep-image             Keep the PR image after detection (default: remove it
                            when --build-image was used)
   --llvm-repo <path>       Local llvm-project clone (required with --build-image)
@@ -52,9 +56,9 @@ Options:
 
 Examples:
   $(basename "$0") --build-image --llvm-repo /path/llvm-project --pr-id 203468 \\
-      --backend-tests amdgpu --output-dir ./data/pr-cov-gaps-203468 -j "\$(nproc)"
-  $(basename "$0") --pr-id 203468 --output-dir ./data/pr-cov-gaps-203468
-  $(basename "$0") --pr-id 203468 --output-dir ./data/pr-cov-gaps-203468 \\
+      --backend-tests amdgpu --output-dir ./data/gap-finding-pr-203468 -j "\$(nproc)"
+  $(basename "$0") --pr-id 203468 --output-dir ./data/gap-finding-pr-203468
+  $(basename "$0") --pr-id 203468 --output-dir ./data/gap-finding-pr-203468 \\
       --lit-filter CodeGen/AMDGPU -j "\$(nproc)"
 EOF
 }
@@ -83,28 +87,6 @@ validate_jobs() {
     fi
 }
 
-cleanup_built_image() {
-    if [[ "${build_image:-0}" -eq 1 && "${keep_image:-0}" -eq 0 && -n "${image_ref:-}" ]]; then
-        if docker image inspect "${image_ref}" >/dev/null 2>&1; then
-            echo "Removing Docker image ${image_ref}"
-            docker rmi "${image_ref}"
-        fi
-    fi
-}
-
-read_image_allowlist() {
-    local allowlist
-    if ! allowlist="$(docker run --rm --entrypoint cat "${image_ref}" /work/.sancov-allowlist 2>/dev/null | tr -d '[:space:]')"; then
-        echo "error: failed to read /work/.sancov-allowlist from image: ${image_ref}" >&2
-        exit 1
-    fi
-    if [[ -z "$allowlist" ]]; then
-        echo "error: /work/.sancov-allowlist is empty in image: ${image_ref}" >&2
-        exit 1
-    fi
-    printf '%s' "$allowlist"
-}
-
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --image)
@@ -128,6 +110,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --keep-image)
             keep_image=1
+            shift
+            ;;
+        --force-build)
+            force_build=1
             shift
             ;;
         --llvm-repo)
@@ -197,11 +183,6 @@ if [[ -n "$image_ref" && -n "$pr_id" ]]; then
     exit 1
 fi
 
-if [[ -n "$image_ref" && "$build_image" -eq 1 ]]; then
-    echo "error: --build-image cannot be used with --image" >&2
-    exit 1
-fi
-
 if [[ -z "$image_ref" && -z "$pr_id" ]]; then
     echo "error: one of --image or --pr-id is required" >&2
     usage >&2
@@ -214,78 +195,17 @@ if [[ -z "$output_dir" ]]; then
     exit 1
 fi
 
-if [[ "$build_image" -eq 0 ]]; then
-    if [[ -n "$llvm_repo" || -n "$backend_tests" || -n "$github_repo" || "$keep_image" -eq 1 ]]; then
-        echo "error: --llvm-repo, --backend-tests, --github-repo, and --keep-image require --build-image" >&2
-        exit 1
-    fi
-else
-    if [[ -z "$llvm_repo" ]]; then
-        echo "error: --llvm-repo is required with --build-image" >&2
-        exit 1
-    fi
-    if [[ -z "$pr_id" ]]; then
-        echo "error: --pr-id is required with --build-image" >&2
-        exit 1
-    fi
-    if [[ -z "$backend_tests" ]]; then
-        echo "error: --backend-tests is required with --build-image" >&2
-        exit 1
-    fi
-fi
-
+docker_image_validate_build_flags
 validate_jobs
+docker_image_normalize_backend_tests
+docker_image_validate_pr_id
+docker_image_resolve_ref
 
-if [[ -n "$backend_tests" ]]; then
-    backend_tests="$(printf '%s' "$backend_tests" | tr '[:upper:]' '[:lower:]')"
-    case "$backend_tests" in
-        amdgpu|spirv) ;;
-        *)
-            echo "error: --backend-tests must be amdgpu or spirv: ${backend_tests}" >&2
-            exit 1
-            ;;
-    esac
-fi
-
-if [[ -n "$pr_id" ]]; then
-    if [[ ! "$pr_id" =~ ^[0-9]+$ ]] || [[ "$pr_id" -eq 0 ]]; then
-        echo "error: --pr-id must be a positive integer: ${pr_id}" >&2
-        exit 1
-    fi
-    image_ref="${image_name}:llvm-pr-${pr_id}"
-fi
-
-if [[ "$build_image" -eq 1 && "$keep_image" -eq 0 ]]; then
-    trap cleanup_built_image EXIT
-fi
-
-if [[ "$build_image" -eq 1 ]]; then
-    build_args=(
-        --llvm-repo "$llvm_repo"
-        --pr-id "$pr_id"
-        --allowlist "$backend_tests"
-    )
-    if [[ -n "$github_repo" ]]; then
-        build_args+=(--github-repo "$github_repo")
-    fi
-    if [[ -n "$jobs" ]]; then
-        build_args+=(-j "$jobs")
-    fi
-
-    echo "=== build PR image ==="
-    "${SCRIPT_DIR}/build-image-pr.sh" "${build_args[@]}"
-fi
-
-if ! docker image inspect "${image_ref}" >/dev/null 2>&1; then
-    echo "error: image not found: ${image_ref}" >&2
-    if [[ "$build_image" -eq 0 ]]; then
-        echo "hint: pass --build-image with --llvm-repo and --backend-tests to build it first" >&2
-    fi
-    exit 1
-fi
+DOCKER_IMAGE_MISSING_HINT="pass --build-image with --llvm-repo and --backend-tests to build it first"
+docker_image_ensure
 
 if [[ ${#lit_filters[@]} -eq 0 ]]; then
-    image_allowlist="$(read_image_allowlist)"
+    image_allowlist="$(docker_image_read_allowlist)"
     mapfile -t lit_filters < <(default_lit_filters_for_allowlist "$image_allowlist")
     echo "Image allowlist: ${image_allowlist} -> ${#lit_filters[@]} lit-filter prefix(es)"
 fi

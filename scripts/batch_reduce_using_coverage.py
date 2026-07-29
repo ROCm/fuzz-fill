@@ -6,7 +6,7 @@ matching folders under candidate_tests/.
 CSV columns: test_name, file, line, covered-points
 (test_name is a directory under --candidate-tests containing test.sh).
 
-Each test.sh records the instrumented llc invocation (binary, flags, .bc path).
+Each test.sh records the instrumented llc invocation (binary, flags, .bc or .ll path).
 Llvm flags on that command are copied into interesting_ir.sh and extract_*
 pipeline steps (config ``llc_O``). interesting_mir.sh uses the same COVERED
 sancov check as interesting_ir.sh. Use ``--mir-codegen-only`` when the pass
@@ -136,8 +136,30 @@ class TestShInfo:
     llc_flags: tuple[str, ...]
 
 
+def resolve_input_path(input_path: Path, test_sh: Path) -> Path:
+    """Resolve IR input from test.sh, including Docker/host path remapping."""
+    if input_path.is_file():
+        return input_path
+
+    repo = _repo_root()
+    posix = input_path.as_posix()
+    marker = "/fuzz-fill/"
+    if marker in posix:
+        candidate = repo / posix.split(marker, 1)[1]
+        if candidate.is_file():
+            return candidate
+
+    sibling = test_sh.parent / input_path.name
+    if sibling.is_file():
+        return sibling
+
+    raise FileNotFoundError(
+        f"Input IR file from test.sh does not exist: {input_path}"
+    )
+
+
 def parse_test_sh(test_sh: Path) -> TestShInfo:
-    """Parse candidate_tests/<test_name>/test.sh for llc binary, flags, and .bc path."""
+    """Parse candidate_tests/<test_name>/test.sh for llc binary, flags, and IR input."""
     if not test_sh.is_file():
         raise FileNotFoundError(f"test.sh not found: {test_sh}")
 
@@ -160,22 +182,28 @@ def parse_test_sh(test_sh: Path) -> TestShInfo:
     if len(parts) < 2:
         raise ValueError(f"Could not parse llc command in {test_sh}: {llc_line!r}")
 
-    llc_exe = Path(parts[0])
-    if llc_exe.name != "llc":
-        raise ValueError(f"Expected llc executable, got {llc_exe!r} in {test_sh}")
-
-    bc_indices = [i for i, p in enumerate(parts) if p.endswith(".bc")]
-    if len(bc_indices) != 1:
+    llc_indices = [i for i, p in enumerate(parts) if Path(p).name == "llc"]
+    if len(llc_indices) != 1:
         raise ValueError(
-            f"Expected exactly one .bc argument in {test_sh}, got {bc_indices!r}"
+            f"Expected exactly one llc executable in {test_sh}, got {llc_indices!r}"
         )
-    bc_idx = bc_indices[0]
-    bc_path = Path(parts[bc_idx])
-    if not bc_path.is_file():
-        raise FileNotFoundError(f"Bitcode file from test.sh does not exist: {bc_path}")
+    llc_idx = llc_indices[0]
+    llc_exe = Path(parts[llc_idx])
 
-    flags = tuple(parts[1:bc_idx])
-    return TestShInfo(llvm_bin=llc_exe.parent, bc_path=bc_path, llc_flags=flags)
+    input_indices = [
+        i
+        for i, p in enumerate(parts)
+        if i > llc_idx and (p.endswith(".bc") or p.endswith(".ll"))
+    ]
+    if len(input_indices) != 1:
+        raise ValueError(
+            f"Expected exactly one .bc or .ll argument in {test_sh}, got {input_indices!r}"
+        )
+    input_idx = input_indices[0]
+    input_path = resolve_input_path(Path(parts[input_idx]), test_sh)
+
+    flags = tuple(parts[llc_idx + 1 : input_idx])
+    return TestShInfo(llvm_bin=llc_exe.parent, bc_path=input_path, llc_flags=flags)
 
 
 def render_interesting_ir(
@@ -509,7 +537,7 @@ def validate_pipeline_cli(
 
 
 def copy_input_bc(test_info: TestShInfo, dest_dir: Path) -> str:
-    """Copy the .bc from test.sh into dest_dir; return config input basename."""
+    """Copy the IR input from test.sh into dest_dir; return config input basename."""
     dest_name = test_info.bc_path.name
     shutil.copy2(test_info.bc_path, dest_dir / dest_name)
     return dest_name

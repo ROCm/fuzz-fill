@@ -84,8 +84,9 @@ class RunTargetLinesCheckTest(unittest.TestCase):
             with report.open(newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
 
-            reported = {(row["file"], int(row["line_no"])) for row in rows}
-            self.assertEqual(reported, {(REL, 30), (REL, 40)})
+            reported = {(row["file"], int(row["line"])) for row in rows}
+            self.assertEqual(reported, {(ABS, 30), (ABS, 40)})
+            self.assertEqual({row["text"] for row in rows}, {"uncovered line", "uncovered line 2"})
 
     def test_missing_uncovered_csv_raises_systemexit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

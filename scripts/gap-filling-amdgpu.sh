@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Workflow 1: baseline -> candidate-test -> incremental for AMDGPU LIT subsets.
+# Gap filling (AMDGPU): candidate-test -> incremental for a fuzz corpus.
+#
+# Requires a gap list from gap finding (baseline or PR):
+#   baseline/line_coverage_uncovered.csv  or  commit_lines_report/target_lines_uncovered.csv
+#   plus baseline/llc_address_line_map.csv from the same baseline run.
 #
 # Usage:
-#   ./scripts/test_coverage_amdgpu_workflow1.sh
-#   OUTPUT_DIR=./data/my_run ./scripts/test_coverage_amdgpu_workflow1.sh
-#   JOBS="$(nproc)" ./scripts/test_coverage_amdgpu_workflow1.sh
-#   SKIP_BASELINE=1 ./scripts/test_coverage_amdgpu_workflow1.sh
-#   REFRESH=all ./scripts/test_coverage_amdgpu_workflow1.sh
+#   ./scripts/gap-filling-amdgpu.sh
+#   OUTPUT_DIR=./data/my_run ./scripts/gap-filling-amdgpu.sh
+#   JOBS="$(nproc)" ./scripts/gap-filling-amdgpu.sh
+#   SKIP_BASELINE=1 ./scripts/gap-filling-amdgpu.sh   # reuse existing gap list under output/baseline/
+#   REFRESH=all ./scripts/gap-filling-amdgpu.sh
 #
 set -euo pipefail
 
@@ -68,7 +72,7 @@ esac
 mkdir -p "$OUTPUT_DIR"
 cd "$REPO_ROOT"
 
-echo "=== AMDGPU Workflow 1 coverage ==="
+echo "=== AMDGPU gap filling ==="
 echo "output:         $OUTPUT_DIR"
 echo "llvm-bin:       $LLVM_BIN"
 echo "instrumented:   $INSTRUMENTED_BIN_DIR"
@@ -77,7 +81,7 @@ echo "lit filters:    ${LIT_FILTERS[*]}"
 echo
 
 if [[ -z "${SKIP_BASELINE:-}" ]]; then
-    echo ">>> Step 1/3: baseline (LIT suite)"
+    echo ">>> Step 1/3: gap finding — baseline (LIT)"
     baseline_args=(
         python -m coverage baseline
         --output-dir "$BASELINE_OUTPUT_DIR"
@@ -94,7 +98,7 @@ if [[ -z "${SKIP_BASELINE:-}" ]]; then
     fi
     "${baseline_args[@]}"
 else
-    echo ">>> Step 1/3: skipped (SKIP_BASELINE=1)"
+    echo ">>> Step 1/3: skipped (SKIP_BASELINE=1; using existing gap list under $BASELINE_OUTPUT_DIR)"
 fi
 
 if [[ -z "${SKIP_CANDIDATE:-}" ]]; then
@@ -113,12 +117,12 @@ if [[ -z "${SKIP_INCREMENTAL:-}" ]]; then
     python -m coverage incremental \
         --output-dir "$INCREMENTAL_OUTPUT_DIR" \
         --sancov "$LLVM_BIN/sancov" \
-        --baseline-output-dir "$BASELINE_OUTPUT_DIR" \
+        --line-coverage-uncovered-csv "$BASELINE_OUTPUT_DIR/line_coverage_uncovered.csv" \
+        --llc-address-line-map-csv "$BASELINE_OUTPUT_DIR/llc_address_line_map.csv" \
         --candidate-tests-output-dir "$CANDIDATE_TESTS_OUTPUT_DIR"
 else
     echo ">>> Step 3/3: skipped (SKIP_INCREMENTAL=1)"
 fi
 
 echo
-echo "Baseline summary: $BASELINE_OUTPUT_DIR/line_coverage_summary.csv"
-echo "Gap-fill report:  $INCREMENTAL_OUTPUT_DIR/new_coverage.csv"
+echo "Gap-fill report: $INCREMENTAL_OUTPUT_DIR/new_coverage.csv"

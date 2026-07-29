@@ -43,6 +43,11 @@ def run_target_lines_check(
 
     A line is listed only when its matched ``(file, line)`` is present in the
     baseline uncovered CSV produced by ``coverage baseline``.
+
+    The report uses the same uncovered-lines contract as ``coverage baseline``:
+    columns ``file`` and ``line`` with absolute paths matching the baseline
+    summary / LLC address map. An optional ``text`` column preserves the source
+    line for review.
     """
     uncovered_lines = load_uncovered_lines_csv(line_coverage_uncovered_csv)
     summary_files: set[str] = {file for file, _ in uncovered_lines}
@@ -91,15 +96,15 @@ def run_target_lines_check(
                 stats["reported"] += 1
                 uncovered_rows.append(
                     {
-                        "file": rel,
-                        "line_no": str(line_no),
+                        "file": sym_file,
+                        "line": str(line_no),
                         "text": text,
                     }
                 )
             else:
                 stats["not_in_uncovered_list"] += 1
 
-    fieldnames = ["file", "line_no", "text"]
+    fieldnames = ["file", "line", "text"]
     with report_path.open("w", encoding="utf-8", newline="") as out:
         w = csv.DictWriter(out, fieldnames=fieldnames)
         w.writeheader()
