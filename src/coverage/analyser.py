@@ -4,6 +4,7 @@ import pandas as pd
 from pathlib import Path
 from typing import Literal
 
+from coverage.constants import DEFAULT_SOURCE_CODE_FILTER
 from coverage.filepaths import Filepaths
 from coverage.line_coverage_summary import load_uncovered_lines_csv
 from coverage.line_rules import (
@@ -16,9 +17,16 @@ from fuzz_fill.log import get_logger, log_timing
 logger = get_logger("coverage.analyser")
 
 class CoverageAnalyzer:
-    def __init__(self, filepaths: Filepaths, mode: Literal["partial", "full"]):
+    def __init__(
+        self,
+        filepaths: Filepaths,
+        mode: Literal["partial", "full"],
+        *,
+        source_filter: str = DEFAULT_SOURCE_CODE_FILTER,
+    ):
         self.filepaths = filepaths
         self.mode = mode
+        self.source_filter = source_filter
         if filepaths.llc_address_line_map_csv is None:
             raise ValueError("llc_address_line_map_csv is required for incremental coverage")
         if filepaths.line_coverage_uncovered_csv is None:
