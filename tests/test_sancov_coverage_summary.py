@@ -143,6 +143,39 @@ class BuildCoverageSummaryTest(unittest.TestCase):
         self.assertEqual(result[(FILE, 30)], "uncovered")
 
 
+class GetCoverageDfTest(unittest.TestCase):
+    def test_dedupes_duplicate_file_line_point_rows(self) -> None:
+        symcov = {
+            "point-symbol-info": {
+                "/usr/include/c++/13/bits/alloc_traits.h": {
+                    "instantiation_a": {"0x1001": "482:0"},
+                    "instantiation_b": {"0x1001": "482:0"},
+                }
+            },
+            "covered-points": ["0x1001"],
+        }
+        df = Sancov.get_coverage_df(symcov, "")
+        self.assertEqual(len(df), 1)
+        self.assertEqual(int(df.iloc[0]["covered"]), 1)
+        Sancov.build_coverage_summary([df])
+
+    def test_unfiltered_real_symcov_builds_joint_coverage(self) -> None:
+        import json
+        from pathlib import Path
+
+        symcov_path = (
+            Path(__file__).resolve().parent.parent
+            / "integration-tests/Output/baseline-single-filter.test.tmp/baseline/processed_sancov/llc.0.symcov"
+        )
+        if not symcov_path.is_file():
+            self.skipTest(f"missing integration symcov fixture: {symcov_path}")
+        symcov = json.loads(symcov_path.read_text(encoding="utf-8"))
+        df = Sancov.get_coverage_df(symcov, "")
+        maps, summaries, coverage = Sancov.get_joint_coverage([df])
+        self.assertGreater(len(maps[0]), 29_000)
+        self.assertGreater(len(coverage), 0)
+
+
 def _address_line_map(rows: list[tuple[str, int, str, int]]) -> pd.DataFrame:
     return Sancov.build_address_line_map(_coverage_df(rows))
 

@@ -100,7 +100,23 @@ class Sancov:
         # Create coverage dataframe
         df["covered"] = df["point"].isin(covered_points).astype(int)
 
-        return df
+        return Sancov.dedupe_coverage_points(df)
+
+    @staticmethod
+    def dedupe_coverage_points(df: pd.DataFrame) -> pd.DataFrame:
+        """Collapse duplicate ``(file, line, point)`` rows from symcov flattening.
+
+        Header and STL paths can map the same instrumentation point through multiple
+        function entries. Keep one row per triple; ``covered`` is 1 if any duplicate
+        was hit.
+        """
+        if df.empty:
+            return df
+        return (
+            df.groupby(["file", "line", "point"], as_index=False, dropna=False)["covered"]
+            .max()
+            .astype({"covered": int})
+        )
 
     @staticmethod
     def full_line_keys(
