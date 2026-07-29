@@ -4,7 +4,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Default LIT directory prefixes when none are passed (combined into one --filter= regex).
 DEFAULT_LIT_FILTER_DIRS = ["AMDGPU"]
-# Default symcov source-path substring for coverage CSVs.
+# Default symcov source-path substring for incremental gap scoping (--source-filter).
 DEFAULT_SOURCE_CODE_FILTER = "llvm/lib"
 
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "coverage_output" / f"cov_<timestamp>"
