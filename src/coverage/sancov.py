@@ -10,7 +10,6 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-from coverage.constants import DEFAULT_SOURCE_CODE_FILTER
 from fuzz_fill.log import get_logger, log_timing, run_subprocess
 
 logger = get_logger("coverage.sancov")
@@ -86,9 +85,10 @@ class Sancov:
         """
         point_symbol_info = symcov.get("point-symbol-info")
 
-        point_symbol_info = {
-            k: v for k, v in point_symbol_info.items() if source_code_filter in k
-        }
+        if source_code_filter:
+            point_symbol_info = {
+                k: v for k, v in point_symbol_info.items() if source_code_filter in k
+            }
 
         df = Sancov.flatten_point_symbol_info(point_symbol_info)
 
@@ -298,7 +298,7 @@ class Sancov:
     ) -> list[pd.DataFrame]:
         """Load per-tool coverage frames from merged symcov paths on each Sancov."""
         if source_code_filter is None:
-            source_code_filter = DEFAULT_SOURCE_CODE_FILTER
+            source_code_filter = ""
         return Sancov.load_coverage_dfs(
             [s.get_merged_symcov_path() for s in sancovs],
             source_code_filter,
