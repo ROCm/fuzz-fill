@@ -15,6 +15,7 @@ PR_CHECK_MAX_PER_RUN="${PR_CHECK_MAX_PER_RUN:-1}"
 PR_CHECK_SEARCH_LIMIT="${PR_CHECK_SEARCH_LIMIT:-100}"
 PR_CHECK_OUTPUT_ROOT="${PR_CHECK_OUTPUT_ROOT:-${REPO_ROOT}/data/pr-check/runs}"
 PR_CHECK_STATE_FILE="${PR_CHECK_STATE_FILE:-${REPO_ROOT}/data/pr-check/state.json}"
+PR_CHECK_REPORT_DIR="${PR_CHECK_REPORT_DIR:-${REPO_ROOT}/data/pr-check/reports}"
 GITHUB_REPO="${GITHUB_REPO:-llvm/llvm-project}"
 IMAGE_NAME="${IMAGE_NAME:-fuzz-fill-test}"
 
@@ -22,6 +23,7 @@ CONFIG_FILE="${PR_CHECK_CONFIG:-${SCRIPT_DIR}/config.env}"
 
 discover_only=0
 plan_only=0
+report_only=0
 
 usage() {
     cat <<EOF
@@ -33,11 +35,13 @@ run coverage-gap detection for PR/backend pairs with new or changed head SHAs.
 Options:
   --discover-only          List matching PRs and exit
   --plan-only              Print planned work items and exit
+  --report-only            Regenerate latest.json/latest.md from state and exit
   --config <path>          Load environment overrides from a file
                            (default: ${SCRIPT_DIR}/config.env if present)
   --llvm-repo <path>       Local llvm-project clone (required unless set in config)
   --state-file <path>      State file (default: ${PR_CHECK_STATE_FILE})
   --output-root <path>     Per-run artifact root (default: ${PR_CHECK_OUTPUT_ROOT})
+  --report-dir <path>      Report output directory (default: ${PR_CHECK_REPORT_DIR})
   --max-per-run <n>        Max PR/backend checks per invocation (default: ${PR_CHECK_MAX_PER_RUN})
   --jobs <n>               Parallel jobs for Docker build and LIT (default: ${PR_CHECK_JOBS})
   --github-repo <owner/repo>
@@ -64,6 +68,14 @@ load_config() {
 
 run_pr_check() {
     PYTHONPATH="${REPO_ROOT}/scripts" python3 -m pr_check "$@"
+}
+
+generate_report() {
+    echo "=== coverage gap report ==="
+    run_pr_check report \
+        --github-repo "$GITHUB_REPO" \
+        --state-file "$PR_CHECK_STATE_FILE" \
+        --report-dir "$PR_CHECK_REPORT_DIR"
 }
 
 require_command() {
@@ -195,6 +207,10 @@ while [[ $# -gt 0 ]]; do
             plan_only=1
             shift
             ;;
+        --report-only)
+            report_only=1
+            shift
+            ;;
         --config)
             [[ $# -ge 2 ]] || { echo "error: --config requires a value" >&2; exit 2; }
             CONFIG_FILE="$2"
@@ -213,6 +229,11 @@ while [[ $# -gt 0 ]]; do
         --output-root)
             [[ $# -ge 2 ]] || { echo "error: --output-root requires a value" >&2; exit 2; }
             PR_CHECK_OUTPUT_ROOT="$2"
+            shift 2
+            ;;
+        --report-dir)
+            [[ $# -ge 2 ]] || { echo "error: --report-dir requires a value" >&2; exit 2; }
+            PR_CHECK_REPORT_DIR="$2"
             shift 2
             ;;
         --max-per-run)
@@ -263,11 +284,16 @@ require_command docker
 require_command gh
 require_command git
 
-mkdir -p "$(dirname "$PR_CHECK_STATE_FILE")" "$PR_CHECK_OUTPUT_ROOT"
+mkdir -p "$(dirname "$PR_CHECK_STATE_FILE")" "$PR_CHECK_OUTPUT_ROOT" "$PR_CHECK_REPORT_DIR"
 
 common_args=(
     --github-repo "$GITHUB_REPO"
 )
+
+if [[ "$report_only" -eq 1 ]]; then
+    generate_report
+    exit 0
+fi
 
 if [[ "$discover_only" -eq 1 ]]; then
     run_pr_check discover "${common_args[@]}" --limit "$PR_CHECK_SEARCH_LIMIT"
@@ -294,6 +320,7 @@ work_json="$(run_pr_check plan \
 work_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' <<<"$work_json")"
 if [[ "$work_count" -eq 0 ]]; then
     echo "No PR/backend pairs need checking."
+    generate_report
     exit 0
 fi
 
@@ -317,8 +344,10 @@ done < <(python3 -c 'import json,sys; print("\n".join(json.dumps(x) for x in jso
 if [[ "$failures" -gt 0 ]]; then
     echo
     echo "${failures} check(s) failed (see state file for details)."
+    generate_report
     exit 1
 fi
 
 echo
 echo "All planned checks completed successfully."
+generate_report

@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import subprocess
 import sys
@@ -361,15 +360,38 @@ def _work_to_json(work: list[WorkItem]) -> list[dict[str, Any]]:
     return [asdict(item) for item in work]
 
 
+def _read_gap_csv(gap_csv: Path, *, max_rows: int | None = None) -> pd.DataFrame:
+    """Load a target_lines_uncovered.csv file as a normalized DataFrame."""
+    if not gap_csv.is_file():
+        return pd.DataFrame(columns=["file", "line_no", "text"])
+
+    frame = pd.read_csv(gap_csv, nrows=max_rows)
+    if frame.empty:
+        return pd.DataFrame(columns=["file", "line_no", "text"])
+
+    for column in ("file", "line_no", "text"):
+        if column not in frame.columns:
+            frame[column] = ""
+
+    normalized = frame[["file", "line_no", "text"]].fillna("").astype(str)
+    return normalized.apply(lambda series: series.str.strip())
+
+
 def count_csv_data_rows(path: Path) -> int:
     """Return the number of data rows in a CSV file (excluding the header)."""
-    if not path.is_file():
-        return 0
+    return len(_read_gap_csv(path))
 
-    with path.open(encoding="utf-8", newline="") as handle:
-        reader = csv.reader(handle)
-        next(reader, None)
-        return sum(1 for _ in reader)
+
+def load_gap_rows(gap_csv: Path, *, max_rows: int = 20) -> list[dict[str, str]]:
+    """Read uncovered line rows from a target_lines_uncovered.csv file."""
+    if max_rows <= 0:
+        return []
+
+    frame = _read_gap_csv(gap_csv, max_rows=max_rows)
+    if frame.empty:
+        return []
+
+    return frame.to_dict(orient="records")
 
 
 def count_lit_failures(path: Path) -> int:
@@ -406,6 +428,223 @@ def evaluate_output_dir(output_dir: Path) -> dict[str, Any]:
         "gap_report": str(gap_csv),
         "lit_failures_json": str(lit_failures_json),
     }
+
+
+def pr_url(github_repo: str, pr_number: int) -> str:
+    return f"https://github.com/{github_repo}/pull/{pr_number}"
+
+
+def _state_entries_dataframe(state: dict[str, Any]) -> pd.DataFrame:
+    """Convert state entries into a flat DataFrame for report aggregation."""
+    rows: list[dict[str, Any]] = []
+    for key, raw in state.get("entries", {}).items():
+        if not isinstance(raw, dict):
+            continue
+
+        entry = _state_entry_from_dict(raw)
+        rows.append(
+            {
+                "key": key,
+                "pr_number": entry.pr_number,
+                "backend": entry.backend,
+                "title": entry.title,
+                "head_sha": entry.head_sha,
+                "status": entry.status,
+                "gap_count": entry.gap_count,
+                "lit_failure_count": entry.lit_failure_count,
+                "checked_at": entry.checked_at,
+                "output_dir": entry.output_dir,
+                "error": entry.error,
+            }
+        )
+
+    columns = [
+        "key",
+        "pr_number",
+        "backend",
+        "title",
+        "head_sha",
+        "status",
+        "gap_count",
+        "lit_failure_count",
+        "checked_at",
+        "output_dir",
+        "error",
+    ]
+    if not rows:
+        return pd.DataFrame(columns=columns)
+
+    return pd.DataFrame(rows)
+
+
+def _attach_sample_gaps(frame: pd.DataFrame, *, max_gap_lines: int) -> pd.DataFrame:
+    """Add a sample_gaps list column for entries that reported coverage gaps."""
+
+    def sample_gaps_for_row(row: pd.Series) -> list[dict[str, str]]:
+        if row["status"] != "gaps" or int(row["gap_count"]) <= 0:
+            return []
+        gap_csv = Path(row["output_dir"]) / "commit_lines_report" / "target_lines_uncovered.csv"
+        return load_gap_rows(gap_csv, max_rows=max_gap_lines)
+
+    enriched = frame.copy()
+    enriched["sample_gaps"] = enriched.apply(sample_gaps_for_row, axis=1)
+    return enriched
+
+
+def build_report_payload(
+    state: dict[str, Any],
+    *,
+    github_repo: str = DEFAULT_GITHUB_REPO,
+    max_gap_lines: int = 20,
+) -> dict[str, Any]:
+    """Aggregate state entries into a report payload."""
+    frame = _state_entries_dataframe(state)
+    if frame.empty:
+        return {
+            "generated_at": utc_now_iso(),
+            "github_repo": github_repo,
+            "summary": {
+                "total_entries": 0,
+                "with_gaps": 0,
+                "clean": 0,
+                "failed": 0,
+            },
+            "entries_with_gaps": [],
+            "failed_entries": [],
+            "all_entries": [],
+        }
+
+    frame = _attach_sample_gaps(frame, max_gap_lines=max_gap_lines)
+    frame["pr_url"] = frame["pr_number"].map(lambda number: pr_url(github_repo, int(number)))
+
+    status_counts = frame["status"].value_counts()
+    with_gaps_frame = frame[frame["status"] == "gaps"].sort_values(
+        ["gap_count", "pr_number", "backend"],
+        ascending=[False, True, True],
+    )
+    failed_frame = frame[frame["status"] == "failed"].sort_values(["pr_number", "backend"])
+    all_entries_frame = frame.sort_values(["pr_number", "backend"])
+
+    return {
+        "generated_at": utc_now_iso(),
+        "github_repo": github_repo,
+        "summary": {
+            "total_entries": int(len(frame)),
+            "with_gaps": int(status_counts.get("gaps", 0)),
+            "clean": int(status_counts.get("clean", 0)),
+            "failed": int(status_counts.get("failed", 0)),
+        },
+        "entries_with_gaps": with_gaps_frame.to_dict(orient="records"),
+        "failed_entries": failed_frame.to_dict(orient="records"),
+        "all_entries": all_entries_frame.to_dict(orient="records"),
+    }
+
+
+def _markdown_escape_cell(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ")
+
+
+def render_report_markdown(report: dict[str, Any]) -> str:
+    """Render a human-readable Markdown summary."""
+    lines = [
+        "# LLVM PR coverage gap report",
+        "",
+        f"Generated: {report['generated_at']}",
+        f"Repository: {report['github_repo']}",
+    ]
+    summary = report["summary"]
+    lines.extend(
+        [
+            (
+                "Entries: "
+                f"{summary['total_entries']} total, "
+                f"{summary['with_gaps']} with gaps, "
+                f"{summary['clean']} clean, "
+                f"{summary['failed']} failed"
+            ),
+            "",
+        ]
+    )
+
+    entries_with_gaps = report.get("entries_with_gaps", [])
+    if entries_with_gaps:
+        lines.append("## PRs with coverage gaps")
+        lines.append("")
+        for entry in entries_with_gaps:
+            lines.append(
+                f"### #{entry['pr_number']} ({entry['backend']}) — "
+                f"{entry['gap_count']} uncovered line(s)"
+            )
+            lines.append("")
+            lines.append(f"- **Title:** {entry['title']}")
+            lines.append(f"- **PR:** {entry['pr_url']}")
+            lines.append(f"- **Head:** `{entry['head_sha'][:12]}`")
+            lines.append(f"- **Checked:** {entry['checked_at']}")
+            if entry["lit_failure_count"] > 0:
+                lines.append(
+                    f"- **Warning:** {entry['lit_failure_count']} LIT failure(s) during baseline"
+                )
+            lines.append("")
+            sample_gaps = entry.get("sample_gaps", [])
+            if sample_gaps:
+                lines.extend(["| File | Line | Text |", "|------|------|------|"])
+                for row in sample_gaps:
+                    text = _markdown_escape_cell(row.get("text", ""))
+                    file_path = _markdown_escape_cell(row.get("file", ""))
+                    lines.append(f"| `{file_path}` | {row.get('line_no', '')} | `{text}` |")
+                remaining = entry["gap_count"] - len(sample_gaps)
+                if remaining > 0:
+                    lines.extend(
+                        [
+                            "",
+                            (
+                                f"*…and {remaining} more line(s). See "
+                                f"`{entry['output_dir']}/commit_lines_report/target_lines_uncovered.csv`*"
+                            ),
+                        ]
+                    )
+            lines.append("")
+
+    failed_entries = report.get("failed_entries", [])
+    if failed_entries:
+        lines.extend(["## Failed checks", ""])
+        for entry in failed_entries:
+            lines.append(
+                f"- #{entry['pr_number']} ({entry['backend']}): {entry.get('error') or 'unknown error'}"
+            )
+        lines.append("")
+
+    if not entries_with_gaps and not failed_entries:
+        lines.append("No PRs with coverage gaps or failed checks in the current state.")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def write_reports(
+    report_dir: Path,
+    payload: dict[str, Any],
+    *,
+    write_run_snapshot: bool = True,
+) -> dict[str, Path]:
+    """Write latest.json, latest.md, and an optional timestamped snapshot."""
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    latest_json = report_dir / "latest.json"
+    latest_md = report_dir / "latest.md"
+    latest_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    latest_md.write_text(render_report_markdown(payload) + "\n", encoding="utf-8")
+
+    written = {"latest_json": latest_json, "latest_md": latest_md}
+    if write_run_snapshot:
+        runs_dir = report_dir / "runs"
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_name = payload["generated_at"].replace(":", "").replace("+00:00", "Z")
+        snapshot_path = runs_dir / f"{snapshot_name}.json"
+        snapshot_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        written["run_snapshot"] = snapshot_path
+
+    return written
 
 
 def cmd_discover(args: argparse.Namespace) -> int:
@@ -446,6 +685,27 @@ def cmd_record(args: argparse.Namespace) -> int:
 def cmd_evaluate_output(args: argparse.Namespace) -> int:
     payload = evaluate_output_dir(args.output_dir)
     print(json.dumps(payload, indent=2))
+    return 0
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    state = load_state(args.state_file)
+    payload = build_report_payload(
+        state,
+        github_repo=args.github_repo,
+        max_gap_lines=args.max_gap_lines,
+    )
+    written = write_reports(
+        args.report_dir,
+        payload,
+        write_run_snapshot=not args.no_run_snapshot,
+    )
+    print(
+        json.dumps(
+            {key: str(path) for key, path in written.items()},
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -511,6 +771,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluate_parser.add_argument("--output-dir", type=Path, required=True)
     evaluate_parser.set_defaults(func=cmd_evaluate_output)
+
+    report_parser = subparsers.add_parser("report", help="Write latest.json and latest.md from state")
+    report_parser.add_argument("--state-file", type=Path, required=True)
+    report_parser.add_argument(
+        "--report-dir",
+        type=Path,
+        required=True,
+        help="Directory for latest.json, latest.md, and runs/ snapshots",
+    )
+    report_parser.add_argument(
+        "--max-gap-lines",
+        type=int,
+        default=20,
+        help="Max uncovered lines to include per PR in the report (default: 20)",
+    )
+    report_parser.add_argument(
+        "--no-run-snapshot",
+        action="store_true",
+        help="Skip writing report_dir/runs/<timestamp>.json",
+    )
+    report_parser.set_defaults(func=cmd_report)
 
     return parser
 
