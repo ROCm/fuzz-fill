@@ -8,6 +8,7 @@ from coverage.constants import DEFAULT_SOURCE_CODE_FILTER
 from coverage.filepaths import Filepaths
 from coverage.line_coverage_summary import load_uncovered_lines_csv
 from coverage.line_rules import (
+    filter_uncovered_lines,
     gap_address_line_map,
     normalize_llc_address_line_map,
 )
@@ -50,6 +51,17 @@ class CoverageAnalyzer:
             llc_address_line_map = normalize_llc_address_line_map(
                 pd.read_csv(self.llc_address_line_map_file)
             )
+            total_uncovered = len(baseline_uncovered)
+            if self.source_filter:
+                baseline_uncovered = filter_uncovered_lines(
+                    baseline_uncovered, self.source_filter
+                )
+                logger.info(
+                    "applied source filter %r: %d uncovered lines (from %d)",
+                    self.source_filter,
+                    len(baseline_uncovered),
+                    total_uncovered,
+                )
             gap_map = gap_address_line_map(llc_address_line_map, baseline_uncovered)
             logger.info(
                 "baseline gap address map: %d rows on %d uncovered lines "

@@ -27,3 +27,15 @@ def gap_address_line_map(
     uncovered_keys = pd.DataFrame(list(baseline_uncovered), columns=["file", "line"])
     uncovered_keys["line"] = uncovered_keys["line"].astype(int)
     return llc_address_line_map.merge(uncovered_keys, on=["file", "line"])
+
+
+def filter_uncovered_lines(
+    baseline_uncovered: frozenset[tuple[str, int]],
+    source_filter: str,
+) -> frozenset[tuple[str, int]]:
+    """Keep only ``(file, line)`` pairs whose file path contains *source_filter*."""
+    if not source_filter:
+        return baseline_uncovered
+    return frozenset(
+        (file, line) for file, line in baseline_uncovered if source_filter in file
+    )
