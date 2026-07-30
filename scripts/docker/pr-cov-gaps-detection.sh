@@ -21,6 +21,7 @@ keep_image=0
 llvm_repo=""
 backend_tests=""
 github_repo=""
+no_cache=0
 
 usage() {
     cat <<EOF
@@ -44,6 +45,7 @@ Options:
   --backend-tests <target> amdgpu or spirv (required with --build-image)
   --github-repo <owner/repo>
                            GitHub repo hosting the PR (default: llvm/llvm-project)
+  --no-cache               Pass --no-cache to docker build when using --build-image
   --lit-filter <dir>       LIT regex prefix; repeat for multiple (default values available in: scripts/lit-filters-amdgpu.sh for amdgpu, CodeGen/SPIRV for spirv)
   --image-name <name>      Image name when using --pr-id (default: fuzz-fill-test)
   --commit <rev>           Revision for added_lines (default: HEAD in image llvm-project)
@@ -165,6 +167,10 @@ while [[ $# -gt 0 ]]; do
             jobs="$2"
             shift 2
             ;;
+        --no-cache)
+            no_cache=1
+            shift
+            ;;
         --help|-h)
             usage
             exit 0
@@ -215,8 +221,8 @@ if [[ -z "$output_dir" ]]; then
 fi
 
 if [[ "$build_image" -eq 0 ]]; then
-    if [[ -n "$llvm_repo" || -n "$backend_tests" || -n "$github_repo" || "$keep_image" -eq 1 ]]; then
-        echo "error: --llvm-repo, --backend-tests, --github-repo, and --keep-image require --build-image" >&2
+    if [[ -n "$llvm_repo" || -n "$backend_tests" || -n "$github_repo" || "$keep_image" -eq 1 || "$no_cache" -eq 1 ]]; then
+        echo "error: --llvm-repo, --backend-tests, --github-repo, --keep-image, and --no-cache require --build-image" >&2
         exit 1
     fi
 else
@@ -270,6 +276,9 @@ if [[ "$build_image" -eq 1 ]]; then
     fi
     if [[ -n "$jobs" ]]; then
         build_args+=(-j "$jobs")
+    fi
+    if [[ "$no_cache" -eq 1 ]]; then
+        build_args+=(--no-cache)
     fi
 
     echo "=== build PR image ==="

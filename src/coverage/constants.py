@@ -29,5 +29,15 @@ UNION_BATCH_SIZE = 200
 # llvm-lit parallelism cap (workaround for high core-count Docker hosts)
 MAX_LIT_JOBS = 384
 
+# Slowest AMDGPU tests (path_in_suite) seeded into .lit_test_times.txt by default
+# so llvm-lit --order=smart schedules them first on baseline runs.
+BASELINE_LIT_PRIORITY_TESTS = (
+    "CodeGen/AMDGPU/memintrinsic-unroll.ll",
+    "CodeGen/AMDGPU/amdgcn.bitcast.1024bit.ll",
+    "CodeGen/AMDGPU/sched-group-barrier-pipeline-solver.mir",
+    "CodeGen/AMDGPU/bf16.ll",
+)
+BASELINE_LIT_PRIORITY_ELAPSED = 1e6
+
 # New test flags
 TEST_FLAGS = ["-O0", "-O1", "-O2", "-O3"]

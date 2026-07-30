@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
-from coverage.constants import DEFAULT_LIT_FILTER_DIRS, MAX_LIT_JOBS
+from coverage.constants import (
+    BASELINE_LIT_PRIORITY_ELAPSED,
+    DEFAULT_LIT_FILTER_DIRS,
+    MAX_LIT_JOBS,
+)
 
 LIT_SITE_CONFIG_REL = Path("test/lit.site.cfg.py")
+LIT_TEST_TIMES_NAME = ".lit_test_times.txt"
 PATCH_MARKER = "# fuzz-fill: SanitizerCoverage env forwarding"
+_LLVM_SRC_ROOT_RE = re.compile(
+    r"""config\.llvm_src_root\s*=\s*path\(r(?P<quote>["'])(?P<path>.+?)(?P=quote)\)"""
+)
 
 PATCH_SNIPPET = f"""
 {PATCH_MARKER}
@@ -36,6 +45,113 @@ def lit_site_config_path(llvm_lit: Path) -> Path:
 def lit_test_suite_path(llvm_lit: Path) -> Path:
     """Build-tree test suite entry point (same path ``check-llvm`` passes to llvm-lit)."""
     return llvm_build_root(llvm_lit) / "test"
+
+
+def lit_test_times_path(llvm_lit: Path) -> Path:
+    """``test/.lit_test_times.txt`` in the instrumented LLVM build (lit exec_root)."""
+    return lit_test_suite_path(llvm_lit) / LIT_TEST_TIMES_NAME
+
+
+def _resolve_lit_site_path(site_cfg: Path, configured_path: str) -> Path:
+    """Resolve a ``path(...)`` value from ``lit.site.cfg.py`` like upstream lit."""
+    if not configured_path:
+        return Path()
+
+    site_cfg = site_cfg.resolve()
+    candidate = Path(configured_path)
+    if candidate.is_absolute():
+        return Path(os.path.realpath(candidate))
+    return Path(os.path.realpath(site_cfg.parent / configured_path))
+
+
+def llvm_test_source_root(llvm_lit: Path) -> Path:
+    """``llvm/test`` in the LLVM source tree configured by ``lit.site.cfg.py``."""
+    site_cfg = lit_site_config_path(llvm_lit)
+    if not site_cfg.is_file():
+        raise FileNotFoundError(
+            f"LLVM lit site config not found at {site_cfg}. "
+            "Expected an instrumented LLVM build containing "
+            f"{LIT_SITE_CONFIG_REL} (--llvm-lit={llvm_lit})."
+        )
+
+    match = _LLVM_SRC_ROOT_RE.search(site_cfg.read_text(encoding="utf-8"))
+    if not match:
+        raise ValueError(
+            f"Could not parse config.llvm_src_root from {site_cfg}. "
+            "Expected a generated lit.site.cfg.py from an LLVM build."
+        )
+    llvm_src_root = _resolve_lit_site_path(site_cfg, match.group("path"))
+    return llvm_src_root / "test"
+
+
+def filter_existing_lit_priority_tests(
+    llvm_lit: Path,
+    priority_tests: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Return ``path_in_suite`` entries that exist under ``llvm/test``."""
+    source_root = llvm_test_source_root(llvm_lit)
+    existing: list[str] = []
+    missing: list[str] = []
+    for path_in_suite in priority_tests:
+        if (source_root / path_in_suite).is_file():
+            existing.append(path_in_suite)
+        else:
+            missing.append(path_in_suite)
+
+    if missing:
+        print(
+            "warning: skipping lit priority scheduling for missing test(s):\n  "
+            + "\n  ".join(missing),
+            flush=True,
+        )
+    return tuple(existing)
+
+
+def _read_lit_test_times(path: Path) -> dict[str, float]:
+    """Parse llvm-lit timing file (``<seconds> <path_in_suite>`` per line)."""
+    if not path.is_file():
+        return {}
+
+    times: dict[str, float] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        fields = line.split(maxsplit=1)
+        if len(fields) != 2:
+            continue
+        time_str, test_path = fields
+        try:
+            times[test_path.strip()] = float(time_str)
+        except ValueError:
+            continue
+    return times
+
+
+def _write_lit_test_times(path: Path, times: dict[str, float]) -> None:
+    """Write llvm-lit timing file using the same ``%e`` format as upstream lit."""
+    lines = [f"{elapsed:e} {name}" for name, elapsed in sorted(times.items())]
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def seed_lit_priority_test_times(
+    llvm_lit: Path,
+    priority_tests: tuple[str, ...],
+    *,
+    priority_elapsed: float = BASELINE_LIT_PRIORITY_ELAPSED,
+) -> Path:
+    """Boost priority tests in ``.lit_test_times.txt`` for smart lit ordering.
+
+    llvm-lit ``--order=smart`` (the default) sorts by descending
+    ``previous_elapsed``. Seeding high values on cold runs front-loads the
+    slowest tests under parallel ``-j``.
+    """
+    path = lit_test_times_path(llvm_lit)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    times = _read_lit_test_times(path)
+    for test_path in priority_tests:
+        times[test_path] = max(times.get(test_path, 0.0), priority_elapsed)
+
+    _write_lit_test_times(path, times)
+    return path
 
 
 def ensure_lit_sancov_env_forwarding(llvm_lit: Path) -> Path:

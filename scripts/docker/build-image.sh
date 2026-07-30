@@ -11,6 +11,7 @@ image_tag="${IMAGE_TAG:-latest}"
 allowlist="amdgpu"
 llvm_release_version="22.1.8"
 ninja_jobs=""
+no_cache=0
 
 usage() {
     cat <<EOF
@@ -28,6 +29,7 @@ Options:
   --allowlist <target>           SanitizerCoverage allowlist target: amdgpu or spirv
                                  (default: amdgpu)
   -j <n>, --jobs <n>             Parallel jobs for ninja when building LLVM (default: unconstrained)
+  --no-cache                     Pass --no-cache to docker build (ignore layer cache)
 
 Environment:
   IMAGE_NAME                     Docker image name (default: fuzz-fill-test)
@@ -89,6 +91,10 @@ while [[ $# -gt 0 ]]; do
             fi
             ninja_jobs="$2"
             shift 2
+            ;;
+        --no-cache)
+            no_cache=1
+            shift
             ;;
         --help|-h)
             usage
@@ -153,6 +159,9 @@ docker_build_args=(
 )
 if [[ -n "$ninja_jobs" ]]; then
     docker_build_args+=(--build-arg NINJA_JOBS="${ninja_jobs}")
+fi
+if [[ "$no_cache" -eq 1 ]]; then
+    docker_build_args+=(--no-cache)
 fi
 
 docker build \
