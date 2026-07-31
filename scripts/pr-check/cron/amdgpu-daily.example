@@ -1,0 +1,28 @@
+# Example crontab entry for daily AMDGPU PR coverage-gap checking.
+#
+# Install:
+#   1. Copy scripts/pr-check/config.example.env to scripts/pr-check/config.env
+#   2. Set LLVM_REPO to an absolute path in config.env
+#   3. Ensure gh auth login and Docker work for the cron user
+#   4. Create the log file (or pick a path you can write to):
+#        sudo touch /var/log/fuzz-fill-amdgpu-pr-check.log
+#        sudo chown "$USER":"$USER" /var/log/fuzz-fill-amdgpu-pr-check.log
+#   5. Edit paths below, then install one line into your crontab:
+#        crontab -e
+#
+# Optional: email on failure (if mail is configured on the host):
+# MAILTO=you@example.com
+
+# Daily at 02:00 UTC — drain all pending AMDGPU PRs opened in the last 14 days.
+0 2 * * * /home/USER/local/dev/fuzz-fill/scripts/pr-check/run-daily-amdgpu.sh >> /var/log/fuzz-fill-amdgpu-pr-check.log 2>&1
+
+# Notes:
+# - Use absolute paths for the script and log file.
+# - First run may take many hours (backfill within the 14-day window).
+# - Subsequent runs only check new PRs or PRs with changed head SHAs.
+# - Results: data/pr-check/reports/latest.md under the fuzz-fill repo.
+# - If a prior run is still going, flock skips the new invocation (exit 0).
+# - Dry run without builds:
+#     /home/USER/local/dev/fuzz-fill/scripts/pr-check/check-llvm-prs.sh \
+#       --config /home/USER/local/dev/fuzz-fill/scripts/pr-check/config.env \
+#       --backends amdgpu --plan-only
