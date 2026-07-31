@@ -409,6 +409,8 @@ Main output: `<output-dir>/commit_lines_report/target_lines_uncovered.csv`. See 
 
 To automatically check open AMDGPU and SPIR-V PRs on a schedule, use [`scripts/pr-check/check-llvm-prs.sh`](scripts/pr-check/check-llvm-prs.sh). It discovers PRs via `gh`, re-runs gap detection when a PR head SHA changes, and writes local reports under `data/pr-check/reports/`.
 
+For a **daily AMDGPU-only** cron job, use [`scripts/pr-check/run-daily-amdgpu.sh`](scripts/pr-check/run-daily-amdgpu.sh) (see [`scripts/pr-check/README.md`](scripts/pr-check/README.md)).
+
 ```bash
 cp scripts/pr-check/config.example.env scripts/pr-check/config.env
 # Set LLVM_REPO in config.env, then:
@@ -416,7 +418,7 @@ cp scripts/pr-check/config.example.env scripts/pr-check/config.env
 ./scripts/pr-check/check-llvm-prs.sh
 ```
 
-See [`scripts/pr-check/README.md`](scripts/pr-check/README.md) for cron/systemd setup, configuration options, and output layout.
+See [`scripts/pr-check/README.md`](scripts/pr-check/README.md) for cron setup, configuration options, and output layout.
 
 ### Run integration tests
 

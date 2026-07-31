@@ -35,12 +35,22 @@ Run from the fuzz-fill repo root:
 
 # Discover, plan, run up to PR_CHECK_MAX_PER_RUN checks, and write reports
 ./scripts/pr-check/check-llvm-prs.sh
+
+# AMDGPU only, or drain all pending checks in one run
+./scripts/pr-check/check-llvm-prs.sh --backends amdgpu
+./scripts/pr-check/check-llvm-prs.sh --backends amdgpu --drain-queue
 ```
 
 Override config path:
 
 ```bash
 ./scripts/pr-check/check-llvm-prs.sh --config /path/to/my-config.env
+```
+
+Daily cron entry point (AMDGPU only, drains the full queue):
+
+```bash
+./scripts/pr-check/run-daily-amdgpu.sh
 ```
 
 ## What each run does
@@ -52,6 +62,15 @@ Override config path:
    - Run [`pr-cov-gaps-detection.sh`](../docker/pr-cov-gaps-detection.sh)
    - Record `gaps`, `clean`, or `failed` in state
 4. **Report** — write `data/pr-check/reports/latest.json` and `latest.md`
+
+### CLI options
+
+| Flag / env var | Default | Purpose |
+|----------------|---------|---------|
+| `--backends` / `PR_CHECK_BACKENDS` | amdgpu, spirv | Limit discovery to specific backends |
+| `--max-age-days` / `PR_CHECK_MAX_AGE_DAYS` | 14 | Only PRs opened within the last N days |
+| `--max-per-run` / `PR_CHECK_MAX_PER_RUN` | 1 | Max checks per invocation (ignored with `--drain-queue`) |
+| `--drain-queue` | off | Process all pending checks one at a time until empty |
 
 ## Output layout
 
@@ -65,7 +84,61 @@ Override config path:
 
 A PR has **coverage gaps** when `target_lines_uncovered.csv` is non-empty (added lines not covered by the regression suite).
 
-## Cron example
+## Daily AMDGPU cron
+
+For a once-daily job that checks all pending AMDGPU PRs opened within the last 14 days:
+
+### One-time setup
+
+```bash
+cp scripts/pr-check/config.example.env scripts/pr-check/config.env
+# Set LLVM_REPO to an absolute path (required for cron)
+# Ensure gh auth login and Docker work for the cron user
+pip install -e .
+```
+
+`config.env` is local-only (not committed). Use absolute paths in cron configs.
+
+### Test before scheduling
+
+```bash
+# See what would run (no LLVM builds)
+./scripts/pr-check/check-llvm-prs.sh \
+  --config scripts/pr-check/config.env \
+  --backends amdgpu \
+  --plan-only
+
+# Full daily run (builds LLVM Docker images — can take hours on first backfill)
+./scripts/pr-check/run-daily-amdgpu.sh
+```
+
+### Install cron
+
+See [`cron/amdgpu-daily.example`](cron/amdgpu-daily.example) for a ready-to-edit crontab snippet. Typical install:
+
+```bash
+# Create log file (adjust path as needed)
+sudo touch /var/log/fuzz-fill-amdgpu-pr-check.log
+sudo chown "$USER":"$USER" /var/log/fuzz-fill-amdgpu-pr-check.log
+
+crontab -e
+# Add the line from cron/amdgpu-daily.example (with your paths)
+```
+
+The wrapper [`run-daily-amdgpu.sh`](run-daily-amdgpu.sh) uses `flock` to skip if a prior run is still going.
+
+### Expected behavior
+
+| Run | What happens |
+|-----|--------------|
+| **First daily run** | Discovers all open AMDGPU PRs from the last 14 days; checks every PR not yet in `state.json` (or with a changed head SHA). May take many hours. |
+| **Subsequent days** | Same 14-day discovery window, but most PRs are skipped (unchanged SHA). Only new or updated PRs are checked. |
+
+Results land in `data/pr-check/reports/latest.md`.
+
+## Lightweight polling cron
+
+For frequent runs that process one PR at a time (both backends):
 
 ```cron
 # Every 6 hours: run at most one PR/backend check, then refresh reports
