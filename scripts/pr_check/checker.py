@@ -22,7 +22,7 @@ import pandas as pd
 STATE_VERSION = 1
 DEFAULT_GITHUB_REPO = "llvm/llvm-project"
 DEFAULT_SEARCH_LIMIT = 100
-DEFAULT_MAX_PR_AGE_DAYS = 30
+DEFAULT_MAX_PR_AGE_DAYS = 14
 
 BACKEND_SEARCH_QUERIES: dict[str, str] = {
     "amdgpu": 'path:"llvm/lib/Target/AMDGPU"',
