@@ -108,6 +108,38 @@ def _validate_max_age_days(max_age_days: int) -> None:
         raise PrCheckerError(f"max_age_days must be a positive integer: {max_age_days}")
 
 
+def _parse_backends_arg(raw: str | None) -> list[str] | None:
+    """Parse a comma-separated backend list from CLI input."""
+    if raw is None:
+        return None
+    names = [part.strip() for part in raw.split(",") if part.strip()]
+    if not names:
+        raise PrCheckerError("backends must list at least one backend when provided")
+    return _validate_backends(names)
+
+
+def _validate_backends(backends: list[str]) -> list[str]:
+    unknown = sorted(set(backends) - set(BACKEND_SEARCH_QUERIES))
+    if unknown:
+        raise PrCheckerError(
+            f"unknown backend(s): {', '.join(unknown)} "
+            f"(known: {', '.join(sorted(BACKEND_SEARCH_QUERIES))})"
+        )
+    seen: set[str] = set()
+    resolved: list[str] = []
+    for backend in backends:
+        if backend not in seen:
+            seen.add(backend)
+            resolved.append(backend)
+    return resolved
+
+
+def _backends_to_search(backends: list[str] | None) -> list[str]:
+    if backends is None:
+        return list(BACKEND_SEARCH_QUERIES)
+    return _validate_backends(backends)
+
+
 def _search_created_since(max_age_days: int) -> str:
     """Return a YYYY-MM-DD date for GitHub ``created:>`` search qualifiers."""
     _validate_max_age_days(max_age_days)
@@ -243,10 +275,11 @@ def _search_results_dataframe(
     github_repo: str = DEFAULT_GITHUB_REPO,
     limit: int = DEFAULT_SEARCH_LIMIT,
     max_age_days: int = DEFAULT_MAX_PR_AGE_DAYS,
+    backends: list[str] | None = None,
 ) -> pd.DataFrame:
     """Run backend searches and return one row per (PR, backend) match."""
     frames: list[pd.DataFrame] = []
-    for backend in BACKEND_SEARCH_QUERIES:
+    for backend in _backends_to_search(backends):
         items = _search_backend_prs(
             backend,
             github_repo=github_repo,
@@ -294,19 +327,22 @@ def discover_prs(
     github_repo: str = DEFAULT_GITHUB_REPO,
     limit: int = DEFAULT_SEARCH_LIMIT,
     max_age_days: int = DEFAULT_MAX_PR_AGE_DAYS,
+    backends: list[str] | None = None,
 ) -> list[DiscoveredPr]:
     """Find open PRs touching AMDGPU and/or SPIR-V target paths."""
+    search_backends = _backends_to_search(backends)
     log.info(
         "Discovering open PRs on %s (limit=%d per backend, max_age_days=%d, backends=%s)",
         github_repo,
         limit,
         max_age_days,
-        ", ".join(sorted(BACKEND_SEARCH_QUERIES)),
+        ", ".join(search_backends),
     )
     search_df = _search_results_dataframe(
         github_repo=github_repo,
         limit=limit,
         max_age_days=max_age_days,
+        backends=backends,
     )
     grouped = _aggregate_search_results(search_df)
     if grouped.empty:
@@ -821,6 +857,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
         github_repo=args.github_repo,
         limit=args.limit,
         max_age_days=args.max_age_days,
+        backends=_parse_backends_arg(args.backends),
     )
     payload = _discovered_to_json(discovered)
     log.info("Writing %d discovered PR(s) to stdout as JSON", len(payload))
@@ -833,6 +870,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
         github_repo=args.github_repo,
         limit=args.limit,
         max_age_days=args.max_age_days,
+        backends=_parse_backends_arg(args.backends),
     )
     state = load_state(args.state_file)
     work = plan_work(discovered, state)
@@ -951,6 +989,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Only include PRs opened within this many days "
             f"(default: {DEFAULT_MAX_PR_AGE_DAYS})"
+        ),
+    )
+    search_parent.add_argument(
+        "--backends",
+        default=None,
+        help=(
+            "Comma-separated backend names to search "
+            f"(default: {', '.join(sorted(BACKEND_SEARCH_QUERIES))})"
         ),
     )
 

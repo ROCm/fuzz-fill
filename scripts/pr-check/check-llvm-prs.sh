@@ -14,6 +14,7 @@ PR_CHECK_JOBS="${PR_CHECK_JOBS:-$(nproc)}"
 PR_CHECK_MAX_PER_RUN="${PR_CHECK_MAX_PER_RUN:-1}"
 PR_CHECK_SEARCH_LIMIT="${PR_CHECK_SEARCH_LIMIT:-100}"
 PR_CHECK_MAX_AGE_DAYS="${PR_CHECK_MAX_AGE_DAYS:-14}"
+PR_CHECK_BACKENDS="${PR_CHECK_BACKENDS:-}"
 PR_CHECK_OUTPUT_ROOT="${PR_CHECK_OUTPUT_ROOT:-${REPO_ROOT}/data/pr-check/runs}"
 PR_CHECK_STATE_FILE="${PR_CHECK_STATE_FILE:-${REPO_ROOT}/data/pr-check/state.json}"
 PR_CHECK_REPORT_DIR="${PR_CHECK_REPORT_DIR:-${REPO_ROOT}/data/pr-check/reports}"
@@ -46,6 +47,7 @@ Options:
   --report-dir <path>      Report output directory (default: ${PR_CHECK_REPORT_DIR})
   --max-per-run <n>        Max PR/backend checks per invocation (default: ${PR_CHECK_MAX_PER_RUN})
   --max-age-days <n>       Only PRs opened in the last N days (default: ${PR_CHECK_MAX_AGE_DAYS})
+  --backends <list>        Comma-separated backends to check (default: amdgpu,spirv)
   --jobs <n>               Parallel jobs for Docker build and LIT (default: ${PR_CHECK_JOBS})
   --log-level <level>        Python log level: debug, info, warning, error
                              (default: ${PR_CHECK_LOG_LEVEL})
@@ -255,6 +257,11 @@ while [[ $# -gt 0 ]]; do
             PR_CHECK_MAX_AGE_DAYS="$2"
             shift 2
             ;;
+        --backends)
+            [[ $# -ge 2 ]] || { echo "error: --backends requires a value" >&2; exit 2; }
+            PR_CHECK_BACKENDS="$2"
+            shift 2
+            ;;
         --jobs)
             [[ $# -ge 2 ]] || { echo "error: --jobs requires a value" >&2; exit 2; }
             PR_CHECK_JOBS="$2"
@@ -313,6 +320,9 @@ common_args=(
     --github-repo "$GITHUB_REPO"
     --max-age-days "$PR_CHECK_MAX_AGE_DAYS"
 )
+if [[ -n "$PR_CHECK_BACKENDS" ]]; then
+    common_args+=(--backends "$PR_CHECK_BACKENDS")
+fi
 
 if [[ "$report_only" -eq 1 ]]; then
     generate_report

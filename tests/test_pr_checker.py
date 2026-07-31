@@ -255,8 +255,10 @@ class DiscoverPrsTest(unittest.TestCase):
     def test_discover_prs_resolves_head_sha_from_pr_view(self) -> None:
         from pr_check.checker import discover_prs
 
-        search_payload = [{"number": 99, "title": "Test PR", "updatedAt": "2026-01-01"}]
-        with mock.patch("pr_check.checker._search_backend_prs", return_value=search_payload):
+        def fake_search(backend: str, **kwargs: object) -> list[dict[str, object]]:
+            return [{"number": 99, "title": "Test PR", "updatedAt": "2026-01-01"}]
+
+        with mock.patch("pr_check.checker._search_backend_prs", side_effect=fake_search):
             with mock.patch(
                 "pr_check.checker._view_pr",
                 return_value={
@@ -271,6 +273,29 @@ class DiscoverPrsTest(unittest.TestCase):
         self.assertEqual(discovered[0].pr_number, 99)
         self.assertEqual(discovered[0].head_sha, "deadbeef")
         self.assertEqual(discovered[0].backends, ["amdgpu", "spirv"])
+
+    def test_discover_prs_honors_backends_filter(self) -> None:
+        from pr_check.checker import discover_prs
+
+        searched: list[str] = []
+
+        def fake_search(backend: str, **kwargs: object) -> list[dict[str, object]]:
+            searched.append(backend)
+            return [{"number": 99, "title": "Test PR", "updatedAt": "2026-01-01"}]
+
+        with mock.patch("pr_check.checker._search_backend_prs", side_effect=fake_search):
+            with mock.patch(
+                "pr_check.checker._view_pr",
+                return_value={
+                    "headRefOid": "deadbeef",
+                    "title": "Test PR",
+                    "updatedAt": "2026-01-02",
+                },
+            ):
+                discovered = discover_prs(limit=1, backends=["amdgpu"])
+
+        self.assertEqual(searched, ["amdgpu"])
+        self.assertEqual(discovered[0].backends, ["amdgpu"])
 
 
 if __name__ == "__main__":
