@@ -27,6 +27,7 @@ CONFIG_FILE="${PR_CHECK_CONFIG:-${SCRIPT_DIR}/config.env}"
 discover_only=0
 plan_only=0
 report_only=0
+drain_queue=0
 
 usage() {
     cat <<EOF
@@ -46,6 +47,7 @@ Options:
   --output-root <path>     Per-run artifact root (default: ${PR_CHECK_OUTPUT_ROOT})
   --report-dir <path>      Report output directory (default: ${PR_CHECK_REPORT_DIR})
   --max-per-run <n>        Max PR/backend checks per invocation (default: ${PR_CHECK_MAX_PER_RUN})
+  --drain-queue            Process all pending checks (one at a time until queue empty)
   --max-age-days <n>       Only PRs opened in the last N days (default: ${PR_CHECK_MAX_AGE_DAYS})
   --backends <list>        Comma-separated backends to check (default: amdgpu,spirv)
   --jobs <n>               Parallel jobs for Docker build and LIT (default: ${PR_CHECK_JOBS})
@@ -208,6 +210,43 @@ run_one_work_item() {
     echo "Result: status=${status} gap_count=${gap_count} lit_failures=${lit_failure_count}"
 }
 
+plan_work_json() {
+    local max_items="$1"
+    local plan_args=(
+        "${common_args[@]}"
+        --state-file "$PR_CHECK_STATE_FILE"
+        --limit "$PR_CHECK_SEARCH_LIMIT"
+    )
+    if [[ -n "$max_items" ]]; then
+        plan_args+=(--max-items "$max_items")
+    fi
+    run_pr_check plan "${plan_args[@]}"
+}
+
+work_count_from_json() {
+    local work_json="$1"
+    python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' <<<"$work_json"
+}
+
+run_work_items() {
+    local work_json="$1"
+
+    while IFS= read -r item; do
+        local pr_number backend title head_sha reason
+        pr_number="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["pr_number"])' "$item")"
+        backend="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["backend"])' "$item")"
+        title="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["title"])' "$item")"
+        head_sha="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["head_sha"])' "$item")"
+        reason="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["reason"])' "$item")"
+
+        echo
+        echo ">>> Running check (${reason}): #${pr_number} ${backend}"
+        if ! run_one_work_item "$pr_number" "$backend" "$title" "$head_sha"; then
+            failures=$((failures + 1))
+        fi
+    done < <(python3 -c 'import json,sys; print("\n".join(json.dumps(x) for x in json.load(sys.stdin)))' <<<"$work_json")
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --discover-only)
@@ -251,6 +290,10 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || { echo "error: --max-per-run requires a value" >&2; exit 2; }
             PR_CHECK_MAX_PER_RUN="$2"
             shift 2
+            ;;
+        --drain-queue)
+            drain_queue=1
+            shift
             ;;
         --max-age-days)
             [[ $# -ge 2 ]] || { echo "error: --max-age-days requires a value" >&2; exit 2; }
@@ -348,37 +391,50 @@ fi
 validate_runtime_config
 
 echo "=== automated PR check run (log-level=${PR_CHECK_LOG_LEVEL}) ===" >&2
-echo "Discovering and planning work (max ${PR_CHECK_MAX_PER_RUN} check(s) this run)..." >&2
 
-work_json="$(run_pr_check plan \
-    "${common_args[@]}" \
-    --state-file "$PR_CHECK_STATE_FILE" \
-    --limit "$PR_CHECK_SEARCH_LIMIT" \
-    --max-items "$PR_CHECK_MAX_PER_RUN")"
+failures=0
+total_checks=0
 
-work_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin)))' <<<"$work_json")"
-if [[ "$work_count" -eq 0 ]]; then
-    echo "No PR/backend pairs need checking."
+if [[ "$drain_queue" -eq 1 ]]; then
+    echo "Draining queue (one check at a time until empty)..." >&2
+    while true; do
+        work_json="$(plan_work_json 1)"
+        work_count="$(work_count_from_json "$work_json")"
+        if [[ "$work_count" -eq 0 ]]; then
+            break
+        fi
+
+        total_checks=$((total_checks + work_count))
+        echo "Planned check ${total_checks} (draining queue)..." >&2
+        run_work_items "$work_json"
+    done
+
+    if [[ "$total_checks" -eq 0 ]]; then
+        echo "No PR/backend pairs need checking."
+    else
+        echo
+        echo "Completed ${total_checks} check(s) while draining queue."
+    fi
+else
+    echo "Discovering and planning work (max ${PR_CHECK_MAX_PER_RUN} check(s) this run)..." >&2
+
+    work_json="$(plan_work_json "$PR_CHECK_MAX_PER_RUN")"
+    work_count="$(work_count_from_json "$work_json")"
+    if [[ "$work_count" -eq 0 ]]; then
+        echo "No PR/backend pairs need checking."
+        generate_report
+        exit 0
+    fi
+
+    echo "Planned ${work_count} PR/backend check(s)."
+    total_checks=$work_count
+    run_work_items "$work_json"
+fi
+
+if [[ "$total_checks" -eq 0 ]]; then
     generate_report
     exit 0
 fi
-
-echo "Planned ${work_count} PR/backend check(s)."
-
-failures=0
-while IFS= read -r item; do
-    pr_number="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["pr_number"])' "$item")"
-    backend="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["backend"])' "$item")"
-    title="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["title"])' "$item")"
-    head_sha="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["head_sha"])' "$item")"
-    reason="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["reason"])' "$item")"
-
-    echo
-    echo ">>> Running check (${reason}): #${pr_number} ${backend}"
-    if ! run_one_work_item "$pr_number" "$backend" "$title" "$head_sha"; then
-        failures=$((failures + 1))
-    fi
-done < <(python3 -c 'import json,sys; print("\n".join(json.dumps(x) for x in json.load(sys.stdin)))' <<<"$work_json")
 
 if [[ "$failures" -gt 0 ]]; then
     echo
