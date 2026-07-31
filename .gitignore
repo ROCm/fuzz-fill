@@ -6,6 +6,7 @@ data/*
 logs/*
 coverage_output/*
 sbom/*
+scripts/pr-check/config.env
 requirements.txt
 **/__pycache__/*
 integration-tests/Output/*

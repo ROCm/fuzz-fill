@@ -67,6 +67,7 @@ Replace `HEAD` with a hash, branch, or `main~3` as needed.
   - [Build](#build)
   - [Build from an LLVM pull request](#build-from-an-llvm-pull-request)
   - [Workflow 2: PR coverage gap detection](#workflow-2-pr-coverage-gap-detection)
+  - [Periodic PR checking](#periodic-pr-checking)
   - [Run integration tests](#run-integration-tests)
   - [Run a container](#run-a-container)
 - [Tests](#tests)
@@ -403,6 +404,19 @@ For the full coverage-gap workflow (build + detect), use [`scripts/docker/pr-cov
 If the image `fuzz-fill-test:llvm-pr-<n>` already exists, omit `--build-image` to run detection only.
 
 Main output: `<output-dir>/commit_lines_report/target_lines_uncovered.csv`. See [Workflow 2](#workflow-2-uncovered-lines-in-a-commit) for report semantics.
+
+### Periodic PR checking
+
+To automatically check open AMDGPU and SPIR-V PRs on a schedule, use [`scripts/pr-check/check-llvm-prs.sh`](scripts/pr-check/check-llvm-prs.sh). It discovers PRs via `gh`, re-runs gap detection when a PR head SHA changes, and writes local reports under `data/pr-check/reports/`.
+
+```bash
+cp scripts/pr-check/config.example.env scripts/pr-check/config.env
+# Set LLVM_REPO in config.env, then:
+./scripts/pr-check/check-llvm-prs.sh --discover-only
+./scripts/pr-check/check-llvm-prs.sh
+```
+
+See [`scripts/pr-check/README.md`](scripts/pr-check/README.md) for cron/systemd setup, configuration options, and output layout.
 
 ### Run integration tests
 
