@@ -110,10 +110,11 @@ class TestRunner:
         return env
 
     def collect_llc_input_files(self) -> list[Path]:
-        """Sorted paths under ``test_root`` with suffix ``.ll`` or ``.bc``."""
+        """Sorted absolute paths under ``test_root`` with suffix ``.ll`` or ``.bc``."""
+        root = self.filepaths.candidate_tests_dir.resolve()
         paths: set[Path] = set()
         for pattern in ("*.ll", "*.bc"):
-            paths.update(p for p in self.filepaths.candidate_tests_dir.rglob(pattern) if p.is_file())
+            paths.update(p.resolve() for p in root.rglob(pattern) if p.is_file())
         return sorted(paths)
 
     def run(self) -> None:
@@ -260,6 +261,8 @@ class TestRunner:
     def create_standalone_test_script(
         self, test_dir: Path, test_path: Path, flag: str
     ) -> None:
+        test_dir = test_dir.resolve()
+        test_path = test_path.resolve()
         test_dir.mkdir(parents=True, exist_ok=True)
         script = test_dir / "test.sh"
         with open(script, "w") as f:
@@ -272,16 +275,18 @@ class TestRunner:
         script.chmod(0o755)
 
     def run_standalone_test(self, test_dir: Path) -> str:
+        test_dir = test_dir.resolve()
+        script = test_dir / "test.sh"
         if any(test_dir.glob("*.sancov")):
             print(f"Sancov files already exist in {test_dir}, skipping test {test_dir}")
             return "skipped"
 
-        argv = [str(test_dir / "test.sh")]
+        argv = [str(script)]
         env = os.environ.copy()
 
         if self.debug:
             print(f"\tRunning: {argv}")
-            print(f"\tCWD: {test_dir}")
+            print(f"\tCWD: {self.filepaths.candidate_tests_dir}")
             print(f"\tCoverage directory: {self.raw_sancov_output_dir}")
             return "skipped"
 
@@ -289,7 +294,7 @@ class TestRunner:
             run_subprocess(
                 logger,
                 argv,
-                cwd=self.filepaths.candidate_tests_dir,
+                cwd=self.filepaths.candidate_tests_dir.resolve(),
                 env=env,
                 check=True,
             )
