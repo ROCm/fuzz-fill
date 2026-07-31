@@ -16,6 +16,7 @@ PR_CHECK_SEARCH_LIMIT="${PR_CHECK_SEARCH_LIMIT:-100}"
 PR_CHECK_OUTPUT_ROOT="${PR_CHECK_OUTPUT_ROOT:-${REPO_ROOT}/data/pr-check/runs}"
 PR_CHECK_STATE_FILE="${PR_CHECK_STATE_FILE:-${REPO_ROOT}/data/pr-check/state.json}"
 PR_CHECK_REPORT_DIR="${PR_CHECK_REPORT_DIR:-${REPO_ROOT}/data/pr-check/reports}"
+PR_CHECK_LOG_LEVEL="${PR_CHECK_LOG_LEVEL:-info}"
 GITHUB_REPO="${GITHUB_REPO:-llvm/llvm-project}"
 IMAGE_NAME="${IMAGE_NAME:-fuzz-fill-test}"
 
@@ -44,6 +45,9 @@ Options:
   --report-dir <path>      Report output directory (default: ${PR_CHECK_REPORT_DIR})
   --max-per-run <n>        Max PR/backend checks per invocation (default: ${PR_CHECK_MAX_PER_RUN})
   --jobs <n>               Parallel jobs for Docker build and LIT (default: ${PR_CHECK_JOBS})
+  --log-level <level>        Python log level: debug, info, warning, error
+                             (default: ${PR_CHECK_LOG_LEVEL})
+  -v, --verbose             Shorthand for --log-level debug
   --github-repo <owner/repo>
                            GitHub repo hosting PRs (default: ${GITHUB_REPO})
   --help, -h               Show this help
@@ -67,7 +71,9 @@ load_config() {
 }
 
 run_pr_check() {
-    PYTHONPATH="${REPO_ROOT}/scripts" python3 -m pr_check "$@"
+    PYTHONPATH="${REPO_ROOT}/scripts" python3 -m pr_check \
+        "$@" \
+        --log-level "$PR_CHECK_LOG_LEVEL"
 }
 
 generate_report() {
@@ -246,6 +252,15 @@ while [[ $# -gt 0 ]]; do
             PR_CHECK_JOBS="$2"
             shift 2
             ;;
+        --log-level)
+            [[ $# -ge 2 ]] || { echo "error: --log-level requires a value" >&2; exit 2; }
+            PR_CHECK_LOG_LEVEL="$2"
+            shift 2
+            ;;
+        -v|--verbose)
+            PR_CHECK_LOG_LEVEL="debug"
+            shift
+            ;;
         --github-repo)
             [[ $# -ge 2 ]] || { echo "error: --github-repo requires a value" >&2; exit 2; }
             GITHUB_REPO="$2"
@@ -296,11 +311,13 @@ if [[ "$report_only" -eq 1 ]]; then
 fi
 
 if [[ "$discover_only" -eq 1 ]]; then
+    echo "=== discover open PRs (log-level=${PR_CHECK_LOG_LEVEL}) ===" >&2
     run_pr_check discover "${common_args[@]}" --limit "$PR_CHECK_SEARCH_LIMIT"
     exit 0
 fi
 
 if [[ "$plan_only" -eq 1 ]]; then
+    echo "=== plan PR checks (log-level=${PR_CHECK_LOG_LEVEL}) ===" >&2
     run_pr_check plan \
         "${common_args[@]}" \
         --state-file "$PR_CHECK_STATE_FILE" \
@@ -310,6 +327,9 @@ if [[ "$plan_only" -eq 1 ]]; then
 fi
 
 validate_runtime_config
+
+echo "=== automated PR check run (log-level=${PR_CHECK_LOG_LEVEL}) ===" >&2
+echo "Discovering and planning work (max ${PR_CHECK_MAX_PER_RUN} check(s) this run)..." >&2
 
 work_json="$(run_pr_check plan \
     "${common_args[@]}" \

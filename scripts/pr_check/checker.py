@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
@@ -29,6 +30,9 @@ BACKEND_SEARCH_QUERIES: dict[str, str] = {
 SEARCH_JSON_FIELDS = ["number", "title", "updatedAt"]
 PR_VIEW_JSON_FIELDS = ["number", "title", "headRefOid", "updatedAt"]
 LIT_FAILURE_CODES = frozenset({"FAIL", "TIMEOUT", "UNRESOLVED", "XPASS"})
+
+LOG_FORMAT = "%(levelname)-8s %(message)s"
+log = logging.getLogger("pr_check")
 
 
 class PrCheckerError(Exception):
@@ -81,6 +85,22 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def configure_logging(level: str = "info") -> None:
+    """Send log records to stderr so stdout stays free for JSON payloads."""
+    numeric_level = getattr(logging, level.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise PrCheckerError(f"invalid log level: {level}")
+
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+
+    root = logging.getLogger("pr_check")
+    root.handlers.clear()
+    root.setLevel(numeric_level)
+    root.addHandler(handler)
+    root.propagate = False
+
+
 def _require_gh() -> str:
     from shutil import which
 
@@ -92,6 +112,7 @@ def _require_gh() -> str:
 
 def _run_gh(args: list[str], *, timeout: int = 120) -> str:
     gh_path = _require_gh()
+    log.debug("running gh %s", " ".join(args))
     try:
         result = subprocess.run(
             [gh_path, *args],
@@ -138,6 +159,13 @@ def _search_backend_prs(
     limit: int = DEFAULT_SEARCH_LIMIT,
 ) -> list[dict[str, Any]]:
     query = BACKEND_SEARCH_QUERIES[backend]
+    log.info(
+        "Searching %s PRs on %s (query=%r, limit=%d)",
+        backend,
+        github_repo,
+        query,
+        limit,
+    )
     payload = _gh_json(
         [
             "search",
@@ -153,6 +181,7 @@ def _search_backend_prs(
     )
     if not isinstance(payload, list):
         raise PrCheckerError(f"unexpected gh search payload for {backend}: {type(payload)!r}")
+    log.info("Found %d open %s PR(s)", len(payload), backend)
     return payload
 
 
@@ -210,15 +239,32 @@ def _aggregate_search_results(search_df: pd.DataFrame) -> pd.DataFrame:
 
 def discover_prs(*, github_repo: str = DEFAULT_GITHUB_REPO, limit: int = DEFAULT_SEARCH_LIMIT) -> list[DiscoveredPr]:
     """Find open PRs touching AMDGPU and/or SPIR-V target paths."""
-    grouped = _aggregate_search_results(
-        _search_results_dataframe(github_repo=github_repo, limit=limit)
+    log.info(
+        "Discovering open PRs on %s (limit=%d per backend: %s)",
+        github_repo,
+        limit,
+        ", ".join(sorted(BACKEND_SEARCH_QUERIES)),
     )
+    search_df = _search_results_dataframe(github_repo=github_repo, limit=limit)
+    grouped = _aggregate_search_results(search_df)
     if grouped.empty:
+        log.info("No matching open PRs found")
         return []
 
+    total = len(grouped)
+    log.info(
+        "Search returned %d unique PR(s); resolving head SHAs via gh pr view",
+        total,
+    )
+
     discovered: list[DiscoveredPr] = []
-    for row in grouped.itertuples(index=False):
+    for index, row in enumerate(grouped.itertuples(index=False), start=1):
         pr_number = int(row.pr_number)
+        if index == 1 or index == total or index % 10 == 0:
+            log.info("Resolving head SHA %d/%d: #%d", index, total, pr_number)
+        else:
+            log.debug("Resolving head SHA %d/%d: #%d", index, total, pr_number)
+
         pr_view = _view_pr(pr_number, github_repo)
         head_sha = pr_view.get("headRefOid")
         if not head_sha:
@@ -234,11 +280,13 @@ def discover_prs(*, github_repo: str = DEFAULT_GITHUB_REPO, limit: int = DEFAULT
             )
         )
 
+    log.info("Discovery complete: %d PR(s) with head SHAs", len(discovered))
     return discovered
 
 
 def load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
+        log.info("State file not found, starting fresh: %s", path)
         return {"version": STATE_VERSION, "entries": {}}
 
     try:
@@ -255,12 +303,14 @@ def load_state(path: Path) -> dict[str, Any]:
     if not isinstance(payload.get("entries"), dict):
         raise PrCheckerError(f"invalid state file {path}: missing entries object")
 
+    log.info("Loaded state from %s (%d entries)", path, len(payload["entries"]))
     return payload
 
 
 def save_state(path: Path, state: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    log.info("Saved state to %s (%d entries)", path, len(state.get("entries", {})))
 
 
 def _state_entry_from_dict(raw: dict[str, Any]) -> StateEntry:
@@ -282,12 +332,24 @@ def plan_work(discovered: list[DiscoveredPr], state: dict[str, Any]) -> list[Wor
     """Return PR/backend pairs that need a fresh coverage run."""
     entries: dict[str, Any] = state["entries"]
     work: list[WorkItem] = []
+    pair_count = 0
+    skipped_up_to_date = 0
+    new_count = 0
+    head_changed_count = 0
+
+    log.info(
+        "Planning work from %d discovered PR(s) against %d state entries",
+        len(discovered),
+        len(entries),
+    )
 
     for pr in discovered:
         for backend in pr.backends:
+            pair_count += 1
             key = entry_key(pr.pr_number, backend)
             existing = entries.get(key)
             if existing is None:
+                new_count += 1
                 work.append(
                     WorkItem(
                         pr_number=pr.pr_number,
@@ -297,10 +359,12 @@ def plan_work(discovered: list[DiscoveredPr], state: dict[str, Any]) -> list[Wor
                         reason="new",
                     )
                 )
+                log.debug("Queued #%d (%s): new", pr.pr_number, backend)
                 continue
 
             previous = _state_entry_from_dict(existing)
             if previous.head_sha != pr.head_sha:
+                head_changed_count += 1
                 work.append(
                     WorkItem(
                         pr_number=pr.pr_number,
@@ -310,8 +374,39 @@ def plan_work(discovered: list[DiscoveredPr], state: dict[str, Any]) -> list[Wor
                         reason="head_changed",
                     )
                 )
+                log.debug(
+                    "Queued #%d (%s): head changed %s -> %s",
+                    pr.pr_number,
+                    backend,
+                    previous.head_sha[:12],
+                    pr.head_sha[:12],
+                )
+            else:
+                skipped_up_to_date += 1
+                log.debug(
+                    "Skipping #%d (%s): already checked at head %s",
+                    pr.pr_number,
+                    backend,
+                    pr.head_sha[:12],
+                )
 
     work.sort(key=lambda item: (item.pr_number, item.backend))
+    log.info(
+        "Plan summary: %d PR/backend pair(s) scanned, %d queued (%d new, %d head_changed), %d up-to-date",
+        pair_count,
+        len(work),
+        new_count,
+        head_changed_count,
+        skipped_up_to_date,
+    )
+    for item in work:
+        log.info(
+            "  -> #%d (%s) [%s] head=%s",
+            item.pr_number,
+            item.backend,
+            item.reason,
+            item.head_sha[:12],
+        )
     return work
 
 
@@ -329,6 +424,14 @@ def record_result(
     error: str | None = None,
 ) -> None:
     key = entry_key(pr_number, backend)
+    log.info(
+        "Recording result for #%d (%s): status=%s gap_count=%d lit_failures=%d",
+        pr_number,
+        backend,
+        status,
+        gap_count,
+        lit_failure_count,
+    )
     state["entries"][key] = {
         "pr_number": pr_number,
         "backend": backend,
@@ -644,12 +747,17 @@ def write_reports(
         snapshot_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         written["run_snapshot"] = snapshot_path
 
+    log.info("Wrote report files under %s", report_dir)
+    for name, path in written.items():
+        log.info("  %s: %s", name, path)
+
     return written
 
 
 def cmd_discover(args: argparse.Namespace) -> int:
     discovered = discover_prs(github_repo=args.github_repo, limit=args.limit)
     payload = _discovered_to_json(discovered)
+    log.info("Writing %d discovered PR(s) to stdout as JSON", len(payload))
     print(json.dumps(payload, indent=2))
     return 0
 
@@ -659,7 +767,14 @@ def cmd_plan(args: argparse.Namespace) -> int:
     state = load_state(args.state_file)
     work = plan_work(discovered, state)
     if args.max_items is not None:
+        if len(work) > args.max_items:
+            log.info(
+                "Capping planned work from %d item(s) to %d (--max-items)",
+                len(work),
+                args.max_items,
+            )
         work = work[: args.max_items]
+    log.info("Writing %d planned work item(s) to stdout as JSON", len(work))
     print(json.dumps(_work_to_json(work), indent=2))
     return 0
 
@@ -683,17 +798,33 @@ def cmd_record(args: argparse.Namespace) -> int:
 
 
 def cmd_evaluate_output(args: argparse.Namespace) -> int:
+    log.info("Evaluating output directory: %s", args.output_dir)
     payload = evaluate_output_dir(args.output_dir)
+    log.info(
+        "Evaluation: status=%s gap_count=%d lit_failures=%d",
+        payload["status"],
+        payload["gap_count"],
+        payload["lit_failure_count"],
+    )
     print(json.dumps(payload, indent=2))
     return 0
 
 
 def cmd_report(args: argparse.Namespace) -> int:
+    log.info("Generating coverage gap report")
     state = load_state(args.state_file)
     payload = build_report_payload(
         state,
         github_repo=args.github_repo,
         max_gap_lines=args.max_gap_lines,
+    )
+    summary = payload["summary"]
+    log.info(
+        "Report summary: %d total, %d with gaps, %d clean, %d failed",
+        summary["total_entries"],
+        summary["with_gaps"],
+        summary["clean"],
+        summary["failed"],
     )
     written = write_reports(
         args.report_dir,
@@ -713,6 +844,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    logging_parent = argparse.ArgumentParser(add_help=False)
+    logging_parent.add_argument(
+        "--log-level",
+        default="info",
+        choices=["debug", "info", "warning", "error"],
+        help="Log level for progress messages on stderr (default: info)",
+    )
+    logging_parent.add_argument(
+        "-v",
+        "--verbose",
+        action="store_const",
+        const="debug",
+        dest="log_level",
+        help="Shorthand for --log-level debug",
+    )
+
     github_repo_parent = argparse.ArgumentParser(add_help=False)
     github_repo_parent.add_argument(
         "--github-repo",
@@ -723,7 +870,7 @@ def build_parser() -> argparse.ArgumentParser:
     discover_parser = subparsers.add_parser(
         "discover",
         help="List open target PRs",
-        parents=[github_repo_parent],
+        parents=[logging_parent, github_repo_parent],
     )
     discover_parser.add_argument(
         "--limit",
@@ -736,7 +883,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_parser = subparsers.add_parser(
         "plan",
         help="List PR/backend pairs needing a run",
-        parents=[github_repo_parent],
+        parents=[logging_parent, github_repo_parent],
     )
     plan_parser.add_argument(
         "--state-file",
@@ -758,7 +905,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plan_parser.set_defaults(func=cmd_plan)
 
-    record_parser = subparsers.add_parser("record", help="Persist one check result")
+    record_parser = subparsers.add_parser(
+        "record",
+        help="Persist one check result",
+        parents=[logging_parent],
+    )
     record_parser.add_argument("--state-file", type=Path, required=True)
     record_parser.add_argument("--pr-number", type=int, required=True)
     record_parser.add_argument("--backend", choices=sorted(BACKEND_SEARCH_QUERIES), required=True)
@@ -778,6 +929,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser = subparsers.add_parser(
         "evaluate-output",
         help="Summarize gap and LIT failure counts from a run output directory",
+        parents=[logging_parent],
     )
     evaluate_parser.add_argument("--output-dir", type=Path, required=True)
     evaluate_parser.set_defaults(func=cmd_evaluate_output)
@@ -785,7 +937,7 @@ def build_parser() -> argparse.ArgumentParser:
     report_parser = subparsers.add_parser(
         "report",
         help="Write latest.json and latest.md from state",
-        parents=[github_repo_parent],
+        parents=[logging_parent, github_repo_parent],
     )
     report_parser.add_argument("--state-file", type=Path, required=True)
     report_parser.add_argument(
@@ -814,9 +966,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        return args.func(args)
+        configure_logging(args.log_level)
     except PrCheckerError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        return args.func(args)
+    except PrCheckerError as exc:
+        log.error("%s", exc)
         return 1
 
 
