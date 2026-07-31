@@ -12,15 +12,17 @@ import logging
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import pandas as pd
 
 STATE_VERSION = 1
 DEFAULT_GITHUB_REPO = "llvm/llvm-project"
 DEFAULT_SEARCH_LIMIT = 100
+DEFAULT_MAX_PR_AGE_DAYS = 30
 
 BACKEND_SEARCH_QUERIES: dict[str, str] = {
     "amdgpu": 'path:"llvm/lib/Target/AMDGPU"',
@@ -101,6 +103,24 @@ def configure_logging(level: str = "info") -> None:
     root.propagate = False
 
 
+def _validate_max_age_days(max_age_days: int) -> None:
+    if max_age_days <= 0:
+        raise PrCheckerError(f"max_age_days must be a positive integer: {max_age_days}")
+
+
+def _search_created_since(max_age_days: int) -> str:
+    """Return a YYYY-MM-DD date for GitHub ``created:>`` search qualifiers."""
+    _validate_max_age_days(max_age_days)
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=max_age_days)
+    return cutoff.isoformat()
+
+
+def _backend_search_query(backend: str, *, max_age_days: int) -> str:
+    """Build a gh search query for one backend, limited to recently opened PRs."""
+    created_since = _search_created_since(max_age_days)
+    return f'{BACKEND_SEARCH_QUERIES[backend]} created:>{created_since}'
+
+
 def _require_gh() -> str:
     from shutil import which
 
@@ -144,6 +164,32 @@ def _gh_json(args: list[str], *, timeout: int = 120) -> Any:
         raise PrCheckerError(f"gh returned invalid JSON: {exc.msg}") from exc
 
 
+def _gh_api_json(endpoint: str) -> Any:
+    stdout = _run_gh(["api", endpoint])
+    if not stdout.strip():
+        return {}
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise PrCheckerError(f"gh api returned invalid JSON: {exc.msg}") from exc
+
+
+def _normalize_search_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Map GitHub issue-search items to the fields used elsewhere in this module."""
+    normalized: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                "number": item.get("number"),
+                "title": item.get("title") or "",
+                "updatedAt": item.get("updated_at") or "",
+            }
+        )
+    return normalized
+
+
 def _json_fields_for_command(args: list[str]) -> list[str]:
     if args and args[0] == "search":
         return SEARCH_JSON_FIELDS
@@ -157,32 +203,32 @@ def _search_backend_prs(
     *,
     github_repo: str = DEFAULT_GITHUB_REPO,
     limit: int = DEFAULT_SEARCH_LIMIT,
+    max_age_days: int = DEFAULT_MAX_PR_AGE_DAYS,
 ) -> list[dict[str, Any]]:
-    query = BACKEND_SEARCH_QUERIES[backend]
+    query = _backend_search_query(backend, max_age_days=max_age_days)
+    search_query = f"repo:{github_repo} is:pr is:open {query}"
     log.info(
-        "Searching %s PRs on %s (query=%r, limit=%d)",
+        "Searching %s PRs on %s (query=%r, limit=%d, max_age_days=%d)",
         backend,
         github_repo,
-        query,
+        search_query,
         limit,
+        max_age_days,
     )
-    payload = _gh_json(
-        [
-            "search",
-            "prs",
-            query,
-            "--repo",
-            github_repo,
-            "--state",
-            "open",
-            "--limit",
-            str(limit),
-        ]
+    payload = _gh_api_json(
+        "search/issues?"
+        + urlencode(
+            {
+                "q": search_query,
+                "per_page": str(min(limit, 100)),
+            }
+        )
     )
-    if not isinstance(payload, list):
-        raise PrCheckerError(f"unexpected gh search payload for {backend}: {type(payload)!r}")
-    log.info("Found %d open %s PR(s)", len(payload), backend)
-    return payload
+    if not isinstance(payload, dict):
+        raise PrCheckerError(f"unexpected gh api search payload for {backend}: {type(payload)!r}")
+    items = _normalize_search_items(payload.get("items", []))
+    log.info("Found %d open %s PR(s)", len(items), backend)
+    return items[:limit]
 
 
 def _view_pr(pr_number: int, github_repo: str) -> dict[str, Any]:
@@ -196,11 +242,17 @@ def _search_results_dataframe(
     *,
     github_repo: str = DEFAULT_GITHUB_REPO,
     limit: int = DEFAULT_SEARCH_LIMIT,
+    max_age_days: int = DEFAULT_MAX_PR_AGE_DAYS,
 ) -> pd.DataFrame:
     """Run backend searches and return one row per (PR, backend) match."""
     frames: list[pd.DataFrame] = []
     for backend in BACKEND_SEARCH_QUERIES:
-        items = _search_backend_prs(backend, github_repo=github_repo, limit=limit)
+        items = _search_backend_prs(
+            backend,
+            github_repo=github_repo,
+            limit=limit,
+            max_age_days=max_age_days,
+        )
         if not items:
             continue
         frame = pd.DataFrame(items)
@@ -237,15 +289,25 @@ def _aggregate_search_results(search_df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def discover_prs(*, github_repo: str = DEFAULT_GITHUB_REPO, limit: int = DEFAULT_SEARCH_LIMIT) -> list[DiscoveredPr]:
+def discover_prs(
+    *,
+    github_repo: str = DEFAULT_GITHUB_REPO,
+    limit: int = DEFAULT_SEARCH_LIMIT,
+    max_age_days: int = DEFAULT_MAX_PR_AGE_DAYS,
+) -> list[DiscoveredPr]:
     """Find open PRs touching AMDGPU and/or SPIR-V target paths."""
     log.info(
-        "Discovering open PRs on %s (limit=%d per backend: %s)",
+        "Discovering open PRs on %s (limit=%d per backend, max_age_days=%d, backends=%s)",
         github_repo,
         limit,
+        max_age_days,
         ", ".join(sorted(BACKEND_SEARCH_QUERIES)),
     )
-    search_df = _search_results_dataframe(github_repo=github_repo, limit=limit)
+    search_df = _search_results_dataframe(
+        github_repo=github_repo,
+        limit=limit,
+        max_age_days=max_age_days,
+    )
     grouped = _aggregate_search_results(search_df)
     if grouped.empty:
         log.info("No matching open PRs found")
@@ -755,7 +817,11 @@ def write_reports(
 
 
 def cmd_discover(args: argparse.Namespace) -> int:
-    discovered = discover_prs(github_repo=args.github_repo, limit=args.limit)
+    discovered = discover_prs(
+        github_repo=args.github_repo,
+        limit=args.limit,
+        max_age_days=args.max_age_days,
+    )
     payload = _discovered_to_json(discovered)
     log.info("Writing %d discovered PR(s) to stdout as JSON", len(payload))
     print(json.dumps(payload, indent=2))
@@ -763,7 +829,11 @@ def cmd_discover(args: argparse.Namespace) -> int:
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
-    discovered = discover_prs(github_repo=args.github_repo, limit=args.limit)
+    discovered = discover_prs(
+        github_repo=args.github_repo,
+        limit=args.limit,
+        max_age_days=args.max_age_days,
+    )
     state = load_state(args.state_file)
     work = plan_work(discovered, state)
     if args.max_items is not None:
@@ -867,35 +937,40 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"GitHub repo hosting PRs (default: {DEFAULT_GITHUB_REPO})",
     )
 
-    discover_parser = subparsers.add_parser(
-        "discover",
-        help="List open target PRs",
-        parents=[logging_parent, github_repo_parent],
-    )
-    discover_parser.add_argument(
+    search_parent = argparse.ArgumentParser(add_help=False)
+    search_parent.add_argument(
         "--limit",
         type=int,
         default=DEFAULT_SEARCH_LIMIT,
         help=f"Max PRs per backend search (default: {DEFAULT_SEARCH_LIMIT})",
+    )
+    search_parent.add_argument(
+        "--max-age-days",
+        type=int,
+        default=DEFAULT_MAX_PR_AGE_DAYS,
+        help=(
+            "Only include PRs opened within this many days "
+            f"(default: {DEFAULT_MAX_PR_AGE_DAYS})"
+        ),
+    )
+
+    discover_parser = subparsers.add_parser(
+        "discover",
+        help="List open target PRs",
+        parents=[logging_parent, github_repo_parent, search_parent],
     )
     discover_parser.set_defaults(func=cmd_discover)
 
     plan_parser = subparsers.add_parser(
         "plan",
         help="List PR/backend pairs needing a run",
-        parents=[logging_parent, github_repo_parent],
+        parents=[logging_parent, github_repo_parent, search_parent],
     )
     plan_parser.add_argument(
         "--state-file",
         type=Path,
         required=True,
         help="Path to state.json",
-    )
-    plan_parser.add_argument(
-        "--limit",
-        type=int,
-        default=DEFAULT_SEARCH_LIMIT,
-        help=f"Max PRs per backend search (default: {DEFAULT_SEARCH_LIMIT})",
     )
     plan_parser.add_argument(
         "--max-items",

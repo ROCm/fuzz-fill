@@ -245,6 +245,13 @@ class ReportGenerationTest(unittest.TestCase):
 
 
 class DiscoverPrsTest(unittest.TestCase):
+    def test_backend_search_query_includes_opened_within_filter(self) -> None:
+        from pr_check.checker import _backend_search_query
+
+        query = _backend_search_query("amdgpu", max_age_days=30)
+        self.assertIn('path:"llvm/lib/Target/AMDGPU"', query)
+        self.assertRegex(query, r'created:>\d{4}-\d{2}-\d{2}')
+
     def test_discover_prs_resolves_head_sha_from_pr_view(self) -> None:
         from pr_check.checker import discover_prs
 

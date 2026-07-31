@@ -15,6 +15,7 @@ from fuzz_fill.log import get_logger, log_timing, run_subprocess
 
 logger = get_logger("coverage.sancov")
 
+
 class Sancov:
 
     @staticmethod
@@ -352,16 +353,16 @@ class Sancov:
         with log_timing(logger, f"sancov merge ({self.suffix})"):
             merged_out = self.get_merged_sancov_path()
 
-            raw_files = list(self.raw_sancov_dir.glob(f"{self.suffix}.*.sancov"))
+            raw_files = sorted(self.raw_sancov_dir.glob(f"{self.suffix}.*.sancov"))
             if not raw_files:
                 raise FileNotFoundError(f"No sancov files found for suffix: {self.suffix}")
 
-            """Merge raw ``.sancov`` files with repeated ``sancov -union`` (batched)."""
             if len(raw_files) == 1:
                 shutil.copy(raw_files[0], merged_out)
                 return
 
-            sancov = self.sancov_bin
+            logger.info("Merging %d raw sancov file(s) via sancov -union", len(raw_files))
+
             batch = self.union_batch
             layer = list(raw_files)
             with tempfile.TemporaryDirectory(dir=merged_out.parent) as tmp:
@@ -375,17 +376,25 @@ class Sancov:
                             nxt.append(chunk[0])
                             continue
                         out_f = tmp_path / f"u_{round_idx}_{len(nxt)}.sancov"
-                        run_subprocess(
-                            logger,
-                            [str(sancov), "-union"]
-                            + [str(p) for p in chunk]
-                            + ["--output", str(out_f)],
-                            check=True,
-                        )
+                        self._union_raw_sancov_chunk(chunk, out_f)
                         nxt.append(out_f)
                     layer = nxt
                     round_idx += 1
                 shutil.copy(layer[0], merged_out)
+
+    def _union_raw_sancov_chunk(self, inputs: list[Path], output: Path) -> None:
+        result = run_subprocess(
+            logger,
+            [str(self.sancov_bin), "-union", *[str(path) for path in inputs], "--output", str(output)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            stderr = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(
+                f"sancov -union failed for {len(inputs)} file(s): {stderr or result.returncode}"
+            )
     
     def symbolize(
         self,

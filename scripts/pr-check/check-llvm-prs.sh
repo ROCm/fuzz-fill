@@ -13,6 +13,7 @@ LLVM_REPO="${LLVM_REPO:-}"
 PR_CHECK_JOBS="${PR_CHECK_JOBS:-$(nproc)}"
 PR_CHECK_MAX_PER_RUN="${PR_CHECK_MAX_PER_RUN:-1}"
 PR_CHECK_SEARCH_LIMIT="${PR_CHECK_SEARCH_LIMIT:-100}"
+PR_CHECK_MAX_AGE_DAYS="${PR_CHECK_MAX_AGE_DAYS:-30}"
 PR_CHECK_OUTPUT_ROOT="${PR_CHECK_OUTPUT_ROOT:-${REPO_ROOT}/data/pr-check/runs}"
 PR_CHECK_STATE_FILE="${PR_CHECK_STATE_FILE:-${REPO_ROOT}/data/pr-check/state.json}"
 PR_CHECK_REPORT_DIR="${PR_CHECK_REPORT_DIR:-${REPO_ROOT}/data/pr-check/reports}"
@@ -44,6 +45,7 @@ Options:
   --output-root <path>     Per-run artifact root (default: ${PR_CHECK_OUTPUT_ROOT})
   --report-dir <path>      Report output directory (default: ${PR_CHECK_REPORT_DIR})
   --max-per-run <n>        Max PR/backend checks per invocation (default: ${PR_CHECK_MAX_PER_RUN})
+  --max-age-days <n>       Only PRs opened in the last N days (default: ${PR_CHECK_MAX_AGE_DAYS})
   --jobs <n>               Parallel jobs for Docker build and LIT (default: ${PR_CHECK_JOBS})
   --log-level <level>        Python log level: debug, info, warning, error
                              (default: ${PR_CHECK_LOG_LEVEL})
@@ -112,6 +114,7 @@ validate_runtime_config() {
     validate_positive_int "PR_CHECK_JOBS" "$PR_CHECK_JOBS"
     validate_positive_int "PR_CHECK_MAX_PER_RUN" "$PR_CHECK_MAX_PER_RUN"
     validate_positive_int "PR_CHECK_SEARCH_LIMIT" "$PR_CHECK_SEARCH_LIMIT"
+    validate_positive_int "PR_CHECK_MAX_AGE_DAYS" "$PR_CHECK_MAX_AGE_DAYS"
 }
 
 record_failed_run() {
@@ -247,6 +250,11 @@ while [[ $# -gt 0 ]]; do
             PR_CHECK_MAX_PER_RUN="$2"
             shift 2
             ;;
+        --max-age-days)
+            [[ $# -ge 2 ]] || { echo "error: --max-age-days requires a value" >&2; exit 2; }
+            PR_CHECK_MAX_AGE_DAYS="$2"
+            shift 2
+            ;;
         --jobs)
             [[ $# -ge 2 ]] || { echo "error: --jobs requires a value" >&2; exit 2; }
             PR_CHECK_JOBS="$2"
@@ -303,6 +311,7 @@ mkdir -p "$(dirname "$PR_CHECK_STATE_FILE")" "$PR_CHECK_OUTPUT_ROOT" "$PR_CHECK_
 
 common_args=(
     --github-repo "$GITHUB_REPO"
+    --max-age-days "$PR_CHECK_MAX_AGE_DAYS"
 )
 
 if [[ "$report_only" -eq 1 ]]; then
