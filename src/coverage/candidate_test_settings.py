@@ -1,0 +1,70 @@
+"""Load llc invocation variants for ``coverage candidate-test``."""
+
+from __future__ import annotations
+
+import csv
+from pathlib import Path
+
+LLC_FLAGS_COLUMN = "llc_flags"
+
+_DEFAULT_OPT_LEVELS = ("-O0", "-O1", "-O2", "-O3")
+_DEFAULT_GLOBAL_ISEL = ("-global-isel=0", "-global-isel=1")
+
+
+def default_llc_flag_variants() -> tuple[str, ...]:
+    """Built-in cross product: four opt levels × two global-isel settings."""
+    return tuple(
+        f"{opt} {isel}"
+        for opt in _DEFAULT_OPT_LEVELS
+        for isel in _DEFAULT_GLOBAL_ISEL
+    )
+
+
+DEFAULT_LLC_FLAG_VARIANTS = default_llc_flag_variants()
+
+
+def load_llc_flag_variants(settings_csv: Path | None) -> list[str]:
+    """Return llc flag strings from ``settings_csv`` or the built-in default."""
+    if settings_csv is None:
+        return list(DEFAULT_LLC_FLAG_VARIANTS)
+    return _load_llc_flag_variants_csv(settings_csv)
+
+
+def _load_llc_flag_variants_csv(settings_csv: Path) -> list[str]:
+    path = settings_csv.resolve()
+    if not path.is_file():
+        raise SystemExit(f"error: settings CSV not found: {path}")
+
+    with path.open(encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            raise SystemExit(f"error: empty or invalid settings CSV: {path}")
+        if LLC_FLAGS_COLUMN not in reader.fieldnames:
+            raise SystemExit(
+                f"error: {path}: expected column {LLC_FLAGS_COLUMN!r}, "
+                f"got {reader.fieldnames!r}"
+            )
+
+        variants: list[str] = []
+        seen: set[str] = set()
+        for line_no, row in enumerate(reader, start=2):
+            raw = row.get(LLC_FLAGS_COLUMN)
+            if raw is None:
+                continue
+            flags = raw.strip()
+            if not flags:
+                raise SystemExit(
+                    f"error: {path}: blank {LLC_FLAGS_COLUMN} on line {line_no}"
+                )
+            if flags in seen:
+                raise SystemExit(
+                    f"error: {path}: duplicate {LLC_FLAGS_COLUMN} on line {line_no}: "
+                    f"{flags!r}"
+                )
+            seen.add(flags)
+            variants.append(flags)
+
+    if not variants:
+        raise SystemExit(f"error: no llc flag variants in settings CSV: {path}")
+
+    return variants

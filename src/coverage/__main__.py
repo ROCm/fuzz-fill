@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from coverage.candidate_test_settings import load_llc_flag_variants
 from coverage.filepaths import Filepaths
 from coverage.test_runner import TestRunner
 from coverage.constants import (
@@ -162,6 +163,15 @@ def main():
     p_candidate_test.add_argument("--timeout", type=int, default=5,
         help="Per-test wall-clock timeout in seconds; the test is killed with "
              "SIGKILL (timeout -s9) when exceeded. Default: 5.")
+    p_candidate_test.add_argument(
+        "--settings-csv",
+        type=Path,
+        default=None,
+        help=(
+            "CSV of llc flag variants (column llc_flags). "
+            "Default: -O0..-O3 crossed with -global-isel=0/1 (8 variants per input)."
+        ),
+    )
 
     p_incremental.add_argument(
         "--sancov",
@@ -270,12 +280,14 @@ def main():
     elif args.subcmd == "candidate-test":
         tools = candidate_test_tools_from_args(llc=args.llc)
         filepaths = get_filepaths(args, tools=tools)
+        llc_flag_variants = load_llc_flag_variants(args.settings_csv)
         logger.info("getting coverage for the candidate tests")
         with log_timing(logger, "candidate-test"):
             test_runner = TestRunner(
                 mode="standalone",
                 filepaths=filepaths,
                 candidate_tests_limit=args.n,
+                llc_flag_variants=llc_flag_variants,
                 jobs=args.jobs,
                 timeout=args.timeout,
             )

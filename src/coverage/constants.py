@@ -38,6 +38,3 @@ BASELINE_LIT_PRIORITY_TESTS = (
     "CodeGen/AMDGPU/bf16.ll",
 )
 BASELINE_LIT_PRIORITY_ELAPSED = 1e6
-
-# New test flags
-TEST_FLAGS = ["-O0", "-O1", "-O2", "-O3"]

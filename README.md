@@ -125,7 +125,7 @@ baseline  →  candidate-test  →  incremental  →  reduce
 ```
 
 1. **`baseline`** — run a filtered slice of the LLVM LIT suite with SanitizerCoverage to establish baseline coverage: which source lines the existing tests already hit.
-2. **`candidate-test`** — run a directory of fuzz-generated tests (`.ll` / `.bc`) through instrumented `llc` and collect their coverage.
+2. **`candidate-test`** — run a directory of fuzz-generated tests (`.ll` / `.bc`) through instrumented `llc` and collect their coverage. By default each input is compiled **8 times** (cross product of `-O0..-O3` and `-global-isel=0/1`). Override variants with `--settings-csv` (see [Candidate-test settings](#candidate-test-settings)).
 3. **`incremental`** — compare fuzz-test coverage against the suite baseline and report which fuzz tests cover lines the suite misses — these are candidate gap-fillers. A fuzz test qualifies for a line only when it fully covers that line and the line appears in the baseline `line_coverage_uncovered.csv`.
 4. **`reduce`** — shrink promising tests into minimal cases suitable for adding to the suite (see [Reduce interesting tests](#reduce-interesting-tests) below).
 
@@ -270,6 +270,18 @@ Baseline symcov CSVs include **all** instrumented source paths from the LIT run.
 | Flag | Meaning |
 |------|---------|
 | `--source-filter REGEX` | Only consider baseline gaps whose source file path matches this Python regex (default: `(?:^|/)llvm/lib/`; pass `""` to disable) |
+
+### Candidate-test settings
+
+Each row in `--settings-csv` is one `llc` invocation (flags passed before the input path). The CSV must have a single column header `llc_flags`:
+
+```csv
+llc_flags
+-O0 -global-isel=0
+-O0 -global-isel=1
+```
+
+When `--settings-csv` is omitted, fuzz-fill uses the built-in default: all combinations of `-O0`, `-O1`, `-O2`, `-O3` with `-global-isel=0` and `-global-isel=1` (**8 runs per input file**). Total jobs = `(number of .ll/.bc files) × (rows in settings)`.
 
 ### Environment variables
 
