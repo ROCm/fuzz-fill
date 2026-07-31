@@ -22,8 +22,8 @@ DEFAULT_GITHUB_REPO = "llvm/llvm-project"
 DEFAULT_SEARCH_LIMIT = 100
 
 BACKEND_SEARCH_QUERIES: dict[str, str] = {
-    "amdgpu": "path:llvm/lib/Target/AMDGPU",
-    "spirv": "path:llvm/lib/Target/SPIRV",
+    "amdgpu": 'path:"llvm/lib/Target/AMDGPU"',
+    "spirv": 'path:"llvm/lib/Target/SPIRV"',
 }
 
 SEARCH_JSON_FIELDS = ["number", "title", "updatedAt"]
