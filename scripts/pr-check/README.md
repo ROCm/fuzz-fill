@@ -180,12 +180,12 @@ sudo systemctl enable --now fuzz-fill-pr-check.timer
 
 ## Low-level CLI
 
-The orchestrator wraps [`scripts/pr_check/checker.py`](../pr_check/checker.py):
+The orchestrator wraps [`src/pr_check/checker.py`](../../src/pr_check/checker.py):
 
 ```bash
-PYTHONPATH=scripts python3 -m pr_check discover
-PYTHONPATH=scripts python3 -m pr_check plan --state-file data/pr-check/state.json
-PYTHONPATH=scripts python3 -m pr_check report \
+PYTHONPATH=src python3 -m pr_check discover
+PYTHONPATH=src python3 -m pr_check plan --state-file data/pr-check/state.json
+PYTHONPATH=src python3 -m pr_check report \
   --state-file data/pr-check/state.json \
   --report-dir data/pr-check/reports
 ```

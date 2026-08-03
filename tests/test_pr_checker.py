@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,11 +11,7 @@ from unittest import mock
 
 import pandas as pd
 
-SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-
-from pr_check.checker import (  # noqa: E402
+from pr_check.checker import (
     STATE_VERSION,
     DiscoveredPr,
     PrCheckerError,

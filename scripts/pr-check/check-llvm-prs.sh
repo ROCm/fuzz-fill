@@ -77,7 +77,7 @@ load_config() {
 }
 
 run_pr_check() {
-    PYTHONPATH="${REPO_ROOT}/scripts" python3 -m pr_check \
+    PYTHONPATH="${REPO_ROOT}/src" python3 -m pr_check \
         "$@" \
         --log-level "$PR_CHECK_LOG_LEVEL"
 }
