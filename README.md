@@ -9,26 +9,19 @@ fuzz-fill has two phases:
    - **PR** — added or changed lines in a commit that baseline coverage still misses.
 2. **Gap filling** — run a fuzz corpus against that list and report which tests cover the gaps; then reduce promising tests into minimal IR modules.
 
-```mermaid
-flowchart LR
-  baseline[Baseline] & pr[PR] --> uncovered[/Uncovered lines/]
-  corpus[/Fuzz corpus/] --> identify[Identify tests<br/>that cover line gaps] --> newTests[/New tests/]
-  uncovered --> identify
-
-  subgraph gapFinding["Gap finding"]
-    baseline
-    pr
-    uncovered
-  end
-
-  subgraph gapFilling["Gap filling"]
-    corpus
-    identify
-    newTests
-  end
-
-  style gapFinding fill:#fafafa,stroke:#bbb,color:#333
-  style gapFilling fill:#fafafa,stroke:#bbb,color:#333
+```
+┌─ Gap finding ────────────────────────────────────────────────┐
+│                                                              │
+│   Baseline ──┐                                               │
+│              ├──► Uncovered lines                            │
+│   PR ────────┘                 │                             │
+└────────────────────────────────│─────────────────────────────┘
+                                 │     
+┌─ Gap filling ──────────────────│─────────────────────────────┐
+│                                ▼                             │
+│   Fuzz corpus ─────────► Identify tests ────────► New tests  │
+│                        that cover line gaps                  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 See [Contributions](#contributions) for tests contributed to LLVM.
