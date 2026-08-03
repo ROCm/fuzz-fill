@@ -74,14 +74,15 @@ Options:
   --help, -h                    Show this help
 
 Examples:
-  $(basename "$0") --output-dir ./data/fill-100 \\
-      --line-coverage-uncovered-csv ./data/baseline-run/baseline/line_coverage_uncovered.csv \\
-      --llc-address-line-map-csv ./data/baseline-run/baseline/llc_address_line_map.csv \\
-      --candidate-tests-dir /path/to/irtests/bitcode/amdgpu/all -n 100 -j "\$(nproc)"
-  $(basename "$0") --pr-id 203468 --output-dir ./data/pr-fill-100 \\
-      --line-coverage-uncovered-csv ./data/gap-finding-pr-203468/commit_lines_report/target_lines_uncovered.csv \\
-      --llc-address-line-map-csv ./data/gap-finding-pr-203468/baseline/llc_address_line_map.csv \\
-      --candidate-tests-dir /path/to/irtests/bitcode/amdgpu/all -n 100 -j "\$(nproc)"
+  $(basename "$0") --output-dir ./data \\
+      --line-coverage-uncovered-csv line_coverage_uncovered.csv \\
+      --llc-address-line-map-csv llc_address_line_map.csv \\
+      --candidate-tests-dir /path/to/corpus -n 100 -j "\$(nproc)"
+      
+  $(basename "$0") --pr-id 203468 --output-dir ./data \\
+      --line-coverage-uncovered-csv line_coverage_uncovered.csv \\
+      --llc-address-line-map-csv llc_address_line_map.csv \\
+      --candidate-tests-dir /path/to/corpus -n 100 -j "\$(nproc)"
 EOF
 }
 
