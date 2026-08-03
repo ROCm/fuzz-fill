@@ -30,18 +30,14 @@ CORPUS_N="${CORPUS_N:-100}"
 source "${SCRIPT_DIR}/lit-filters-amdgpu.sh"
 LIT_FILTERS=("${AMDGPU_LIT_FILTERS[@]}")
 
-require_bin() {
-    local dir="$1" tool="$2"
-    if [[ ! -x "$dir/$tool" ]]; then
-        echo "error: missing $dir/$tool" >&2
-        exit 1
-    fi
-}
+# shellcheck source=scripts/lib/common.sh
+source "${SCRIPT_DIR}/lib/common.sh"
+# shellcheck source=scripts/lib/coverage-baseline.sh
+source "${SCRIPT_DIR}/lib/coverage-baseline.sh"
+# shellcheck source=scripts/lib/gap-filling.sh
+source "${SCRIPT_DIR}/lib/gap-filling.sh"
 
-if [[ -f "$REPO_ROOT/venv/bin/activate" ]]; then
-    # shellcheck disable=SC1091
-    source "$REPO_ROOT/venv/bin/activate"
-fi
+activate_venv_if_present "$REPO_ROOT"
 
 require_bin "$LLVM_BIN" sancov
 require_bin "$INSTRUMENTED_BIN_DIR" llvm-lit
@@ -72,6 +68,11 @@ esac
 mkdir -p "$OUTPUT_DIR"
 cd "$REPO_ROOT"
 
+export COVERAGE_SANCOV="${LLVM_BIN}/sancov"
+export COVERAGE_LLVM_LIT="${INSTRUMENTED_BIN_DIR}/llvm-lit"
+export COVERAGE_LLC="${INSTRUMENTED_BIN_DIR}/llc"
+export COVERAGE_OPT="${INSTRUMENTED_BIN_DIR}/opt"
+
 echo "=== AMDGPU gap filling ==="
 echo "output:         $OUTPUT_DIR"
 echo "llvm-bin:       $LLVM_BIN"
@@ -82,44 +83,25 @@ echo
 
 if [[ -z "${SKIP_BASELINE:-}" ]]; then
     echo ">>> Step 1/3: gap finding — baseline (LIT)"
-    baseline_args=(
-        python -m coverage baseline
-        --output-dir "$BASELINE_OUTPUT_DIR"
-        --sancov "$LLVM_BIN/sancov"
-        --llvm-lit "$INSTRUMENTED_BIN_DIR/llvm-lit"
-        --llc "$INSTRUMENTED_BIN_DIR/llc"
-        --opt "$INSTRUMENTED_BIN_DIR/opt"
-    )
-    for lit_filter in "${LIT_FILTERS[@]}"; do
-        baseline_args+=(--lit-filter "$lit_filter")
-    done
-    if [[ -n "${JOBS:-}" ]]; then
-        baseline_args+=(-j "$JOBS")
-    fi
-    "${baseline_args[@]}"
+    run_coverage_baseline "$BASELINE_OUTPUT_DIR" "${LIT_FILTERS[@]}"
 else
     echo ">>> Step 1/3: skipped (SKIP_BASELINE=1; using existing gap list under $BASELINE_OUTPUT_DIR)"
 fi
 
 if [[ -z "${SKIP_CANDIDATE:-}" ]]; then
     echo ">>> Step 2/3: candidate-test"
-    python -m coverage candidate-test \
-        --output-dir "$CANDIDATE_TESTS_OUTPUT_DIR" \
-        --llc "$INSTRUMENTED_BIN_DIR/llc" \
-        --candidate-tests-dir "$TESTS_DIR" \
-        --n "$CORPUS_N"
+    run_candidate_test "$CANDIDATE_TESTS_OUTPUT_DIR" "$TESTS_DIR" "$CORPUS_N"
 else
     echo ">>> Step 2/3: skipped (SKIP_CANDIDATE=1)"
 fi
 
 if [[ -z "${SKIP_INCREMENTAL:-}" ]]; then
     echo ">>> Step 3/3: incremental"
-    python -m coverage incremental \
-        --output-dir "$INCREMENTAL_OUTPUT_DIR" \
-        --sancov "$LLVM_BIN/sancov" \
-        --line-coverage-uncovered-csv "$BASELINE_OUTPUT_DIR/line_coverage_uncovered.csv" \
-        --llc-address-line-map-csv "$BASELINE_OUTPUT_DIR/llc_address_line_map.csv" \
-        --candidate-tests-output-dir "$CANDIDATE_TESTS_OUTPUT_DIR"
+    run_incremental \
+        "$INCREMENTAL_OUTPUT_DIR" \
+        "$BASELINE_OUTPUT_DIR/line_coverage_uncovered.csv" \
+        "$BASELINE_OUTPUT_DIR/llc_address_line_map.csv" \
+        "$CANDIDATE_TESTS_OUTPUT_DIR"
 else
     echo ">>> Step 3/3: skipped (SKIP_INCREMENTAL=1)"
 fi

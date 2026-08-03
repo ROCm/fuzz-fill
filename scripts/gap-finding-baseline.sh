@@ -17,17 +17,19 @@ BASELINE_OUTPUT_DIR=$OUTPUT_DIR/baseline
 
 FILTER="${FILTER:-AMDGPU}"
 
+# shellcheck source=scripts/lib/coverage-baseline.sh
+source "${SCRIPT_DIR}/lib/coverage-baseline.sh"
+
 rm -rf "$BASELINE_OUTPUT_DIR"
 
 cd "$REPO_ROOT"
 
-python -m coverage baseline \
-    --output-dir "$BASELINE_OUTPUT_DIR" \
-    --sancov "$LLVM_BIN/sancov" \
-    --llvm-lit "$INSTRUMENTED_BIN_DIR/llvm-lit" \
-    --llc "$INSTRUMENTED_BIN_DIR/llc" \
-    --opt "$INSTRUMENTED_BIN_DIR/opt" \
-    --lit-filter "$FILTER" \
-    --lit-allow-failures
+export COVERAGE_SANCOV="${LLVM_BIN}/sancov"
+export COVERAGE_LLVM_LIT="${INSTRUMENTED_BIN_DIR}/llvm-lit"
+export COVERAGE_LLC="${INSTRUMENTED_BIN_DIR}/llc"
+export COVERAGE_OPT="${INSTRUMENTED_BIN_DIR}/opt"
+export LIT_ALLOW_FAILURES=1
+
+run_coverage_baseline "$BASELINE_OUTPUT_DIR" "$FILTER"
 
 echo "Uncovered baseline lines: $BASELINE_OUTPUT_DIR/line_coverage_uncovered.csv"

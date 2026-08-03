@@ -116,50 +116,20 @@ if [[ ! -d "$candidate_tests_dir" ]]; then
     exit 1
 fi
 
-if [[ -f "$REPO_ROOT/venv/bin/activate" ]]; then
-    # shellcheck disable=SC1091
-    source "$REPO_ROOT/venv/bin/activate"
-fi
+# shellcheck source=scripts/lib/common.sh
+source "${SCRIPT_DIR}/lib/common.sh"
+# shellcheck source=scripts/lib/gap-reducing.sh
+source "${SCRIPT_DIR}/lib/gap-reducing.sh"
 
-extra_args=(--pipeline "$pipeline")
-if [[ -n "${WITH_CREDUCE:-}" ]]; then
-    extra_args+=(--with-creduce)
-fi
-if [[ -n "${CREDUCE_N:-}" ]]; then
-    extra_args+=(--creduce-n "$CREDUCE_N")
-fi
-if [[ -n "${PASS_UNDER_TEST:-}" ]]; then
-    extra_args+=(--pass-under-test "$PASS_UNDER_TEST")
-fi
-if [[ -n "${MTRIPLE:-}" ]]; then
-    extra_args+=(--mtriple "$MTRIPLE")
-fi
-if [[ -n "${EXTRACT_MIR_OUTPUT:-}" ]]; then
-    extra_args+=(--extract-mir-output "$EXTRACT_MIR_OUTPUT")
-fi
-if [[ -n "${MIR_CODEGEN_ONLY:-}" ]]; then
-    extra_args+=(--mir-codegen-only)
-fi
-
-batch_args=(
-    python3 "${SCRIPT_DIR}/batch_reduce_using_coverage.py"
-    --csv "$coverage_csv"
-    --candidate-tests "$candidate_tests_dir"
-    --output "$reduced_dir"
-    --n "$reduce_row"
-    "${extra_args[@]}"
-)
+activate_venv_if_present "$REPO_ROOT"
 
 if [[ "$prepare_only" -eq 0 ]]; then
-    if [[ ! -x "$INSTRUMENTED_BIN_DIR/llc" ]]; then
-        echo "error: missing $INSTRUMENTED_BIN_DIR/llc" >&2
-        exit 1
-    fi
-    if [[ ! -x "$LLVM_BIN/llvm-reduce" ]]; then
-        echo "error: missing $LLVM_BIN/llvm-reduce" >&2
-        exit 1
-    fi
-    batch_args+=(--llc "$INSTRUMENTED_BIN_DIR/llc" --llvm-reduce "$LLVM_BIN/llvm-reduce")
+    require_bin "$INSTRUMENTED_BIN_DIR" llc
+    require_bin "$LLVM_BIN" llvm-reduce
+    export COVERAGE_LLC="${INSTRUMENTED_BIN_DIR}/llc"
+    export COVERAGE_LLVM_REDUCE="${LLVM_BIN}/llvm-reduce"
+else
+    export PREPARE_ONLY=1
 fi
 
 cd "$REPO_ROOT"
@@ -174,4 +144,4 @@ if [[ "$prepare_only" -eq 1 ]]; then
 fi
 echo
 
-"${batch_args[@]}"
+run_gap_reducing "$coverage_csv" "$candidate_tests_dir" "$reduced_dir" "$reduce_row" "$pipeline"
