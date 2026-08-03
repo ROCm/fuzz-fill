@@ -4,9 +4,21 @@
 #   1. Copy scripts/pr-check/config.example.env to scripts/pr-check/config.env
 #   2. Set LLVM_REPO to an absolute path in config.env
 #   3. Ensure gh auth login and Docker work for the cron user
-#   4. Edit the script path below, then install into your user crontab:
-#        crontab -e
+#   4. Install the schedule into *your* crontab (runs as your user, not root):
+#        a. Open your crontab file in an editor:
+#             crontab -e
+#           (First time: pick an editor, e.g. nano. Opens ~/.crontab or a temp file.)
+#        b. Copy the cron line from step 5 below (the line starting with "0 2").
+#        c. Replace /home/USER with your home directory, e.g. for user agorzyns:
+#             /home/agorzyns/local/dev/fuzz-fill/scripts/pr-check/run-daily-amdgpu.sh
+#           Tip: run `realpath scripts/pr-check/run-daily-amdgpu.sh` from the repo root.
+#        d. Paste the edited line as a new line at the end of the file.
+#        e. Save and exit the editor (in nano: Ctrl+O, Enter, Ctrl+X).
+#        f. Confirm it was installed:
+#             crontab -l
+#           You should see your new line listed.
 #
+#   5. Cron line to paste (edit the path first — see 4c):
 # Logs append to logs/pr-check/amdgpu-daily.log under the fuzz-fill repo
 # (already gitignored — no sudo or /var/log needed).
 #
@@ -16,6 +28,8 @@
 # Daily at 02:00 UTC — drain all pending AMDGPU PRs opened in the last 14 days.
 0 2 * * * /home/USER/local/dev/fuzz-fill/scripts/pr-check/run-daily-amdgpu.sh
 
+# Cron schedule format: minute hour day-of-month month day-of-week command
+# "0 2 * * *" = every day at 02:00 (server local time; check `date` if unsure).
 # Notes:
 # - Use an absolute path to run-daily-amdgpu.sh.
 # - First run may take many hours (backfill within the 14-day window).
