@@ -24,13 +24,22 @@ DEFAULT_GITHUB_REPO = "llvm/llvm-project"
 DEFAULT_SEARCH_LIMIT = 100
 DEFAULT_MAX_PR_AGE_DAYS = 14
 
-BACKEND_SEARCH_QUERIES: dict[str, str] = {
-    "amdgpu": 'path:"llvm/lib/Target/AMDGPU"',
-    "spirv": 'path:"llvm/lib/Target/SPIRV"',
+BACKEND_SEARCH_QUERIES: dict[str, list[str]] = {
+    "amdgpu": [
+        'label:"backend:AMDGPU"',
+    ],
+    "spirv": [
+        'path:"llvm/lib/Target/SPIRV"',
+    ],
+}
+
+BACKEND_TARGET_PATH_PREFIXES: dict[str, str] = {
+    "amdgpu": "llvm/lib/Target/AMDGPU/",
+    "spirv": "llvm/lib/Target/SPIRV/",
 }
 
 SEARCH_JSON_FIELDS = ["number", "title", "updatedAt"]
-PR_VIEW_JSON_FIELDS = ["number", "title", "headRefOid", "updatedAt"]
+PR_VIEW_JSON_FIELDS = ["number", "title", "headRefOid", "updatedAt", "files"]
 LIT_FAILURE_CODES = frozenset({"FAIL", "TIMEOUT", "UNRESOLVED", "XPASS"})
 
 LOG_FORMAT = "%(levelname)-8s %(message)s"
@@ -147,10 +156,50 @@ def _search_created_since(max_age_days: int) -> str:
     return cutoff.isoformat()
 
 
-def _backend_search_query(backend: str, *, max_age_days: int) -> str:
-    """Build a gh search query for one backend, limited to recently opened PRs."""
+def _backend_search_terms(backend: str, *, max_age_days: int) -> list[str]:
+    """Build gh search terms for one backend, limited to recently opened PRs."""
     created_since = _search_created_since(max_age_days)
-    return f'{BACKEND_SEARCH_QUERIES[backend]} created:>{created_since}'
+    age_filter = f"created:>{created_since}"
+    return [f"{term} {age_filter}" for term in BACKEND_SEARCH_QUERIES[backend]]
+
+
+def _pr_changed_paths(pr_view: dict[str, Any]) -> list[str]:
+    files = pr_view.get("files")
+    if not isinstance(files, list):
+        return []
+    paths: list[str] = []
+    for entry in files:
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        if isinstance(path, str) and path:
+            paths.append(path)
+    return paths
+
+
+def _pr_touches_backend_path(pr_view: dict[str, Any], backend: str) -> bool:
+    prefix = BACKEND_TARGET_PATH_PREFIXES[backend]
+    return any(path.startswith(prefix) for path in _pr_changed_paths(pr_view))
+
+
+def _merge_search_items(items_list: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Merge GitHub search hits, keeping one row per PR number."""
+    merged: dict[int, dict[str, Any]] = {}
+    for items in items_list:
+        for item in items:
+            number = item.get("number")
+            if number is None:
+                continue
+            pr_number = int(number)
+            existing = merged.get(pr_number)
+            if existing is None:
+                merged[pr_number] = dict(item)
+                continue
+            if item.get("title") and not existing.get("title"):
+                existing["title"] = item["title"]
+            if (item.get("updatedAt") or "") > (existing.get("updatedAt") or ""):
+                existing["updatedAt"] = item["updatedAt"]
+    return [merged[pr_number] for pr_number in sorted(merged)]
 
 
 def _require_gh() -> str:
@@ -230,23 +279,11 @@ def _json_fields_for_command(args: list[str]) -> list[str]:
     raise PrCheckerError(f"unsupported gh command for JSON parsing: {' '.join(args)}")
 
 
-def _search_backend_prs(
-    backend: str,
+def _search_issues(
+    search_query: str,
     *,
-    github_repo: str = DEFAULT_GITHUB_REPO,
-    limit: int = DEFAULT_SEARCH_LIMIT,
-    max_age_days: int = DEFAULT_MAX_PR_AGE_DAYS,
+    limit: int,
 ) -> list[dict[str, Any]]:
-    query = _backend_search_query(backend, max_age_days=max_age_days)
-    search_query = f"repo:{github_repo} is:pr is:open {query}"
-    log.info(
-        "Searching %s PRs on %s (query=%r, limit=%d, max_age_days=%d)",
-        backend,
-        github_repo,
-        search_query,
-        limit,
-        max_age_days,
-    )
     payload = _gh_api_json(
         "search/issues?"
         + urlencode(
@@ -257,10 +294,36 @@ def _search_backend_prs(
         )
     )
     if not isinstance(payload, dict):
-        raise PrCheckerError(f"unexpected gh api search payload for {backend}: {type(payload)!r}")
-    items = _normalize_search_items(payload.get("items", []))
-    log.info("Found %d open %s PR(s)", len(items), backend)
-    return items[:limit]
+        raise PrCheckerError(f"unexpected gh api search payload: {type(payload)!r}")
+    return _normalize_search_items(payload.get("items", []))
+
+
+def _search_backend_prs(
+    backend: str,
+    *,
+    github_repo: str = DEFAULT_GITHUB_REPO,
+    limit: int = DEFAULT_SEARCH_LIMIT,
+    max_age_days: int = DEFAULT_MAX_PR_AGE_DAYS,
+) -> list[dict[str, Any]]:
+    search_terms = _backend_search_terms(backend, max_age_days=max_age_days)
+    per_term_results: list[list[dict[str, Any]]] = []
+    for term in search_terms:
+        search_query = f"repo:{github_repo} is:pr is:open {term}"
+        log.info(
+            "Searching %s PRs on %s (query=%r, limit=%d, max_age_days=%d)",
+            backend,
+            github_repo,
+            search_query,
+            limit,
+            max_age_days,
+        )
+        items = _search_issues(search_query, limit=limit)
+        log.info("Found %d open %s PR(s) for search term", len(items), backend)
+        per_term_results.append(items)
+
+    items = _merge_search_items(per_term_results)[:limit]
+    log.info("Found %d unique open %s PR(s) after merging search terms", len(items), backend)
+    return items
 
 
 def _view_pr(pr_number: int, github_repo: str) -> dict[str, Any]:
@@ -329,7 +392,7 @@ def discover_prs(
     max_age_days: int = DEFAULT_MAX_PR_AGE_DAYS,
     backends: list[str] | None = None,
 ) -> list[DiscoveredPr]:
-    """Find open PRs touching AMDGPU and/or SPIR-V target paths."""
+    """Find open PRs with changed files under AMDGPU/SPIR-V target directories."""
     search_backends = _backends_to_search(backends)
     log.info(
         "Discovering open PRs on %s (limit=%d per backend, max_age_days=%d, backends=%s)",
@@ -351,22 +414,37 @@ def discover_prs(
 
     total = len(grouped)
     log.info(
-        "Search returned %d unique PR(s); resolving head SHAs via gh pr view",
+        "Search returned %d unique PR(s); resolving PR metadata and filtering by target paths",
         total,
     )
 
     discovered: list[DiscoveredPr] = []
+    skipped_without_target_paths = 0
     for index, row in enumerate(grouped.itertuples(index=False), start=1):
         pr_number = int(row.pr_number)
         if index == 1 or index == total or index % 10 == 0:
-            log.info("Resolving head SHA %d/%d: #%d", index, total, pr_number)
+            log.info("Inspecting PR %d/%d: #%d", index, total, pr_number)
         else:
-            log.debug("Resolving head SHA %d/%d: #%d", index, total, pr_number)
+            log.debug("Inspecting PR %d/%d: #%d", index, total, pr_number)
 
         pr_view = _view_pr(pr_number, github_repo)
         head_sha = pr_view.get("headRefOid")
         if not head_sha:
             raise PrCheckerError(f"could not resolve headRefOid for {github_repo}#{pr_number}")
+
+        matched_backends = [
+            backend
+            for backend in row.backends
+            if _pr_touches_backend_path(pr_view, backend)
+        ]
+        if not matched_backends:
+            skipped_without_target_paths += 1
+            log.debug(
+                "Skipping #%d: no changed files under tracked target path(s) for %s",
+                pr_number,
+                ", ".join(row.backends),
+            )
+            continue
 
         discovered.append(
             DiscoveredPr(
@@ -374,11 +452,15 @@ def discover_prs(
                 title=pr_view.get("title") or row.title or "",
                 head_sha=head_sha,
                 updated_at=pr_view.get("updatedAt") or row.updated_at or "",
-                backends=list(row.backends),
+                backends=matched_backends,
             )
         )
 
-    log.info("Discovery complete: %d PR(s) with head SHAs", len(discovered))
+    log.info(
+        "Discovery complete: %d PR(s) with target-path changes (%d skipped without target-path changes)",
+        len(discovered),
+        skipped_without_target_paths,
+    )
     return discovered
 
 

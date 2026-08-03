@@ -240,12 +240,50 @@ class ReportGenerationTest(unittest.TestCase):
 
 
 class DiscoverPrsTest(unittest.TestCase):
-    def test_backend_search_query_includes_opened_within_filter(self) -> None:
-        from pr_check.checker import _backend_search_query
+    def test_backend_search_terms_include_label_and_age_filter_for_amdgpu(self) -> None:
+        from pr_check.checker import _backend_search_terms
 
-        query = _backend_search_query("amdgpu", max_age_days=30)
-        self.assertIn('path:"llvm/lib/Target/AMDGPU"', query)
-        self.assertRegex(query, r'created:>\d{4}-\d{2}-\d{2}')
+        terms = _backend_search_terms("amdgpu", max_age_days=30)
+        self.assertEqual(len(terms), 1)
+        self.assertIn('label:"backend:AMDGPU"', terms[0])
+        self.assertRegex(terms[0], r'created:>\d{4}-\d{2}-\d{2}')
+
+    def test_pr_touches_backend_path_matches_target_prefix(self) -> None:
+        from pr_check.checker import _pr_touches_backend_path
+
+        pr_view = {
+            "files": [
+                {"path": "clang/test/CodeGenHIP/foo.hip"},
+                {"path": "llvm/lib/Target/AMDGPU/Foo.cpp"},
+            ]
+        }
+        self.assertTrue(_pr_touches_backend_path(pr_view, "amdgpu"))
+        self.assertFalse(_pr_touches_backend_path(pr_view, "spirv"))
+
+    def test_merge_search_items_deduplicates_by_pr_number(self) -> None:
+        from pr_check.checker import _merge_search_items
+
+        merged = _merge_search_items(
+            [
+                [{"number": 10, "title": "From path", "updatedAt": "2026-01-01"}],
+                [{"number": 10, "title": "", "updatedAt": "2026-01-03"}, {"number": 5, "title": "Label only", "updatedAt": "2026-01-02"}],
+            ]
+        )
+
+        self.assertEqual([item["number"] for item in merged], [5, 10])
+        self.assertEqual(merged[1]["updatedAt"], "2026-01-03")
+        self.assertEqual(merged[1]["title"], "From path")
+
+    def _pr_view_with_target_files(self) -> dict[str, object]:
+        return {
+            "headRefOid": "deadbeef",
+            "title": "Test PR",
+            "updatedAt": "2026-01-02",
+            "files": [
+                {"path": "llvm/lib/Target/AMDGPU/Foo.cpp"},
+                {"path": "llvm/lib/Target/SPIRV/Bar.cpp"},
+            ],
+        }
 
     def test_discover_prs_resolves_head_sha_from_pr_view(self) -> None:
         from pr_check.checker import discover_prs
@@ -256,11 +294,7 @@ class DiscoverPrsTest(unittest.TestCase):
         with mock.patch("pr_check.checker._search_backend_prs", side_effect=fake_search):
             with mock.patch(
                 "pr_check.checker._view_pr",
-                return_value={
-                    "headRefOid": "deadbeef",
-                    "title": "Test PR",
-                    "updatedAt": "2026-01-02",
-                },
+                return_value=self._pr_view_with_target_files(),
             ):
                 discovered = discover_prs(limit=1)
 
@@ -281,16 +315,32 @@ class DiscoverPrsTest(unittest.TestCase):
         with mock.patch("pr_check.checker._search_backend_prs", side_effect=fake_search):
             with mock.patch(
                 "pr_check.checker._view_pr",
-                return_value={
-                    "headRefOid": "deadbeef",
-                    "title": "Test PR",
-                    "updatedAt": "2026-01-02",
-                },
+                return_value=self._pr_view_with_target_files(),
             ):
                 discovered = discover_prs(limit=1, backends=["amdgpu"])
 
         self.assertEqual(searched, ["amdgpu"])
         self.assertEqual(discovered[0].backends, ["amdgpu"])
+
+    def test_discover_prs_skips_prs_without_target_path_changes(self) -> None:
+        from pr_check.checker import discover_prs
+
+        def fake_search(backend: str, **kwargs: object) -> list[dict[str, object]]:
+            return [{"number": 99, "title": "Test PR", "updatedAt": "2026-01-01"}]
+
+        with mock.patch("pr_check.checker._search_backend_prs", side_effect=fake_search):
+            with mock.patch(
+                "pr_check.checker._view_pr",
+                return_value={
+                    "headRefOid": "deadbeef",
+                    "title": "Test PR",
+                    "updatedAt": "2026-01-02",
+                    "files": [{"path": "clang/test/CodeGenHIP/foo.hip"}],
+                },
+            ):
+                discovered = discover_prs(limit=1, backends=["amdgpu"])
+
+        self.assertEqual(discovered, [])
 
 
 if __name__ == "__main__":
