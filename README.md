@@ -4,23 +4,36 @@ Fuzzing to fill LLVM coverage gaps with fuzz-generated tests.
 
 fuzz-fill has two phases:
 
-1. **Gap finding** — measure baseline coverage and produce a list of uncovered lines.
-2. **Gap filling** — run a fuzz corpus against that list and report which tests cover the gaps; then reduce promising tests into minimal LIT cases.
+1. **Gap finding** — measure baseline coverage achieved by LLVM's LIT test suite and produce a list of uncovered lines. At present `fuzz-fill` supports finding gaps in the AMDGPU and SPIR-V backends; this will be extended in the futuer to other backends and parts of the LLVM codebase.
+   - **Baseline** — all uncovered lines in a user-specified part of the LLVM codebase. 
+   - **PR** — added or changed lines in a commit that baseline coverage still misses.
+2. **Gap filling** — run a fuzz corpus against that list and report which tests cover the gaps; then reduce promising tests into minimal IR modules.
 
-Gap finding comes in two flavours:
+```mermaid
+flowchart TB
+  subgraph gapFinding["1. Gap finding"]
+    baseline["Baseline<br/>filtered LIT run"]
+    pr["PR<br/>git commit + baseline run"]
+    baseline --> gapListB["all uncovered lines"]
+    pr --> gapListP["lines changed in the PR that are uncovered"]
+  end
 
-| Flavour | Input | Main output |
-|---------|-------|-------------|
-| **Baseline** | Filtered LIT run | `baseline/line_coverage_uncovered.csv` |
-| **PR** | Git commit + baseline | `commit_lines_report/target_lines_uncovered.csv` (added lines still uncovered) |
+  subgraph gapFilling["2. Gap filling"]
+    corpus["Fuzz corpus"]
+    corpus --> candidate["candidate-test"]
+    candidate --> incremental["incremental"]
+    incremental --> result["tests covering gaps"]
+  end
 
-Gap filling always needs a gap list plus `baseline/llc_address_line_map.csv` from the **same** baseline run (and image / LIT filters).
+  gapListB --> incremental
+  gapListP --> incremental
+```
 
 See [Contributions](#contributions) for tests contributed to LLVM.
 
 ## Quick start (Docker)
 
-Try [PR gap finding](#gap-finding-pr), which reports lines added in a commit that baseline coverage still does not hit.
+Try [PR gap finding](#gap-finding-pr), which reports lines changed in a PR or commit that are not covered by any LIT tests. Results are saved in `<output-dir>/commit_lines_report/target_lines_uncovered.csv`. See [Gap finding (PR)](#gap-finding-pr) and [Docker test image](#docker-test-image) for more options.
 
 Prerequisites:
 - [Docker](https://docs.docker.com/)
@@ -31,7 +44,7 @@ git clone https://github.com/ROCm/fuzz-fill.git
 cd fuzz-fill
 ```
 
-**LLVM pull request** — requires [GitHub CLI](https://cli.github.com/) (`gh`). Builds a PR image and runs gap finding in one step (first build compiles LLVM in Docker and can take a while):
+**LLVM pull request** — requires [GitHub CLI](https://cli.github.com/) (`gh`). Builds a PR image, squashes all commits onto the PR's base commit, and finds all coverage gaps in that PR:
 
 ```bash
 ./scripts/docker/gap-finding-pr.sh \
@@ -45,7 +58,7 @@ cd fuzz-fill
 
 Use `spirv` instead of `amdgpu` for SPIR-V backend tests.
 
-**Local commit** — build from your `llvm-project` checkout, then run gap finding with `--image` and `--commit`:
+**Local commit** — build from your `llvm-project` checkout (the local checkout remains unchanged). This command only finds gaps in lines changed in a single commit rather than a full PR. Replace `HEAD` with a hash, branch, or `main~3` as needed:
 
 ```bash
 ./scripts/docker/build-image.sh --llvm-dir /path/to/llvm-project --allowlist amdgpu -j "$(nproc)"
@@ -56,10 +69,6 @@ Use `spirv` instead of `amdgpu` for SPIR-V backend tests.
   --commit HEAD \
   -j "$(nproc)"
 ```
-
-Replace `HEAD` with a hash, branch, or `main~3` as needed. `--commit` selects the revision passed to `added_lines`; default is `HEAD` inside the container's `/work/llvm-project`.
-
-**Result (both paths):** `<output-dir>/commit_lines_report/target_lines_uncovered.csv`. See [Gap finding (PR)](#gap-finding-pr) and [Docker test image](#docker-test-image) for more options.
 
 To **fill** those gaps with fuzz tests, chain [gap filling](#gap-filling) after gap finding (see [Chaining gap finding and filling](#chaining-gap-finding-and-filling)).
 
@@ -139,7 +148,7 @@ baseline  →  line_coverage_uncovered.csv
 (LIT run)     (+ llc_address_line_map.csv)
 ```
 
-**`coverage baseline`** — run a filtered slice of LLVM LIT with SanitizerCoverage and write uncovered lines plus the LLC address map.
+**`coverage baseline`** — identify uncovered lines in run a filtered slice of LLVM instrumented with SanitizerCoverage.
 
 ### Configure and run
 
