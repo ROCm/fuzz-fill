@@ -117,15 +117,11 @@ pip install -e .
 See [`cron/amdgpu-daily.example`](cron/amdgpu-daily.example) for a ready-to-edit crontab snippet. Typical install:
 
 ```bash
-# Create log file (adjust path as needed)
-sudo touch /var/log/fuzz-fill-amdgpu-pr-check.log
-sudo chown "$USER":"$USER" /var/log/fuzz-fill-amdgpu-pr-check.log
-
 crontab -e
 # Add the line from cron/amdgpu-daily.example (with your paths)
 ```
 
-The wrapper [`run-daily-amdgpu.sh`](run-daily-amdgpu.sh) uses `flock` to skip if a prior run is still going.
+The wrapper [`run-daily-amdgpu.sh`](run-daily-amdgpu.sh) appends logs to `logs/pr-check/amdgpu-daily.log` (gitignored, no sudo required) and uses `flock` to skip if a prior run is still going.
 
 ### Expected behavior
 
@@ -142,7 +138,7 @@ For frequent runs that process one PR at a time (both backends):
 
 ```cron
 # Every 6 hours: run at most one PR/backend check, then refresh reports
-0 */6 * * * cd /path/to/fuzz-fill && ./scripts/pr-check/check-llvm-prs.sh >> /var/log/fuzz-fill-pr-check.log 2>&1
+0 */6 * * * cd /path/to/fuzz-fill && ./scripts/pr-check/check-llvm-prs.sh >> logs/pr-check/polling.log 2>&1
 ```
 
 Keep `PR_CHECK_MAX_PER_RUN=1` unless you have enough CPU/time for multiple LLVM Docker builds per invocation.

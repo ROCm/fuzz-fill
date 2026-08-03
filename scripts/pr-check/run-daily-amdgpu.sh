@@ -10,6 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CONFIG_FILE="${PR_CHECK_CONFIG:-${SCRIPT_DIR}/config.env}"
 LOCK_FILE="${REPO_ROOT}/data/pr-check/.amdgpu-daily.lock"
+LOG_FILE="${PR_CHECK_LOG_FILE:-${REPO_ROOT}/logs/pr-check/amdgpu-daily.log}"
 ORCHESTRATOR="${SCRIPT_DIR}/check-llvm-prs.sh"
 
 log() {
@@ -27,7 +28,10 @@ Configuration:
   to an absolute path before scheduling this script.
 
 Environment:
-  PR_CHECK_CONFIG   Override config file path (default: ${CONFIG_FILE})
+  PR_CHECK_CONFIG    Override config file path (default: ${CONFIG_FILE})
+  PR_CHECK_LOG_FILE  Override log file path (default: ${LOG_FILE})
+
+Logs append to logs/pr-check/amdgpu-daily.log under the repo (gitignored).
 
 For a dry run without builds, use:
   ${ORCHESTRATOR} --config ${CONFIG_FILE} --backends amdgpu --plan-only
@@ -47,6 +51,9 @@ fi
 
 # Cron runs with a minimal PATH; include common install locations.
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${HOME}/.local/bin:${PATH:-}"
+
+mkdir -p "$(dirname "$LOG_FILE")"
+exec > >(tee -a "$LOG_FILE") 2>&1
 
 if [[ ! -x "$ORCHESTRATOR" ]]; then
     log "error: orchestrator not found or not executable: ${ORCHESTRATOR}"
