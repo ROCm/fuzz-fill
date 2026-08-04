@@ -97,15 +97,14 @@ if [[ -z "$output_dir" ]]; then
     exit 1
 fi
 
-if [[ ! "$reduce_row" =~ ^[0-9]+$ ]] || [[ "$reduce_row" -eq 0 ]]; then
-    echo "error: --row must be a positive integer: ${reduce_row}" >&2
-    exit 1
-fi
-
 # shellcheck source=scripts/lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
 # shellcheck source=scripts/lib/gap-artifacts.sh
 source "${SCRIPT_DIR}/lib/gap-artifacts.sh"
+# shellcheck source=scripts/lib/gap-reducing-cli.sh
+source "${SCRIPT_DIR}/lib/gap-reducing-cli.sh"
+
+gap_reducing_validate_row "$reduce_row"
 
 coverage_csv="$(gap_fill_coverage_csv "$output_dir")"
 candidate_tests_dir="$(gap_fill_candidate_tests_dir "$output_dir")"
@@ -117,13 +116,13 @@ source "${SCRIPT_DIR}/lib/gap-reducing.sh"
 
 activate_venv_if_present "$REPO_ROOT"
 
+gap_reducing_apply_env "$prepare_only"
+
 if [[ "$prepare_only" -eq 0 ]]; then
     require_bin "$INSTRUMENTED_BIN_DIR" llc
     require_bin "$LLVM_BIN" llvm-reduce
     export COVERAGE_LLC="${INSTRUMENTED_BIN_DIR}/llc"
     export COVERAGE_LLVM_REDUCE="${LLVM_BIN}/llvm-reduce"
-else
-    export PREPARE_ONLY=1
 fi
 
 cd "$REPO_ROOT"

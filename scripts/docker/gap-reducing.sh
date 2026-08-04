@@ -15,6 +15,8 @@ CONTAINER_WORKDIR="/work/fuzz-fill"
 CONTAINER_SCRIPT="${CONTAINER_WORKDIR}/scripts/docker/$(basename "$0")"
 
 if [[ "${IN_CONTAINER:-}" == 1 ]]; then
+    # shellcheck source=scripts/lib/gap-reducing-cli.sh
+    source "${REPO_ROOT}/scripts/lib/gap-reducing-cli.sh"
     # shellcheck source=scripts/lib/gap-reducing.sh
     source "${REPO_ROOT}/scripts/lib/gap-reducing.sh"
 
@@ -23,6 +25,15 @@ if [[ "${IN_CONTAINER:-}" == 1 ]]; then
     : "${PREPARE_ONLY:?PREPARE_ONLY is required}"
 
     export BATCH_REDUCE_PYTHON=python
+
+    gap_reducing_apply_env \
+        "${PREPARE_ONLY}" \
+        "${WITH_CREDUCE:-0}" \
+        "${CREDUCE_N:-}" \
+        "${PASS_UNDER_TEST:-}" \
+        "${MTRIPLE:-}" \
+        "${EXTRACT_MIR_OUTPUT:-}" \
+        "${MIR_CODEGEN_ONLY:-0}"
 
     if [[ "${PREPARE_ONLY}" -eq 0 ]]; then
         export COVERAGE_LLC=/work/llvm-build-sancov/bin/llc
@@ -219,18 +230,13 @@ if [[ -z "$output_dir" ]]; then
     exit 1
 fi
 
-if [[ ! "$reduce_row" =~ ^[0-9]+$ ]] || [[ "$reduce_row" -eq 0 ]]; then
-    echo "error: --row must be a positive integer: ${reduce_row}" >&2
-    exit 1
-fi
-
-if [[ -n "$creduce_n" ]] && { [[ ! "$creduce_n" =~ ^[0-9]+$ ]] || [[ "$creduce_n" -eq 0 ]]; }; then
-    echo "error: --creduce-n must be a positive integer: ${creduce_n}" >&2
-    exit 1
-fi
-
 # shellcheck source=scripts/lib/gap-artifacts.sh
 source "${REPO_ROOT}/scripts/lib/gap-artifacts.sh"
+# shellcheck source=scripts/lib/gap-reducing-cli.sh
+source "${REPO_ROOT}/scripts/lib/gap-reducing-cli.sh"
+
+gap_reducing_validate_row "$reduce_row"
+gap_reducing_validate_creduce_n "$creduce_n"
 
 output_dir="$(realpath "$output_dir")"
 coverage_csv="$(gap_fill_coverage_csv "$output_dir")"
@@ -246,28 +252,10 @@ docker_image_resolve_ref
 DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --backend-tests"
 docker_image_ensure
 
-docker_env=(
-    -e "IN_CONTAINER=1"
-    -e "REDUCE_ROW=${reduce_row}"
-    -e "PIPELINE=${pipeline}"
-    -e "PREPARE_ONLY=${prepare_only}"
-    -e "WITH_CREDUCE=${with_creduce}"
-)
-if [[ -n "$creduce_n" ]]; then
-    docker_env+=(-e "CREDUCE_N=${creduce_n}")
-fi
-if [[ -n "$pass_under_test" ]]; then
-    docker_env+=(-e "PASS_UNDER_TEST=${pass_under_test}")
-fi
-if [[ -n "$mtriple" ]]; then
-    docker_env+=(-e "MTRIPLE=${mtriple}")
-fi
-if [[ -n "$extract_mir_output" ]]; then
-    docker_env+=(-e "EXTRACT_MIR_OUTPUT=${extract_mir_output}")
-fi
-if [[ "$mir_codegen_only" -eq 1 ]]; then
-    docker_env+=(-e "MIR_CODEGEN_ONLY=1")
-fi
+docker_env=(-e "IN_CONTAINER=1")
+gap_reducing_append_docker_env docker_env \
+    "$reduce_row" "$pipeline" "$prepare_only" "$with_creduce" \
+    "$creduce_n" "$pass_under_test" "$mtriple" "$extract_mir_output" "$mir_codegen_only"
 
 repo_mount=()
 if [[ "${bind_repo}" -eq 1 ]]; then
@@ -275,12 +263,7 @@ if [[ "${bind_repo}" -eq 1 ]]; then
     echo "Using local fuzz-fill checkout: ${REPO_ROOT}"
 fi
 
-echo "Gap-fill output: ${output_dir}"
-echo "Reducing row:      ${reduce_row}"
-echo "Pipeline:          ${pipeline}"
-if [[ "$prepare_only" -eq 1 ]]; then
-    echo "Mode:              prepare-only"
-fi
+gap_reducing_print_summary "$output_dir" "$reduce_row" "$pipeline" "$prepare_only" "Gap-fill output"
 
 docker run --rm \
     -v "${output_dir}:/mounted-output" \
