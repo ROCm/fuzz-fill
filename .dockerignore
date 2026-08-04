@@ -21,6 +21,7 @@ logs/
 coverage_output/
 integration-tests/Output/
 .backups/
+candidate-tests-dataset/
 
 # Python / test artifacts.
 **/__pycache__/
