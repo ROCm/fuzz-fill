@@ -1,0 +1,38 @@
+# COM: Maintainer-only: end-to-end min-candidate-tests (normal users can skip).
+
+# RUN: rm -rf %t && mkdir -p %t/candidate_tests %t/min
+# RUN: %coverage candidate-test --output-dir %t/candidate_tests --llc %sancov-llc --candidate-tests-dir %S/fixtures/coverage-new-tests --n 1
+
+# COM: candidate-test must emit settings and manifest metadata.
+# RUN: test -f %t/candidate_tests/candidate_test_settings.csv
+# RUN: test -f %t/candidate_tests/candidate_test_manifest.csv
+# RUN: wc -l %t/candidate_tests/candidate_test_settings.csv | %FileCheck %s --check-prefix=SETTINGS_LINES
+# SETTINGS_LINES: 9
+
+# RUN: wc -l %t/candidate_tests/candidate_test_manifest.csv | %FileCheck %s --check-prefix=MANIFEST_LINES
+# MANIFEST_LINES: 9
+
+# RUN: %coverage min-candidate-tests --output-dir %t/min --sancov %sancov --candidate-tests-output-dir %t/candidate_tests -j 2 --batch-size 2
+
+# RUN: test -f %t/min/min_candidate_tests.csv
+# RUN: test -f %t/min/min_candidate_tests_points.csv
+
+# COM: At least one run should be kept; header plus data rows.
+# RUN: wc -l %t/min/min_candidate_tests.csv | %FileCheck %s --check-prefix=KEPT_MIN
+# KEPT_MIN: {{[1-9]}}
+
+# COM: Points CSV must have a header and at least one instrumentation point.
+# RUN: wc -l %t/min/min_candidate_tests_points.csv | %FileCheck %s --check-prefix=POINTS_MIN
+# POINTS_MIN: {{[2-9]}}
+
+# COM: Kept runs CSV must include source file and llc flags columns with data.
+# RUN: %FileCheck %s --input-file=%t/min/min_candidate_tests.csv --check-prefix=KEPT_CSV
+# KEPT_CSV: source_file,llc_flags,test_dir
+# KEPT_CSV-NEXT: {{.*}},{{.*}},test_{{[0-7]}}_standalone-empty-kernel.ll
+
+# COM: Source files CSV must list the fixture source path, which must exist on disk.
+# RUN: test -f %t/min/min_candidate_tests_source_files.csv
+# RUN: %FileCheck %s --input-file=%t/min/min_candidate_tests_source_files.csv --check-prefix=SOURCE_FILES_CSV
+# SOURCE_FILES_CSV: source_file
+# SOURCE_FILES_CSV-NEXT: {{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll
+# RUN: test -f %S/fixtures/coverage-new-tests/standalone-empty-kernel.ll

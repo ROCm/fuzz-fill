@@ -300,5 +300,14 @@ class CoverageDfFromHitsTest(unittest.TestCase):
         self.assertEqual(actual, expected)
 
 
+class SancovParsePrintOutputTest(unittest.TestCase):
+    def test_parses_and_normalizes_addresses(self) -> None:
+        stdout = "0x1\n\n0x0002\n  0x3  \n"
+        self.assertEqual(
+            Sancov.parse_print_output(stdout),
+            {"0x1", "0x0002", "0x3"},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

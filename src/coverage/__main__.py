@@ -13,6 +13,9 @@ from coverage.constants import (
     DEFAULT_OPT_LINE_POINT_SUMMARY_FILE,
     DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
     DEFAULT_OUTPUT_DIR,
+    DEFAULT_MIN_CANDIDATE_TESTS_CSV,
+    DEFAULT_MIN_CANDIDATE_TESTS_POINTS_CSV,
+    DEFAULT_MIN_CANDIDATE_TESTS_BATCH_SIZE,
     DEFAULT_NEW_COVERAGE_CSV,
     DEFAULT_SOURCE_CODE_FILTER,
     DEFAULT_TARGET_LINES_REPORT,
@@ -20,6 +23,7 @@ from coverage.constants import (
 )
 
 from coverage.analyser import CoverageAnalyzer
+from coverage.min_candidate_tests import MinCandidateTestsSelector
 from coverage.target_lines_check import run_target_lines_check
 from fuzz_fill.env import (
     FUZZ_FILL_LLC,
@@ -55,12 +59,20 @@ def main():
 
     sub = parser.add_subparsers(
         dest="subcmd",
-        metavar="{baseline,candidate-test,incremental,target-lines}",
+        metavar="{baseline,candidate-test,incremental,min-candidate-tests,target-lines}",
         required=True,
     )
     p_baseline = sub.add_parser("baseline")
     p_candidate_test = sub.add_parser("candidate-test")
     p_incremental = sub.add_parser("incremental")
+    p_min_candidate_tests = sub.add_parser(
+        "min-candidate-tests",
+        help=(
+            "[maintainer-only; not for normal use] Greedy selection of "
+            "candidate-test runs by instrumentation point coverage. Outside "
+            "the main baseline → candidate-test → incremental workflow."
+        ),
+    )
     p_target_lines = sub.add_parser(
         "target-lines",
         help=(
@@ -72,6 +84,7 @@ def main():
     add_shared_arguments(p_baseline)
     add_shared_arguments(p_candidate_test)
     add_shared_arguments(p_incremental)
+    add_shared_arguments(p_min_candidate_tests)
     add_shared_arguments(p_target_lines)
 
     p_baseline.add_argument(
@@ -214,6 +227,38 @@ def main():
         ),
     )
 
+    p_min_candidate_tests.add_argument(
+        "--sancov",
+        type=Path,
+        default=None,
+        help=f"Path to the sancov executable (or set {FUZZ_FILL_SANCOV}).",
+    )
+    p_min_candidate_tests.add_argument(
+        "--candidate-tests-output-dir",
+        type=existing_dir_path,
+        required=True,
+        help="Directory containing candidate-test output (manifest, settings, test dirs)",
+    )
+    p_min_candidate_tests.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=None,
+        help=(
+            "Number of parallel sancov --print workers within each batch. "
+            "Defaults to the number of detected CPUs."
+        ),
+    )
+    p_min_candidate_tests.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_MIN_CANDIDATE_TESTS_BATCH_SIZE,
+        help=(
+            "Number of runs to load and minimize per batch "
+            f"(default: {DEFAULT_MIN_CANDIDATE_TESTS_BATCH_SIZE})."
+        ),
+    )
+
     p_target_lines.add_argument(
         "--line-coverage-uncovered-csv",
         type=existing_file_path,
@@ -311,6 +356,22 @@ def main():
             )
 
             coverage_analyzer.get_incremental_coverage()
+
+    elif args.subcmd == "min-candidate-tests":
+        tools = incremental_tools_from_args(sancov=args.sancov)
+        logger.info(
+            "min-candidate-tests (maintainer-only): selecting minimal candidate "
+            "tests by instrumentation point coverage"
+        )
+        with log_timing(logger, "min-candidate-tests"):
+            selector = MinCandidateTestsSelector(
+                candidate_tests_output_dir=args.candidate_tests_output_dir,
+                output_dir=args.output_dir,
+                sancov_bin=tools.sancov,
+                jobs=args.jobs,
+                batch_size=args.batch_size,
+            )
+            selector.run()
 
     elif args.subcmd == "target-lines":
         args.llvm_repo = path_from_flag_or_env(
