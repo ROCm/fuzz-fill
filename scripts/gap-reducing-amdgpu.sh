@@ -15,9 +15,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-LLVM_REPO="${LLVM_REPO:-$(cd "${REPO_ROOT}/../llvm-project" && pwd)}"
-LLVM_BIN="${LLVM_BIN:-${LLVM_REPO}/build/bin}"
-INSTRUMENTED_BIN_DIR="${INSTRUMENTED_BIN_DIR:-${LLVM_REPO}/build-sancov/bin}"
 
 output_dir=""
 reduce_row="${REDUCE_ROW:-1}"
@@ -97,8 +94,8 @@ if [[ -z "$output_dir" ]]; then
     exit 1
 fi
 
-# shellcheck source=scripts/lib/common.sh
-source "${SCRIPT_DIR}/lib/common.sh"
+# shellcheck source=scripts/lib/local-llvm-env.sh
+source "${SCRIPT_DIR}/lib/local-llvm-env.sh"
 # shellcheck source=scripts/lib/gap-artifacts.sh
 source "${SCRIPT_DIR}/lib/gap-artifacts.sh"
 # shellcheck source=scripts/lib/gap-reducing-cli.sh
@@ -115,14 +112,13 @@ validate_gap_fill_artifacts "$coverage_csv" "$candidate_tests_dir" \
 source "${SCRIPT_DIR}/lib/gap-reducing.sh"
 
 activate_venv_if_present "$REPO_ROOT"
+setup_local_llvm_env "$REPO_ROOT" "build-sancov/bin"
 
 gap_reducing_apply_env "$prepare_only"
 
 if [[ "$prepare_only" -eq 0 ]]; then
-    require_bin "$INSTRUMENTED_BIN_DIR" llc
-    require_bin "$LLVM_BIN" llvm-reduce
-    export COVERAGE_LLC="${INSTRUMENTED_BIN_DIR}/llc"
-    export COVERAGE_LLVM_REDUCE="${LLVM_BIN}/llvm-reduce"
+    require_local_reduce_bins
+    export_local_reduce_tools
 fi
 
 cd "$REPO_ROOT"

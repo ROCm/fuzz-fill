@@ -16,9 +16,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-LLVM_REPO="${LLVM_REPO:-$(cd "${REPO_ROOT}/../llvm-project" && pwd)}"
-LLVM_BIN="${LLVM_BIN:-${LLVM_REPO}/build/bin}"
-INSTRUMENTED_BIN_DIR="${INSTRUMENTED_BIN_DIR:-${LLVM_REPO}/build-sancov/bin}"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}/data/coverage_output/bb_coverage_amdgpu_$(date +%y%m%d)}"
 BASELINE_OUTPUT_DIR="$OUTPUT_DIR/baseline"
 CANDIDATE_TESTS_OUTPUT_DIR="$OUTPUT_DIR/candidate_tests"
@@ -30,19 +27,16 @@ CORPUS_N="${CORPUS_N:-100}"
 source "${SCRIPT_DIR}/lit-filters-amdgpu.sh"
 LIT_FILTERS=("${AMDGPU_LIT_FILTERS[@]}")
 
-# shellcheck source=scripts/lib/common.sh
-source "${SCRIPT_DIR}/lib/common.sh"
+# shellcheck source=scripts/lib/local-llvm-env.sh
+source "${SCRIPT_DIR}/lib/local-llvm-env.sh"
 # shellcheck source=scripts/lib/coverage-baseline.sh
 source "${SCRIPT_DIR}/lib/coverage-baseline.sh"
 # shellcheck source=scripts/lib/gap-filling.sh
 source "${SCRIPT_DIR}/lib/gap-filling.sh"
 
 activate_venv_if_present "$REPO_ROOT"
-
-require_bin "$LLVM_BIN" sancov
-require_bin "$INSTRUMENTED_BIN_DIR" llvm-lit
-require_bin "$INSTRUMENTED_BIN_DIR" llc
-require_bin "$INSTRUMENTED_BIN_DIR" opt
+setup_local_llvm_env "$REPO_ROOT" "build-sancov/bin"
+require_local_coverage_bins
 
 case "${REFRESH:-}" in
     all)
@@ -67,11 +61,6 @@ esac
 
 mkdir -p "$OUTPUT_DIR"
 cd "$REPO_ROOT"
-
-export COVERAGE_SANCOV="${LLVM_BIN}/sancov"
-export COVERAGE_LLVM_LIT="${INSTRUMENTED_BIN_DIR}/llvm-lit"
-export COVERAGE_LLC="${INSTRUMENTED_BIN_DIR}/llc"
-export COVERAGE_OPT="${INSTRUMENTED_BIN_DIR}/opt"
 
 echo "=== AMDGPU gap filling ==="
 echo "output:         $OUTPUT_DIR"
