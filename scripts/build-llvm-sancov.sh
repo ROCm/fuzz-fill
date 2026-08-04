@@ -12,7 +12,8 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
   --bootstrap-bin   Directory with clang and clang++ (e.g. official LLVM release bin/)
   --ignorelist      Sanitizer coverage ignorelist file (optional)
   --instrumentation-mode func|bb|edge
-                    SanitizerCoverage instrumentation granularity (default: bb)
+                    SanitizerCoverage instrumentation granularity (default: bb).
+                    fuzz-fill expects basic-block (bb) coverage; func or edge will likely break it.
   ninja_jobs        Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
 
 Builds llvm-tblgen from the source tree, then instrumented llc/opt (Debug + SanitizerCoverage)

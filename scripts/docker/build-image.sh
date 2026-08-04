@@ -30,7 +30,8 @@ Options:
   --allowlist <target>           SanitizerCoverage allowlist target: amdgpu or spirv
                                  (default: amdgpu)
   --sancov-instrumentation-mode func|bb|edge
-                                 SanitizerCoverage instrumentation mode (default: bb)
+                                 SanitizerCoverage instrumentation mode (default: bb).
+                                 fuzz-fill expects basic-block (bb) coverage; func or edge will likely break it.
   -j <n>, --jobs <n>             Parallel jobs for ninja when building LLVM (default: unconstrained)
   --no-cache                     Pass --no-cache to docker build (ignore layer cache)
 

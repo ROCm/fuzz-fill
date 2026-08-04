@@ -29,7 +29,8 @@ Required:
 
 Options:
   --sancov-instrumentation-mode func|bb|edge
-                         SanitizerCoverage instrumentation mode (default: bb)
+                         SanitizerCoverage instrumentation mode (default: bb).
+                         fuzz-fill expects basic-block (bb) coverage; func or edge will likely break it.
   --github-repo <owner/repo>
                          GitHub repo hosting the PR (default: llvm/llvm-project)
   --tag <tag>            Docker image tag (default: llvm-pr-<pr-id>)
