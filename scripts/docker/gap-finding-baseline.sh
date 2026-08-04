@@ -24,27 +24,9 @@ if [[ "${IN_CONTAINER:-}" == 1 ]]; then
     exit 0
 fi
 
-# shellcheck source=scripts/docker/ensure-image.sh
-source "${SCRIPT_DIR}/ensure-image.sh"
-# shellcheck source=scripts/docker/docker-image-cli.sh
-source "${SCRIPT_DIR}/docker-image-cli.sh"
-# shellcheck source=scripts/docker/docker-run.sh
-source "${SCRIPT_DIR}/docker-run.sh"
-# shellcheck source=scripts/lib/common.sh
-source "${REPO_ROOT}/scripts/lib/common.sh"
-# shellcheck source=scripts/lib/lit-filters.sh
-source "${REPO_ROOT}/scripts/lib/lit-filters.sh"
-# shellcheck source=scripts/lib/lit-failures.sh
-source "${REPO_ROOT}/scripts/lib/lit-failures.sh"
-
-CONTAINER_WORKDIR="${DOCKER_GAP_CONTAINER_WORKDIR}"
-CONTAINER_SCRIPT="$(docker_gap_container_script "$0")"
-
-docker_image_cli_init_vars
-output_dir=""
-lit_filter=""
-jobs=""
-bind_repo=0
+# shellcheck source=scripts/docker/gap-finding-docker.sh
+source "${SCRIPT_DIR}/gap-finding-docker.sh"
+docker_gap_finding_source_host_libs "$0"
 
 usage() {
     cat <<EOF
@@ -56,18 +38,10 @@ Artifacts are written under --output-dir/baseline/ (mounted at /mounted-output/)
 Required:
   --output-dir <path>           Host output directory (created if missing)
 
-Image (one of):
-  --image <ref>                 Docker image ref (default: \${IMAGE_NAME:-fuzz-fill-test}:\${IMAGE_TAG:-latest})
-  --pr-id <n>                   Use \${IMAGE_NAME:-fuzz-fill-test}:llvm-pr-<n>
+$(docker_gap_finding_usage_image_select_options)
 
 Image build (optional; reuses existing image when omitted):
-  --build-image                 Build PR image via build-image-pr.sh when missing
-  --force-build                 Rebuild PR image even when the tag already exists
-  --keep-image                  Keep PR image after run (default: remove when --build-image)
-  --llvm-repo <path>            Local llvm-project clone (required with --build-image)
-  --backend-tests <target>      amdgpu or spirv (required with --build-image)
-  --github-repo <owner/repo>    GitHub repo hosting the PR (default: llvm/llvm-project)
-  --image-name <name>           Image name when using --pr-id (default: fuzz-fill-test)
+$(docker_gap_finding_usage_image_build_options)
 
 Options:
   --bind-repo                   Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
@@ -92,17 +66,11 @@ while [[ $# -gt 0 ]]; do
         shift "${DOCKER_GAP_CLI_SHIFT}"
         continue
     fi
+    if docker_gap_finding_try_parse_workflow "$1" "${2:-}"; then
+        shift "${DOCKER_GAP_FINDING_SHIFT}"
+        continue
+    fi
     case "$1" in
-        --output-dir)
-            [[ $# -ge 2 ]] || { echo "error: --output-dir requires a value" >&2; exit 2; }
-            output_dir="$2"
-            shift 2
-            ;;
-        --lit-filter)
-            [[ $# -ge 2 ]] || { echo "error: --lit-filter requires a value" >&2; exit 2; }
-            lit_filter="$2"
-            shift 2
-            ;;
         --help|-h)
             usage
             exit 0
@@ -124,14 +92,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ $# -gt 0 ]]; then
-    echo "error: unexpected argument: $1" >&2
+if ! docker_gap_finding_finish_arg_parse "$@"; then
     usage >&2
     exit 2
 fi
 
-if [[ -z "$output_dir" ]]; then
-    echo "error: --output-dir is required" >&2
+if ! docker_gap_finding_require_output_dir; then
     usage >&2
     exit 1
 fi
@@ -141,14 +107,10 @@ validate_jobs "$jobs"
 DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --backend-tests"
 docker_image_cli_prepare
 
-if [[ -z "$lit_filter" ]]; then
-    image_allowlist="$(docker_image_read_allowlist)"
-    lit_filter="$(lit_filter_for_allowlist "$image_allowlist")"
-    echo "Image allowlist: ${image_allowlist} -> lit-filter: ${lit_filter}"
-fi
+docker_gap_default_lit_filters_from_image single
+lit_filter="${lit_filters[0]}"
 
-mkdir -p "$output_dir"
-output_dir="$(realpath "$output_dir")"
+docker_gap_finding_prepare_output_dir
 rm -rf "${output_dir}/baseline"
 
 docker_env=(-e "IN_CONTAINER=1" -e "LIT_FILTER=${lit_filter}")
