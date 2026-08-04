@@ -9,6 +9,7 @@ IMAGE_NAME="${IMAGE_NAME:-fuzz-fill-test}"
 llvm_dir=""
 image_tag="${IMAGE_TAG:-latest}"
 allowlist="amdgpu"
+sancov_instrumentation_mode=""
 llvm_release_version="22.1.8"
 ninja_jobs=""
 no_cache=0
@@ -28,6 +29,8 @@ Options:
   --tag <tag>                    Docker image tag (default: latest)
   --allowlist <target>           SanitizerCoverage allowlist target: amdgpu or spirv
                                  (default: amdgpu)
+  --sancov-instrumentation-mode func|bb|edge
+                                 SanitizerCoverage instrumentation mode (default: bb)
   -j <n>, --jobs <n>             Parallel jobs for ninja when building LLVM (default: unconstrained)
   --no-cache                     Pass --no-cache to docker build (ignore layer cache)
 
@@ -39,6 +42,7 @@ Examples:
   $(basename "$0") --llvm-dir llvm-project
   $(basename "$0") --llvm-dir /path/to/llvm-project --tag local-llvm
   $(basename "$0") --allowlist spirv --tag spirv
+  $(basename "$0") --sancov-instrumentation-mode edge --tag edge
   $(basename "$0") --llvm-release-version 22.1.8 -j "\$(nproc)"
 EOF
 }
@@ -74,6 +78,14 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             allowlist="$2"
+            shift 2
+            ;;
+        --sancov-instrumentation-mode)
+            if [[ $# -lt 2 ]]; then
+                echo "error: --sancov-instrumentation-mode requires a value" >&2
+                exit 1
+            fi
+            sancov_instrumentation_mode="$2"
             shift 2
             ;;
         --llvm-release-version)
@@ -125,6 +137,14 @@ case "$allowlist" in
         ;;
 esac
 
+case "$sancov_instrumentation_mode" in
+    ""|func|bb|edge) ;;
+    *)
+        echo "error: --sancov-instrumentation-mode must be func, bb, or edge: ${sancov_instrumentation_mode}" >&2
+        exit 1
+        ;;
+esac
+
 validate_ninja_jobs
 
 llvm_context=""
@@ -157,6 +177,9 @@ docker_build_args=(
     --build-arg GID="$(id -g)"
     --build-arg USERNAME="$(id -un)"
 )
+if [[ -n "$sancov_instrumentation_mode" ]]; then
+    docker_build_args+=(--build-arg SANCOV_INSTRUMENTATION_MODE="${sancov_instrumentation_mode}")
+fi
 if [[ -n "$ninja_jobs" ]]; then
     docker_build_args+=(--build-arg NINJA_JOBS="${ninja_jobs}")
 fi

@@ -89,14 +89,21 @@ COPY scripts/ignorelist-amdgpu.txt /work/ignorelist-amdgpu.txt
 RUN chmod +x /usr/local/bin/build-llvm-sancov.sh
 
 ARG SANCOV_ALLOWLIST=amdgpu
+ARG SANCOV_INSTRUMENTATION_MODE=bb
 ARG NINJA_JOBS=""
-RUN case "${SANCOV_ALLOWLIST}" in \
+RUN case "${SANCOV_INSTRUMENTATION_MODE:-bb}" in \
+        func|bb|edge) sancov_mode="${SANCOV_INSTRUMENTATION_MODE:-bb}" ;; \
+        *) echo "error: SANCOV_INSTRUMENTATION_MODE must be func, bb, or edge: ${SANCOV_INSTRUMENTATION_MODE:-<unset>}" >&2; exit 1 ;; \
+    esac \
+ && case "${SANCOV_ALLOWLIST}" in \
         amdgpu) allowlist=/work/allowlist-amdgpu.txt; ignorelist=/work/ignorelist-amdgpu.txt ;; \
         spirv) allowlist=/work/allowlist-spirv.txt; ignorelist="" ;; \
         *) echo "error: unsupported SANCOV_ALLOWLIST: ${SANCOV_ALLOWLIST} (expected amdgpu or spirv)" >&2; exit 1 ;; \
     esac \
  && echo "${SANCOV_ALLOWLIST}" > /work/.sancov-allowlist \
+ && echo "${sancov_mode}" > /work/.sancov-instrumentation-mode \
  && echo "=== fuzz-fill: SanitizerCoverage allowlist = ${SANCOV_ALLOWLIST} ===" \
+ && echo "=== fuzz-fill: SanitizerCoverage instrumentation mode = ${sancov_mode} (default: bb) ===" \
  && if [ -n "${ignorelist}" ]; then echo "=== fuzz-fill: SanitizerCoverage ignorelist = ${ignorelist} ==="; fi \
  && llvm_build_start=$(date +%s) \
  && if [ -n "${ignorelist}" ]; then \
@@ -106,6 +113,7 @@ RUN case "${SANCOV_ALLOWLIST}" in \
             /work/llvm-build-sancov \
             --bootstrap-bin /work/llvm-release/bin \
             --ignorelist "${ignorelist}" \
+            --instrumentation-mode "${sancov_mode}" \
             "${NINJA_JOBS}"; \
     else \
         /usr/local/bin/build-llvm-sancov.sh \
@@ -113,6 +121,7 @@ RUN case "${SANCOV_ALLOWLIST}" in \
             /work/llvm-project \
             /work/llvm-build-sancov \
             --bootstrap-bin /work/llvm-release/bin \
+            --instrumentation-mode "${sancov_mode}" \
             "${NINJA_JOBS}"; \
     fi \
  && llvm_build_secs=$(( $(date +%s) - llvm_build_start )) \
@@ -143,6 +152,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.llvm-source /work/.llvm-source
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.sancov-allowlist /work/.sancov-allowlist
+COPY --chown=${UID}:${GID} --from=llvm-builder /work/.sancov-instrumentation-mode /work/.sancov-instrumentation-mode
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.llvm-build-time /work/.llvm-build-time
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-project /work/llvm-project
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-build-sancov /work/llvm-build-sancov
@@ -154,6 +164,7 @@ COPY --chown=${UID}:${GID} integration-tests /work/fuzz-fill/integration-tests
 
 RUN echo "=== fuzz-fill image LLVM source: $(cat /work/.llvm-source) ===" \
  && echo "=== fuzz-fill image SanitizerCoverage allowlist: $(cat /work/.sancov-allowlist) ===" \
+ && echo "=== fuzz-fill image SanitizerCoverage instrumentation mode: $(cat /work/.sancov-instrumentation-mode) ===" \
  && echo "=== fuzz-fill image LLVM build wall time: $(cat /work/.llvm-build-time)s ==="
 
 USER "${UID}"

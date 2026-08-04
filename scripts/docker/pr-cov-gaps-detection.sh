@@ -52,6 +52,9 @@ Options:
   -j <n>, --jobs <n>       Parallel jobs for llvm-lit; with --build-image, also for ninja
   --help, -h               Show this help
 
+PR image builds (--build-image) use SanitizerCoverage bb instrumentation by default.
+To use func or edge, build the image separately with build-image-pr.sh first.
+
 Examples:
   $(basename "$0") --build-image --llvm-repo /path/llvm-project --pr-id 203468 \\
       --backend-tests amdgpu --output-dir ./data/pr-cov-gaps-203468 -j "\$(nproc)"

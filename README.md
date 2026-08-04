@@ -369,6 +369,7 @@ By default the image is tagged `fuzz-fill-test:latest`. LLVM source is downloade
 | `--llvm-release-version <ver>` | Official LLVM release for bootstrap toolchain (default: `22.1.8`) |
 | `--tag <tag>` | Docker image tag (default: `latest`) |
 | `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist baked into the instrumented build (default: `amdgpu`; AMDGPU also applies [`scripts/ignorelist-amdgpu.txt`](scripts/ignorelist-amdgpu.txt)) |
+| `--sancov-instrumentation-mode func\|bb\|edge` | SanitizerCoverage instrumentation mode (default: `bb`; produces `-fsanitize-coverage=<mode>,trace-pc-guard`) |
 | `-j <n>`, `--jobs <n>` | Limit ninja parallelism for the sancov build (default: unconstrained) |
 
 Examples:
@@ -376,6 +377,7 @@ Examples:
 ```bash
 ./scripts/docker/build-image.sh --llvm-dir llvm-project --tag local-llvm
 ./scripts/docker/build-image.sh --allowlist spirv --tag spirv
+./scripts/docker/build-image.sh --sancov-instrumentation-mode edge --tag edge
 ./scripts/docker/build-image.sh -j "$(nproc)"
 ```
 
@@ -392,6 +394,7 @@ Examples:
 | `--llvm-repo <path>` | Local `llvm-project` clone |
 | `--pr-id <n>` | GitHub pull request number |
 | `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist |
+| `--sancov-instrumentation-mode func\|bb\|edge` | SanitizerCoverage instrumentation mode (default: `bb`) |
 | `--github-repo <owner/repo>` | GitHub repo hosting the PR (default: `llvm/llvm-project`) |
 | `-j <n>`, `--jobs <n>` | Limit ninja parallelism for both LLVM builds (default: unconstrained) |
 
