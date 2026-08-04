@@ -40,6 +40,7 @@ _DEFAULT_SKIP_DIRS: tuple[str, ...] = (
     "llvm-project",
     ".llvm-docker-staging",
     ".fuzz-fill-llvm-pr-worktrees",
+    "candidate-tests-dataset",
     "venv*",
     "**/venv*",
 )

@@ -34,6 +34,12 @@ paths = [
 ]
 
 [[allowlists]]
+description = "Curated LLVM bitcode corpus (binary test inputs)"
+paths = [
+  '''^candidate-tests-dataset/''',
+]
+
+[[allowlists]]
 description = "Test fixtures using well-known dummy variable names"
 # The "tell" here is the variable name on the same line, not the value
 # (the value is a random-looking string by design). Match against the
