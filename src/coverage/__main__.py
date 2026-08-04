@@ -68,9 +68,8 @@ def main():
     p_min_candidate_tests = sub.add_parser(
         "min-candidate-tests",
         help=(
-            "Greedy selection of candidate-test runs by instrumentation point "
-            "coverage. Outside the main baseline → candidate-test → "
-            "incremental workflow."
+            "Greedily select candidate-test runs to cover instrumentation points; "
+            "yields a minimal set, not necessarily the minimum. "
         ),
     )
     p_target_lines = sub.add_parser(
