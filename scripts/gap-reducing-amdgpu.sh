@@ -102,22 +102,16 @@ if [[ ! "$reduce_row" =~ ^[0-9]+$ ]] || [[ "$reduce_row" -eq 0 ]]; then
     exit 1
 fi
 
-coverage_csv="$output_dir/incremental/new_coverage.csv"
-candidate_tests_dir="$output_dir/candidate_tests"
-reduced_dir="$output_dir/reduced"
-
-if [[ ! -f "$coverage_csv" ]]; then
-    echo "error: gap-fill CSV not found: ${coverage_csv}" >&2
-    echo "hint: run gap-filling first (e.g. scripts/gap-filling-amdgpu.sh)" >&2
-    exit 1
-fi
-if [[ ! -d "$candidate_tests_dir" ]]; then
-    echo "error: candidate_tests directory not found: ${candidate_tests_dir}" >&2
-    exit 1
-fi
-
 # shellcheck source=scripts/lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
+# shellcheck source=scripts/lib/gap-artifacts.sh
+source "${SCRIPT_DIR}/lib/gap-artifacts.sh"
+
+coverage_csv="$(gap_fill_coverage_csv "$output_dir")"
+candidate_tests_dir="$(gap_fill_candidate_tests_dir "$output_dir")"
+reduced_dir="$(gap_fill_reduced_dir "$output_dir")"
+validate_gap_fill_artifacts "$coverage_csv" "$candidate_tests_dir" \
+    "run gap-filling first (e.g. scripts/gap-filling-amdgpu.sh)"
 # shellcheck source=scripts/lib/gap-reducing.sh
 source "${SCRIPT_DIR}/lib/gap-reducing.sh"
 

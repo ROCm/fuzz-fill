@@ -34,7 +34,7 @@ run_gap_reducing() {
         --pipeline "$pipeline"
     )
 
-    if [[ -n "${WITH_CREDUCE:-}" ]]; then
+    if [[ "${WITH_CREDUCE:-0}" == 1 ]]; then
         batch_args+=(--with-creduce)
     fi
     if [[ -n "${CREDUCE_N:-}" ]]; then
@@ -52,7 +52,7 @@ run_gap_reducing() {
     if [[ -n "${MIR_CODEGEN_ONLY:-}" ]]; then
         batch_args+=(--mir-codegen-only)
     fi
-    if [[ -z "${PREPARE_ONLY:-}" ]]; then
+    if [[ "${PREPARE_ONLY:-0}" != 1 ]]; then
         if [[ -n "${COVERAGE_LLC:-}" ]]; then
             batch_args+=(--llc "$COVERAGE_LLC")
         fi

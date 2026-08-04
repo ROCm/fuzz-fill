@@ -7,8 +7,31 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+CONTAINER_WORKDIR="/work/fuzz-fill"
+CONTAINER_SCRIPT="${CONTAINER_WORKDIR}/scripts/docker/$(basename "$0")"
+
+if [[ "${IN_CONTAINER:-}" == 1 ]]; then
+    # shellcheck source=scripts/lib/gap-finding-pr.sh
+    source "${REPO_ROOT}/scripts/lib/gap-finding-pr.sh"
+
+    commit="${COMMIT_REV:-$(git -C /work/llvm-project rev-parse HEAD)}"
+
+    mapfile -t lit_filters < /mounted-output/.lit-filters
+
+    export LIT_ALLOW_FAILURES=1
+
+    run_gap_finding_pr /mounted-output "$commit" "" "${lit_filters[@]}"
+    exit 0
+fi
+
 # shellcheck source=scripts/docker/ensure-image.sh
 source "${SCRIPT_DIR}/ensure-image.sh"
+# shellcheck source=scripts/lib/common.sh
+source "${REPO_ROOT}/scripts/lib/common.sh"
+# shellcheck source=scripts/lib/lit-filters.sh
+source "${REPO_ROOT}/scripts/lib/lit-filters.sh"
+# shellcheck source=scripts/lib/lit-failures.sh
+source "${REPO_ROOT}/scripts/lib/lit-failures.sh"
 
 image_ref=""
 pr_id=""
@@ -61,30 +84,6 @@ Examples:
   $(basename "$0") --pr-id 203468 --output-dir ./data/gap-finding-pr-203468 \\
       --lit-filter CodeGen/AMDGPU -j "\$(nproc)"
 EOF
-}
-
-default_lit_filters_for_allowlist() {
-    case "$1" in
-        amdgpu)
-            # shellcheck source=scripts/lit-filters-amdgpu.sh
-            source "${REPO_ROOT}/scripts/lit-filters-amdgpu.sh"
-            printf '%s\n' "${AMDGPU_LIT_FILTERS[@]}"
-            ;;
-        spirv)
-            printf '%s\n' "CodeGen/SPIRV"
-            ;;
-        *)
-            echo "error: unsupported image allowlist: ${1} (expected amdgpu or spirv)" >&2
-            return 1
-            ;;
-    esac
-}
-
-validate_jobs() {
-    if [[ -n "$jobs" ]] && { [[ ! "$jobs" =~ ^[0-9]+$ ]] || [[ "$jobs" -eq 0 ]]; }; then
-        echo "error: -j/--jobs must be a positive integer: ${jobs}" >&2
-        exit 1
-    fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -196,7 +195,7 @@ if [[ -z "$output_dir" ]]; then
 fi
 
 docker_image_validate_build_flags
-validate_jobs
+validate_jobs "$jobs"
 docker_image_normalize_backend_tests
 docker_image_validate_pr_id
 docker_image_resolve_ref
@@ -216,7 +215,7 @@ output_dir="$(realpath "$output_dir")"
 lit_filters_file="${output_dir}/.lit-filters"
 printf '%s\n' "${lit_filters[@]}" > "$lit_filters_file"
 
-docker_env=()
+docker_env=(-e "IN_CONTAINER=1")
 if [[ -n "$commit_rev" ]]; then
     docker_env+=(-e "COMMIT_REV=${commit_rev}")
 fi
@@ -227,77 +226,13 @@ fi
 docker run --rm \
     -v "${output_dir}:/mounted-output" \
     "${docker_env[@]}" \
-    -w /work/fuzz-fill \
+    -w "${CONTAINER_WORKDIR}" \
     "${image_ref}" \
-    bash -lc '
-set -euo pipefail
-
-commit="${COMMIT_REV:-$(git -C /work/llvm-project rev-parse HEAD)}"
-
-mapfile -t lit_filters < /mounted-output/.lit-filters
-
-baseline_args=(
-    python -m coverage baseline
-    --output-dir /mounted-output/baseline
-    --lit-allow-failures
-)
-for lit_filter in "${lit_filters[@]}"; do
-    baseline_args+=(--lit-filter "${lit_filter}")
-done
-if [[ -n "${JOBS:-}" ]]; then
-    baseline_args+=(-j "${JOBS}")
-fi
-
-echo "=== coverage baseline (${#lit_filters[@]} lit-filter prefix(es)) ==="
-"${baseline_args[@]}"
-
-echo "=== added_lines (commit=${commit}) ==="
-python -m added_lines \
-    --commit "${commit}" \
-    --output-dir /mounted-output/added-lines
-
-echo "=== coverage target-lines ==="
-python -m coverage target-lines \
-    --output-dir /mounted-output/commit_lines_report \
-    --line-coverage-uncovered-csv /mounted-output/baseline/line_coverage_uncovered.csv \
-    --target-lines-csv /mounted-output/added-lines/added-lines.csv
-'
+    bash "${CONTAINER_SCRIPT}"
 
 report="${output_dir}/commit_lines_report/target_lines_uncovered.csv"
 echo "Wrote ${report}"
 echo "Image: ${image_ref}"
 echo "LIT filters: ${lit_filters[*]}"
 
-lit_failures_json="${output_dir}/baseline/lit_failures.json"
-warning_file="${output_dir}/README-WARNING"
-
-fail_count=0
-if [[ -f "$lit_failures_json" ]]; then
-    fail_count="$(python3 -c '
-import json, sys
-FAILURE_CODES = {"FAIL", "TIMEOUT", "UNRESOLVED", "XPASS"}
-try:
-    with open(sys.argv[1]) as f:
-        data = json.load(f)
-    print(sum(1 for t in data.get("tests", []) if t.get("code") in FAILURE_CODES))
-except Exception:
-    print(0)
-' "$lit_failures_json")"
-fi
-
-if [[ "$fail_count" -gt 0 ]]; then
-    msg="WARNING: ${fail_count} LIT test(s) failed during the baseline run (e.g., failed a check, timed out, unresolved, or unexpectedly passed).
-Failed tests may lead to an incomplete coverage profile. As a result,
-target_lines_uncovered.csv may report lines as uncovered even though they are
-actually covered by a (failing) test.
-Review baseline/lit_failures.json for the list of failing tests."
-
-    if [[ -t 1 ]]; then
-        printf '%b\n' "\033[1;31m${msg}\033[0m"
-    else
-        printf '%s\n' "$msg"
-    fi
-
-    printf '%s\n' "$msg" > "$warning_file"
-    echo "Wrote ${warning_file}"
-fi
+emit_lit_failures_warning "$output_dir" "target_lines_uncovered.csv"

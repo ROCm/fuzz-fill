@@ -11,9 +11,35 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+CONTAINER_WORKDIR="/work/fuzz-fill"
+CONTAINER_SCRIPT="${CONTAINER_WORKDIR}/scripts/docker/$(basename "$0")"
+
+if [[ "${IN_CONTAINER:-}" == 1 ]]; then
+    # shellcheck source=scripts/lib/gap-reducing.sh
+    source "${REPO_ROOT}/scripts/lib/gap-reducing.sh"
+
+    : "${REDUCE_ROW:?REDUCE_ROW is required}"
+    : "${PIPELINE:?PIPELINE is required}"
+    : "${PREPARE_ONLY:?PREPARE_ONLY is required}"
+
+    export BATCH_REDUCE_PYTHON=python
+
+    if [[ "${PREPARE_ONLY}" -eq 0 ]]; then
+        export COVERAGE_LLC=/work/llvm-build-sancov/bin/llc
+        export COVERAGE_LLVM_REDUCE=/work/llvm-build-sancov/bin/llvm-reduce
+    fi
+
+    run_gap_reducing \
+        /mounted-output/incremental/new_coverage.csv \
+        /mounted-output/candidate_tests \
+        /mounted-output/reduced \
+        "$REDUCE_ROW" \
+        "$PIPELINE"
+    exit 0
+fi
+
 # shellcheck source=scripts/docker/ensure-image.sh
 source "${SCRIPT_DIR}/ensure-image.sh"
-CONTAINER_WORKDIR="/work/fuzz-fill"
 
 image_name="${IMAGE_NAME:-fuzz-fill-test}"
 image_tag="${IMAGE_TAG:-latest}"
@@ -203,19 +229,14 @@ if [[ -n "$creduce_n" ]] && { [[ ! "$creduce_n" =~ ^[0-9]+$ ]] || [[ "$creduce_n
     exit 1
 fi
 
-output_dir="$(realpath "$output_dir")"
-coverage_csv="${output_dir}/incremental/new_coverage.csv"
-candidate_tests_dir="${output_dir}/candidate_tests"
+# shellcheck source=scripts/lib/gap-artifacts.sh
+source "${REPO_ROOT}/scripts/lib/gap-artifacts.sh"
 
-if [[ ! -f "$coverage_csv" ]]; then
-    echo "error: gap-fill CSV not found: ${coverage_csv}" >&2
-    echo "hint: run scripts/docker/gap-filling.sh first" >&2
-    exit 1
-fi
-if [[ ! -d "$candidate_tests_dir" ]]; then
-    echo "error: candidate_tests directory not found: ${candidate_tests_dir}" >&2
-    exit 1
-fi
+output_dir="$(realpath "$output_dir")"
+coverage_csv="$(gap_fill_coverage_csv "$output_dir")"
+candidate_tests_dir="$(gap_fill_candidate_tests_dir "$output_dir")"
+validate_gap_fill_artifacts "$coverage_csv" "$candidate_tests_dir" \
+    "run scripts/docker/gap-filling.sh first"
 
 docker_image_validate_build_flags
 docker_image_normalize_backend_tests
@@ -226,6 +247,7 @@ DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --bu
 docker_image_ensure
 
 docker_env=(
+    -e "IN_CONTAINER=1"
     -e "REDUCE_ROW=${reduce_row}"
     -e "PIPELINE=${pipeline}"
     -e "PREPARE_ONLY=${prepare_only}"
@@ -266,45 +288,7 @@ docker run --rm \
     "${docker_env[@]}" \
     -w "${CONTAINER_WORKDIR}" \
     "${image_ref}" \
-    bash -lc '
-set -euo pipefail
-
-batch_args=(
-    python scripts/batch_reduce_using_coverage.py
-    --csv /mounted-output/incremental/new_coverage.csv
-    --candidate-tests /mounted-output/candidate_tests
-    --output /mounted-output/reduced
-    --n "${REDUCE_ROW}"
-    --pipeline "${PIPELINE}"
-)
-if [[ "${WITH_CREDUCE}" -eq 1 ]]; then
-    batch_args+=(--with-creduce)
-fi
-if [[ -n "${CREDUCE_N:-}" ]]; then
-    batch_args+=(--creduce-n "${CREDUCE_N}")
-fi
-if [[ -n "${PASS_UNDER_TEST:-}" ]]; then
-    batch_args+=(--pass-under-test "${PASS_UNDER_TEST}")
-fi
-if [[ -n "${MTRIPLE:-}" ]]; then
-    batch_args+=(--mtriple "${MTRIPLE}")
-fi
-if [[ -n "${EXTRACT_MIR_OUTPUT:-}" ]]; then
-    batch_args+=(--extract-mir-output "${EXTRACT_MIR_OUTPUT}")
-fi
-if [[ -n "${MIR_CODEGEN_ONLY:-}" ]]; then
-    batch_args+=(--mir-codegen-only)
-fi
-if [[ "${PREPARE_ONLY}" -eq 0 ]]; then
-    batch_args+=(
-        --llc /work/llvm-build-sancov/bin/llc
-        --llvm-reduce /work/llvm-build-sancov/bin/llvm-reduce
-    )
-fi
-
-echo "=== gap reducing (row=${REDUCE_ROW}, pipeline=${PIPELINE}) ==="
-"${batch_args[@]}"
-'
+    bash "${CONTAINER_SCRIPT}"
 
 echo "Image: ${image_ref}"
 echo "Wrote ${output_dir}/reduced/"

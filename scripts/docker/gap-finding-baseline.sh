@@ -10,9 +10,30 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+CONTAINER_WORKDIR="/work/fuzz-fill"
+CONTAINER_SCRIPT="${CONTAINER_WORKDIR}/scripts/docker/$(basename "$0")"
+
+if [[ "${IN_CONTAINER:-}" == 1 ]]; then
+    # shellcheck source=scripts/lib/coverage-baseline.sh
+    source "${REPO_ROOT}/scripts/lib/coverage-baseline.sh"
+
+    : "${LIT_FILTER:?LIT_FILTER is required}"
+
+    export LIT_ALLOW_FAILURES=1
+
+    echo "=== coverage baseline (lit-filter=${LIT_FILTER}) ==="
+    run_coverage_baseline /mounted-output/baseline "$LIT_FILTER"
+    exit 0
+fi
+
 # shellcheck source=scripts/docker/ensure-image.sh
 source "${SCRIPT_DIR}/ensure-image.sh"
-CONTAINER_WORKDIR="/work/fuzz-fill"
+# shellcheck source=scripts/lib/common.sh
+source "${REPO_ROOT}/scripts/lib/common.sh"
+# shellcheck source=scripts/lib/lit-filters.sh
+source "${REPO_ROOT}/scripts/lib/lit-filters.sh"
+# shellcheck source=scripts/lib/lit-failures.sh
+source "${REPO_ROOT}/scripts/lib/lit-failures.sh"
 
 image_name="${IMAGE_NAME:-fuzz-fill-test}"
 image_tag="${IMAGE_TAG:-latest}"
@@ -64,24 +85,6 @@ Examples:
   $(basename "$0") --build-image --llvm-repo /path/llvm-project --pr-id 203468 \\
       --backend-tests amdgpu --output-dir ./data/pr-baseline -j "\$(nproc)"
 EOF
-}
-
-lit_filter_for_allowlist() {
-    case "$1" in
-        amdgpu) echo "CodeGen/AMDGPU" ;;
-        spirv) echo "CodeGen/SPIRV" ;;
-        *)
-            echo "error: unsupported image allowlist: ${1} (expected amdgpu or spirv)" >&2
-            exit 1
-            ;;
-    esac
-}
-
-validate_jobs() {
-    if [[ -n "$jobs" ]] && { [[ ! "$jobs" =~ ^[0-9]+$ ]] || [[ "$jobs" -eq 0 ]]; }; then
-        echo "error: -j/--jobs must be a positive integer: ${jobs}" >&2
-        exit 1
-    fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -184,7 +187,7 @@ docker_image_validate_build_flags
 docker_image_normalize_backend_tests
 docker_image_validate_pr_id
 docker_image_resolve_ref
-validate_jobs
+validate_jobs "$jobs"
 
 DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --backend-tests"
 docker_image_ensure
@@ -199,7 +202,7 @@ mkdir -p "$output_dir"
 output_dir="$(realpath "$output_dir")"
 rm -rf "${output_dir}/baseline"
 
-docker_env=(-e "LIT_FILTER=${lit_filter}")
+docker_env=(-e "IN_CONTAINER=1" -e "LIT_FILTER=${lit_filter}")
 if [[ -n "$jobs" ]]; then
     docker_env+=(-e "JOBS=${jobs}")
 fi
@@ -216,57 +219,10 @@ docker run --rm \
     "${docker_env[@]}" \
     -w "${CONTAINER_WORKDIR}" \
     "${image_ref}" \
-    bash -lc '
-set -euo pipefail
-
-baseline_args=(
-    python -m coverage baseline
-    --output-dir /mounted-output/baseline
-    --lit-filter "${LIT_FILTER}"
-    --lit-allow-failures
-)
-if [[ -n "${JOBS:-}" ]]; then
-    baseline_args+=(-j "${JOBS}")
-fi
-
-echo "=== coverage baseline (lit-filter=${LIT_FILTER}) ==="
-"${baseline_args[@]}"
-'
+    bash "${CONTAINER_SCRIPT}"
 
 echo "Image: ${image_ref}"
 echo "LIT filter: ${lit_filter}"
 echo "Wrote ${output_dir}/baseline/"
 
-lit_failures_json="${output_dir}/baseline/lit_failures.json"
-warning_file="${output_dir}/README-WARNING"
-
-fail_count=0
-if [[ -f "$lit_failures_json" ]]; then
-    fail_count="$(python3 -c '
-import json, sys
-FAILURE_CODES = {"FAIL", "TIMEOUT", "UNRESOLVED", "XPASS"}
-try:
-    with open(sys.argv[1]) as f:
-        data = json.load(f)
-    print(sum(1 for t in data.get("tests", []) if t.get("code") in FAILURE_CODES))
-except Exception:
-    print(0)
-' "$lit_failures_json")"
-fi
-
-if [[ "$fail_count" -gt 0 ]]; then
-    msg="WARNING: ${fail_count} LIT test(s) failed during the baseline run (e.g., failed a check, timed out, unresolved, or unexpectedly passed).
-Failed tests may lead to an incomplete coverage profile. As a result,
-downstream gap lists may report lines as uncovered even though they are
-actually covered by a (failing) test.
-Review baseline/lit_failures.json for the list of failing tests."
-
-    if [[ -t 1 ]]; then
-        printf '%b\n' "\033[1;31m${msg}\033[0m"
-    else
-        printf '%s\n' "$msg"
-    fi
-
-    printf '%s\n' "$msg" > "$warning_file"
-    echo "Wrote ${warning_file}"
-fi
+emit_lit_failures_warning "$output_dir" "downstream gap lists"

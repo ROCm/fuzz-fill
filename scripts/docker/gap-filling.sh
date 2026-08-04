@@ -14,9 +14,35 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+CONTAINER_WORKDIR="/work/fuzz-fill"
+CONTAINER_SCRIPT="${CONTAINER_WORKDIR}/scripts/docker/$(basename "$0")"
+
+if [[ "${IN_CONTAINER:-}" == 1 ]]; then
+    # shellcheck source=scripts/lib/gap-filling.sh
+    source "${REPO_ROOT}/scripts/lib/gap-filling.sh"
+
+    : "${CANDIDATE_N:?CANDIDATE_N is required}"
+    : "${UNCOVERED_CSV:?UNCOVERED_CSV is required}"
+    : "${LLC_MAP_CSV:?LLC_MAP_CSV is required}"
+
+    run_candidate_test /mounted-output/candidate_tests /mounted-candidate-tests "$CANDIDATE_N"
+
+    run_incremental \
+        /mounted-output/incremental \
+        "$UNCOVERED_CSV" \
+        "$LLC_MAP_CSV" \
+        /mounted-output/candidate_tests
+    exit 0
+fi
+
 # shellcheck source=scripts/docker/ensure-image.sh
 source "${SCRIPT_DIR}/ensure-image.sh"
-CONTAINER_WORKDIR="/work/fuzz-fill"
+# shellcheck source=scripts/lib/common.sh
+source "${REPO_ROOT}/scripts/lib/common.sh"
+# shellcheck source=scripts/lib/gap-artifacts.sh
+source "${REPO_ROOT}/scripts/lib/gap-artifacts.sh"
+# shellcheck source=scripts/lib/candidate-inputs.sh
+source "${REPO_ROOT}/scripts/lib/candidate-inputs.sh"
 
 image_name="${IMAGE_NAME:-fuzz-fill-test}"
 image_tag="${IMAGE_TAG:-latest}"
@@ -86,80 +112,11 @@ Examples:
 EOF
 }
 
-validate_jobs() {
-    if [[ -n "$jobs" ]] && { [[ ! "$jobs" =~ ^[0-9]+$ ]] || [[ "$jobs" -eq 0 ]]; }; then
-        echo "error: -j/--jobs must be a positive integer: ${jobs}" >&2
-        exit 1
-    fi
-}
-
 validate_candidate_n() {
     if [[ ! "$candidate_n" =~ ^[0-9]+$ ]] || [[ "$candidate_n" -eq 0 ]]; then
         echo "error: -n/--n must be a positive integer: ${candidate_n}" >&2
         exit 1
     fi
-}
-
-validate_profile_csv() {
-    local flag_name="$1"
-    local path="$2"
-    if [[ ! -f "$path" ]]; then
-        echo "error: ${flag_name} not found: ${path}" >&2
-        exit 1
-    fi
-}
-
-resolve_profile_csv_paths() {
-    if [[ -z "$line_coverage_uncovered_csv" ]]; then
-        echo "error: --line-coverage-uncovered-csv is required" >&2
-        exit 1
-    fi
-    if [[ -z "$llc_address_line_map_csv" ]]; then
-        echo "error: --llc-address-line-map-csv is required" >&2
-        exit 1
-    fi
-    validate_profile_csv "--line-coverage-uncovered-csv" "$line_coverage_uncovered_csv"
-    validate_profile_csv "--llc-address-line-map-csv" "$llc_address_line_map_csv"
-    line_coverage_uncovered_csv="$(realpath "$line_coverage_uncovered_csv")"
-    llc_address_line_map_csv="$(realpath "$llc_address_line_map_csv")"
-}
-
-# Enumerate .ll/.bc under src (recursive), sorted — matches TestRunner.collect_llc_input_files().
-collect_candidate_inputs() {
-    local src="$1"
-    find "$src" -type f \( -name '*.ll' -o -name '*.bc' \) | LC_ALL=C sort
-}
-
-# Copy the first n candidate inputs into staging_dir, preserving relative paths.
-stage_candidate_tests() {
-    local src="$1"
-    local n="$2"
-    local staging_dir="$3"
-    local src_real count rel dest_parent
-
-    src_real="$(realpath "$src")"
-    mapfile -t candidate_files < <(collect_candidate_inputs "$src_real")
-
-    if [[ "${#candidate_files[@]}" -eq 0 ]]; then
-        echo "error: no .ll or .bc files under --candidate-tests-dir: ${src_real}" >&2
-        exit 1
-    fi
-
-    count="$n"
-    if [[ "${#candidate_files[@]}" -lt "$count" ]]; then
-        count="${#candidate_files[@]}"
-        echo "note: corpus has ${#candidate_files[@]} file(s); staging all of them (requested ${n})"
-    fi
-
-    local i
-    for (( i = 0; i < count; i++ )); do
-        rel="${candidate_files[$i]#"${src_real}/"}"
-        dest_parent="${staging_dir}/$(dirname "$rel")"
-        mkdir -p "$dest_parent"
-        cp -- "${candidate_files[$i]}" "${staging_dir}/${rel}"
-    done
-
-    echo "Staged ${count} candidate test file(s) under ${staging_dir}"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -289,8 +246,8 @@ if [[ ! -d "$candidate_tests_dir" ]]; then
     exit 1
 fi
 
-resolve_profile_csv_paths
-validate_jobs
+resolve_gap_profile_csv_paths line_coverage_uncovered_csv llc_address_line_map_csv
+validate_jobs "$jobs"
 
 docker_image_validate_build_flags
 docker_image_normalize_backend_tests
@@ -336,6 +293,7 @@ fi
 rm -rf "${output_dir}/candidate_tests" "${output_dir}/incremental"
 
 docker_env=(
+    -e "IN_CONTAINER=1"
     -e "CANDIDATE_N=${candidate_n}"
     -e "UNCOVERED_CSV=${container_uncovered_csv}"
     -e "LLC_MAP_CSV=${container_llc_map_csv}"
@@ -358,29 +316,7 @@ docker run --rm \
     "${docker_env[@]}" \
     -w "${CONTAINER_WORKDIR}" \
     "${image_ref}" \
-    bash -lc '
-set -euo pipefail
-
-candidate_args=(
-    python -m coverage candidate-test
-    --output-dir /mounted-output/candidate_tests
-    --candidate-tests-dir /mounted-candidate-tests
-    --n "${CANDIDATE_N}"
-)
-if [[ -n "${JOBS:-}" ]]; then
-    candidate_args+=(-j "${JOBS}")
-fi
-
-echo "=== coverage candidate-test (n=${CANDIDATE_N}) ==="
-"${candidate_args[@]}"
-
-echo "=== coverage incremental ==="
-python -m coverage incremental \
-    --output-dir /mounted-output/incremental \
-    --line-coverage-uncovered-csv "${UNCOVERED_CSV}" \
-    --llc-address-line-map-csv "${LLC_MAP_CSV}" \
-    --candidate-tests-output-dir /mounted-output/candidate_tests
-'
+    bash "${CONTAINER_SCRIPT}"
 
 echo "Image: ${image_ref}"
 report="${output_dir}/incremental/new_coverage.csv"
