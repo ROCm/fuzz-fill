@@ -351,7 +351,7 @@ Optional commands outside the main workflows in fuzz-fill.
 
 | Command | Purpose |
 |---------|---------|
-| `python -m coverage min-candidate-tests` | From `candidate-test` output, greedily select a minimal set of `(source file, llc flags)` runs that cover the same SanitizerCoverage instrumentation points; writes `min_candidate_tests.csv`, `min_candidate_tests_points.csv`, and `min_candidate_tests_source_files.csv`. Requires `candidate_test_manifest.csv` and `candidate_test_settings.csv` emitted by `candidate-test`. |
+| `python -m coverage min-candidate-tests` | From `candidate-test` output, selects a minimal set of tests that cover the same SanitizerCoverage instrumentation points; writes `min_candidate_tests.csv`, `min_candidate_tests_points.csv`, and `min_candidate_tests_source_files.csv`. Requires `candidate_test_manifest.csv` and `candidate_test_settings.csv` emitted by `candidate-test`. |
 
 ---
 
