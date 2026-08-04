@@ -359,7 +359,7 @@ def main():
     elif args.subcmd == "min-candidate-tests":
         tools = incremental_tools_from_args(sancov=args.sancov)
         logger.info(
-            "min-candidate-tests: selecting minimal candidate "
+            "min-candidate-tests: selecting minimal set of candidate "
             "tests by instrumentation point coverage"
         )
         with log_timing(logger, "min-candidate-tests"):
