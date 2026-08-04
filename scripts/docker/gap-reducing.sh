@@ -11,8 +11,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-CONTAINER_WORKDIR="/work/fuzz-fill"
-CONTAINER_SCRIPT="${CONTAINER_WORKDIR}/scripts/docker/$(basename "$0")"
 
 if [[ "${IN_CONTAINER:-}" == 1 ]]; then
     # shellcheck source=scripts/lib/gap-reducing-cli.sh
@@ -51,11 +49,15 @@ fi
 
 # shellcheck source=scripts/docker/ensure-image.sh
 source "${SCRIPT_DIR}/ensure-image.sh"
+# shellcheck source=scripts/docker/docker-image-cli.sh
+source "${SCRIPT_DIR}/docker-image-cli.sh"
+# shellcheck source=scripts/docker/docker-run.sh
+source "${SCRIPT_DIR}/docker-run.sh"
 
-image_name="${IMAGE_NAME:-fuzz-fill-test}"
-image_tag="${IMAGE_TAG:-latest}"
-image_ref=""
-pr_id=""
+CONTAINER_WORKDIR="${DOCKER_GAP_CONTAINER_WORKDIR}"
+CONTAINER_SCRIPT="$(docker_gap_container_script "$0")"
+
+docker_image_cli_init_vars
 output_dir=""
 reduce_row=1
 pipeline="llvm_reduce_ir"
@@ -67,12 +69,6 @@ pass_under_test=""
 mtriple=""
 extract_mir_output=""
 mir_codegen_only=0
-build_image=0
-keep_image=0
-force_build=0
-llvm_repo=""
-backend_tests=""
-github_repo=""
 
 usage() {
     cat <<EOF
@@ -118,17 +114,15 @@ EOF
 }
 
 while [[ $# -gt 0 ]]; do
+    if docker_image_cli_try_parse "$1" "${2:-}"; then
+        shift "${DOCKER_IMAGE_CLI_SHIFT}"
+        continue
+    fi
+    if docker_gap_cli_try_parse_common "$1" "${2:-}"; then
+        shift "${DOCKER_GAP_CLI_SHIFT}"
+        continue
+    fi
     case "$1" in
-        --image)
-            [[ $# -ge 2 ]] || { echo "error: --image requires a value" >&2; exit 2; }
-            image_ref="$2"
-            shift 2
-            ;;
-        --pr-id)
-            [[ $# -ge 2 ]] || { echo "error: --pr-id requires a value" >&2; exit 2; }
-            pr_id="$2"
-            shift 2
-            ;;
         --output-dir)
             [[ $# -ge 2 ]] || { echo "error: --output-dir requires a value" >&2; exit 2; }
             output_dir="$2"
@@ -176,42 +170,6 @@ while [[ $# -gt 0 ]]; do
             mir_codegen_only=1
             shift
             ;;
-        --bind-repo)
-            bind_repo=1
-            shift
-            ;;
-        --build-image)
-            build_image=1
-            shift
-            ;;
-        --keep-image)
-            keep_image=1
-            shift
-            ;;
-        --force-build)
-            force_build=1
-            shift
-            ;;
-        --llvm-repo)
-            [[ $# -ge 2 ]] || { echo "error: --llvm-repo requires a value" >&2; exit 2; }
-            llvm_repo="$2"
-            shift 2
-            ;;
-        --backend-tests)
-            [[ $# -ge 2 ]] || { echo "error: --backend-tests requires a value" >&2; exit 2; }
-            backend_tests="$2"
-            shift 2
-            ;;
-        --github-repo)
-            [[ $# -ge 2 ]] || { echo "error: --github-repo requires a value" >&2; exit 2; }
-            github_repo="$2"
-            shift 2
-            ;;
-        --image-name)
-            [[ $# -ge 2 ]] || { echo "error: --image-name requires a value" >&2; exit 2; }
-            image_name="$2"
-            shift 2
-            ;;
         --help|-h)
             usage
             exit 0
@@ -244,34 +202,20 @@ candidate_tests_dir="$(gap_fill_candidate_tests_dir "$output_dir")"
 validate_gap_fill_artifacts "$coverage_csv" "$candidate_tests_dir" \
     "run scripts/docker/gap-filling.sh first"
 
-docker_image_validate_build_flags
-docker_image_normalize_backend_tests
-docker_image_validate_pr_id
-docker_image_resolve_ref
-
 DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --backend-tests"
-docker_image_ensure
+docker_image_cli_prepare
 
 docker_env=(-e "IN_CONTAINER=1")
 gap_reducing_append_docker_env docker_env \
     "$reduce_row" "$pipeline" "$prepare_only" "$with_creduce" \
     "$creduce_n" "$pass_under_test" "$mtriple" "$extract_mir_output" "$mir_codegen_only"
 
-repo_mount=()
-if [[ "${bind_repo}" -eq 1 ]]; then
-    repo_mount=(-v "${REPO_ROOT}:${CONTAINER_WORKDIR}")
-    echo "Using local fuzz-fill checkout: ${REPO_ROOT}"
-fi
+extra_mounts=()
+docker_gap_append_bind_repo_mount extra_mounts
 
 gap_reducing_print_summary "$output_dir" "$reduce_row" "$pipeline" "$prepare_only" "Gap-fill output"
 
-docker run --rm \
-    -v "${output_dir}:/mounted-output" \
-    "${repo_mount[@]}" \
-    "${docker_env[@]}" \
-    -w "${CONTAINER_WORKDIR}" \
-    "${image_ref}" \
-    bash "${CONTAINER_SCRIPT}"
+docker_gap_run "$CONTAINER_SCRIPT" "$output_dir" "$image_ref" docker_env extra_mounts
 
 echo "Image: ${image_ref}"
 echo "Wrote ${output_dir}/reduced/"
