@@ -30,7 +30,10 @@ Run from the fuzz-fill repo root:
 # Show planned work (PR/backend pairs needing a fresh check)
 ./scripts/pr-check/check-llvm-prs.sh --plan-only
 
-# Regenerate latest.json / latest.md from state without running checks
+# Refresh latest.json / latest.md from state (no checks, no LLVM_REPO needed)
+./scripts/pr-check/get-latest.sh
+
+# Same as get-latest.sh, via the main orchestrator flag
 ./scripts/pr-check/check-llvm-prs.sh --report-only
 
 # Discover, plan, run up to PR_CHECK_MAX_PER_RUN checks, and write reports
@@ -83,6 +86,18 @@ Daily cron entry point (AMDGPU only, drains the full queue):
 | `data/pr-check/reports/runs/<timestamp>.json` | Snapshot from each report generation |
 
 A PR has **coverage gaps** when `target_lines_uncovered.csv` is non-empty (added lines not covered by the regression suite).
+
+## Refreshing reports
+
+Reports are built from `state.json`, not by scanning `runs/`. After a failed or interrupted check run, or anytime you want the summary synced to current state:
+
+```bash
+./scripts/pr-check/get-latest.sh
+```
+
+Use this when `latest.md` looks stale (e.g. fewer entries than `state.json`, or checks finished but the orchestrator exited early). The markdown body lists only PRs **with gaps**; clean PRs appear in the summary line and in `latest.json`.
+
+The main orchestrator also refreshes reports at normal exit. An EXIT trap regenerates the report if at least one check ran but the process did not finish cleanly (Ctrl+C, OOM, or unexpected early exit during `--drain-queue`).
 
 ## Daily AMDGPU cron
 

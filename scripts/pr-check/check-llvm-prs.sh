@@ -82,12 +82,21 @@ run_pr_check() {
         --log-level "$PR_CHECK_LOG_LEVEL"
 }
 
+report_generated=0
+
 generate_report() {
+    report_generated=1
     echo "=== coverage gap report ==="
     run_pr_check report \
         --github-repo "$GITHUB_REPO" \
         --state-file "$PR_CHECK_STATE_FILE" \
         --report-dir "$PR_CHECK_REPORT_DIR"
+}
+
+cleanup_report() {
+    if [[ "$report_generated" -eq 0 && "$total_checks" -gt 0 ]]; then
+        generate_report || true
+    fi
 }
 
 require_command() {
@@ -394,6 +403,7 @@ echo "=== automated PR check run (log-level=${PR_CHECK_LOG_LEVEL}) ===" >&2
 
 failures=0
 total_checks=0
+trap cleanup_report EXIT
 
 if [[ "$drain_queue" -eq 1 ]]; then
     echo "Draining queue (one check at a time until empty)..." >&2
