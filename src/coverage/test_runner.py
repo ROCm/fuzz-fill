@@ -9,9 +9,15 @@ import sys
 import pandas as pd
 from pathlib import Path
 
-from coverage.candidate_test_settings import DEFAULT_LLC_FLAG_VARIANTS
+from coverage.candidate_test_settings import (
+    DEFAULT_LLC_FLAG_VARIANTS,
+    write_manifest_csv,
+    write_settings_csv,
+)
 from coverage.constants import (
     BASELINE_LIT_PRIORITY_TESTS,
+    DEFAULT_CANDIDATE_TEST_MANIFEST_FILE,
+    DEFAULT_CANDIDATE_TEST_SETTINGS_FILE,
     DEFAULT_LIT_FAILURES_REPORT,
 )
 from coverage.filepaths import Filepaths
@@ -256,6 +262,16 @@ class TestRunner:
             if self.standalone_total_tests == 0:
                 self._print_standalone_progress("(no standalone inputs)")
                 return
+
+            output_dir = self.filepaths.output_dir
+            write_settings_csv(
+                self._llc_flag_variants,
+                output_dir / DEFAULT_CANDIDATE_TEST_SETTINGS_FILE,
+            )
+            write_manifest_csv(
+                work,
+                output_dir / DEFAULT_CANDIDATE_TEST_MANIFEST_FILE,
+            )
 
             sem = asyncio.Semaphore(self._jobs)
 

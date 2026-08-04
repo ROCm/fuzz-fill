@@ -68,3 +68,38 @@ def _load_llc_flag_variants_csv(settings_csv: Path) -> list[str]:
         raise SystemExit(f"error: no llc flag variants in settings CSV: {path}")
 
     return variants
+
+
+MANIFEST_COLUMNS = ("test_id", "source_file", "llc_flags", "test_dir")
+
+
+def write_settings_csv(variants: list[str], path: Path) -> None:
+    """Write llc flag variants to a settings CSV under the candidate-test output dir."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([LLC_FLAGS_COLUMN])
+        for flags in variants:
+            writer.writerow([flags])
+
+
+def write_manifest_csv(
+    work: list[tuple[Path, Path, str]],
+    path: Path,
+) -> None:
+    """Write one manifest row per planned standalone run."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=MANIFEST_COLUMNS)
+        writer.writeheader()
+        for test_dir, test_path, llc_flags in work:
+            rest = test_dir.name.removeprefix("test_")
+            test_id, _ = rest.split("_", 1)
+            writer.writerow(
+                {
+                    "test_id": test_id,
+                    "source_file": str(test_path.resolve()),
+                    "llc_flags": llc_flags,
+                    "test_dir": test_dir.name,
+                }
+            )

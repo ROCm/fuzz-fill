@@ -13,6 +13,11 @@
 # RUN: find %t/candidate_tests_csv -name '*.sancov' | wc -l | %FileCheck %s --check-prefix=SANCOV_CSV
 # SANCOV_CSV: 12
 
+# RUN: test -f %t/candidate_tests_csv/candidate_test_settings.csv
+# RUN: test -f %t/candidate_tests_csv/candidate_test_manifest.csv
+# RUN: wc -l %t/candidate_tests_csv/candidate_test_manifest.csv | %FileCheck %s --check-prefix=MANIFEST_CSV
+# MANIFEST_CSV: 13
+
 # RUN: %coverage candidate-test --output-dir %t/candidate_tests_default --llc %sancov-llc --candidate-tests-dir %S/fixtures/new-tests-parallel --n 3 2>&1 | tee %t/candidate_tests_default.log
 
 # RUN: %FileCheck %s --input-file=%t/candidate_tests_default.log --check-prefix=EXEC_DEFAULT
@@ -20,3 +25,8 @@
 
 # RUN: find %t/candidate_tests_default -name '*.sancov' | wc -l | %FileCheck %s --check-prefix=SANCOV_DEFAULT
 # SANCOV_DEFAULT: 24
+
+# RUN: test -f %t/candidate_tests_default/candidate_test_settings.csv
+# RUN: test -f %t/candidate_tests_default/candidate_test_manifest.csv
+# RUN: wc -l %t/candidate_tests_default/candidate_test_manifest.csv | %FileCheck %s --check-prefix=MANIFEST_DEFAULT
+# MANIFEST_DEFAULT: 25

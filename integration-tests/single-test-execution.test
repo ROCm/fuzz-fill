@@ -24,3 +24,11 @@
 # COM: Each successful run must have produced sancov coverage output.
 # RUN: ls %t/candidate_tests/test_0_standalone-empty-kernel.ll/*.sancov
 # RUN: ls %t/candidate_tests/test_7_standalone-empty-kernel.ll/*.sancov
+
+# COM: Settings and manifest metadata must be present.
+# RUN: test -f %t/candidate_tests/candidate_test_settings.csv
+# RUN: test -f %t/candidate_tests/candidate_test_manifest.csv
+# RUN: wc -l %t/candidate_tests/candidate_test_settings.csv | %FileCheck %s --check-prefix=SETTINGS_LINES
+# SETTINGS_LINES: 9
+# RUN: wc -l %t/candidate_tests/candidate_test_manifest.csv | %FileCheck %s --check-prefix=MANIFEST_LINES
+# MANIFEST_LINES: 9
