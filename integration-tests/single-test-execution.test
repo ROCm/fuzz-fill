@@ -25,10 +25,26 @@
 # RUN: ls %t/candidate_tests/test_0_standalone-empty-kernel.ll/*.sancov
 # RUN: ls %t/candidate_tests/test_7_standalone-empty-kernel.ll/*.sancov
 
-# COM: Settings and manifest metadata must be present.
-# RUN: test -f %t/candidate_tests/candidate_test_settings.csv
-# RUN: test -f %t/candidate_tests/candidate_test_manifest.csv
-# RUN: wc -l %t/candidate_tests/candidate_test_settings.csv | %FileCheck %s --check-prefix=SETTINGS_LINES
-# SETTINGS_LINES: 9
-# RUN: wc -l %t/candidate_tests/candidate_test_manifest.csv | %FileCheck %s --check-prefix=MANIFEST_LINES
-# MANIFEST_LINES: 9
+# COM: Settings and manifest metadata must match the default eight-variant matrix.
+# RUN: %FileCheck %s --input-file=%t/candidate_tests/candidate_test_settings.csv --check-prefix=SETTINGS_CSV
+# RUN: %FileCheck %s --input-file=%t/candidate_tests/candidate_test_manifest.csv --check-prefix=MANIFEST_CSV
+
+# SETTINGS_CSV: llc_flags
+# SETTINGS_CSV-NEXT: -O0 -global-isel=0
+# SETTINGS_CSV-NEXT: -O0 -global-isel=1
+# SETTINGS_CSV-NEXT: -O1 -global-isel=0
+# SETTINGS_CSV-NEXT: -O1 -global-isel=1
+# SETTINGS_CSV-NEXT: -O2 -global-isel=0
+# SETTINGS_CSV-NEXT: -O2 -global-isel=1
+# SETTINGS_CSV-NEXT: -O3 -global-isel=0
+# SETTINGS_CSV-NEXT: -O3 -global-isel=1
+
+# MANIFEST_CSV: test_id,source_file,llc_flags,test_dir
+# MANIFEST_CSV-NEXT: 0,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O0 -global-isel=0,test_0_standalone-empty-kernel.ll
+# MANIFEST_CSV-NEXT: 1,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O0 -global-isel=1,test_1_standalone-empty-kernel.ll
+# MANIFEST_CSV-NEXT: 2,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O1 -global-isel=0,test_2_standalone-empty-kernel.ll
+# MANIFEST_CSV-NEXT: 3,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O1 -global-isel=1,test_3_standalone-empty-kernel.ll
+# MANIFEST_CSV-NEXT: 4,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O2 -global-isel=0,test_4_standalone-empty-kernel.ll
+# MANIFEST_CSV-NEXT: 5,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O2 -global-isel=1,test_5_standalone-empty-kernel.ll
+# MANIFEST_CSV-NEXT: 6,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O3 -global-isel=0,test_6_standalone-empty-kernel.ll
+# MANIFEST_CSV-NEXT: 7,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O3 -global-isel=1,test_7_standalone-empty-kernel.ll

@@ -289,7 +289,7 @@ Several commands accept LLVM tool paths via environment variables when the match
 
 | Env var | CLI flag | Commands |
 |---------|----------|----------|
-| `FUZZ_FILL_SANCOV` | `--sancov` | `coverage baseline`, `coverage incremental`, `coverage min-candidate-tests` (maintainer-only) |
+| `FUZZ_FILL_SANCOV` | `--sancov` | `coverage baseline`, `coverage incremental`, `coverage min-candidate-tests` (mainly for maintainers) |
 | `FUZZ_FILL_LLVM_LIT` | `--llvm-lit` | `coverage baseline` |
 | `FUZZ_FILL_LLC` | `--llc` | `coverage baseline`, `coverage candidate-test`, `reduce` |
 | `FUZZ_FILL_OPT` | `--opt` | `coverage baseline` |
@@ -345,9 +345,9 @@ FILTER=CodeGen/AMDGPU ./scripts/test_coverage.sh
 
 Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `INSTRUMENTED_BIN_DIR`, …); only the `FUZZ_FILL_*` variables are read by the Python CLIs.
 
-### Maintainer-only commands
+### Utility commands
 
-**Normal users can ignore this section.** These commands are mainly for fuzz-fill developers, not currently used in the workflows.
+Optional commands outside the main workflows in fuzz-fill.
 
 | Command | Purpose |
 |---------|---------|

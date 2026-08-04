@@ -68,9 +68,9 @@ def main():
     p_min_candidate_tests = sub.add_parser(
         "min-candidate-tests",
         help=(
-            "[maintainer-only; not for normal use] Greedy selection of "
-            "candidate-test runs by instrumentation point coverage. Outside "
-            "the main baseline → candidate-test → incremental workflow."
+            "Greedy selection of candidate-test runs by instrumentation point "
+            "coverage. Outside the main baseline → candidate-test → "
+            "incremental workflow."
         ),
     )
     p_target_lines = sub.add_parser(
@@ -360,7 +360,7 @@ def main():
     elif args.subcmd == "min-candidate-tests":
         tools = incremental_tools_from_args(sancov=args.sancov)
         logger.info(
-            "min-candidate-tests (maintainer-only): selecting minimal candidate "
+            "min-candidate-tests: selecting minimal candidate "
             "tests by instrumentation point coverage"
         )
         with log_timing(logger, "min-candidate-tests"):

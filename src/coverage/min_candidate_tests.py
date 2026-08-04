@@ -1,10 +1,4 @@
-"""Maintainer-only command: greedy minimal selection of candidate-test runs.
-
-Normal fuzz-fill users do not need this. It is for fuzz-fill developers
-experimenting with shrinking a candidate-test run matrix by instrumentation
-point coverage alone, outside the main workflow
-(baseline → candidate-test → incremental).
-"""
+# Greedy minimal selection of candidate-test runs by instrumentation point coverage.
 
 from __future__ import annotations
 
