@@ -13,6 +13,7 @@ from coverage.constants import (
     DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_NEW_COVERAGE_CSV,
+    DEFAULT_SOURCE_CODE_FILTER,
     DEFAULT_TARGET_LINES_REPORT,
     DEFAULT_TIMINGS_FILE,
 )
@@ -192,6 +193,16 @@ def main():
         required=True,
         help="Directory containing the candidate tests coverage output",
     )
+    p_incremental.add_argument(
+        "--source-filter",
+        default=DEFAULT_SOURCE_CODE_FILTER,
+        metavar="REGEX",
+        help=(
+            "Only consider baseline gaps whose source file path matches this "
+            f"regex (default: {DEFAULT_SOURCE_CODE_FILTER!r}). "
+            "Pass an empty string to disable filtering."
+        ),
+    )
 
     p_target_lines.add_argument(
         "--line-coverage-uncovered-csv",
@@ -281,7 +292,11 @@ def main():
             filepaths.llc_address_line_map_csv = args.llc_address_line_map_csv
             filepaths.output_candidate_tests_dir = args.candidate_tests_output_dir
 
-            coverage_analyzer = CoverageAnalyzer(filepaths, mode="full")
+            coverage_analyzer = CoverageAnalyzer(
+                filepaths,
+                mode="full",
+                source_filter=args.source_filter,
+            )
 
             coverage_analyzer.get_incremental_coverage()
 

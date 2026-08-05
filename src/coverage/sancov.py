@@ -10,7 +10,6 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-from coverage.constants import DEFAULT_SOURCE_CODE_FILTER
 from fuzz_fill.log import get_logger, log_timing, run_subprocess
 
 logger = get_logger("coverage.sancov")
@@ -86,9 +85,10 @@ class Sancov:
         """
         point_symbol_info = symcov.get("point-symbol-info")
 
-        point_symbol_info = {
-            k: v for k, v in point_symbol_info.items() if source_code_filter in k
-        }
+        if source_code_filter:
+            point_symbol_info = {
+                k: v for k, v in point_symbol_info.items() if source_code_filter in k
+            }
 
         df = Sancov.flatten_point_symbol_info(point_symbol_info)
 
@@ -100,7 +100,32 @@ class Sancov:
         # Create coverage dataframe
         df["covered"] = df["point"].isin(covered_points).astype(int)
 
-        return df
+        return Sancov.dedupe_coverage_points(df)
+
+    @staticmethod
+    def dedupe_coverage_points(df: pd.DataFrame) -> pd.DataFrame:
+        """Collapse duplicate ``(file, line, point)`` rows from symcov flattening.
+
+        Header and STL paths can map the same instrumentation point through multiple
+        function entries. Duplicate rows must agree on ``covered``; keep one row per
+        triple.
+        """
+        if df.empty:
+            return df
+        covered_nunique = (
+            df.groupby(["file", "line", "point"], dropna=False)["covered"]
+            .nunique()
+        )
+        conflicts = covered_nunique[covered_nunique > 1]
+        assert conflicts.empty, (
+            "duplicate (file, line, point) rows disagree on covered: "
+            f"{conflicts.reset_index()[['file', 'line', 'point']].to_dict('records')}"
+        )
+        return (
+            df.groupby(["file", "line", "point"], as_index=False, dropna=False)["covered"]
+            .max()
+            .astype({"covered": int})
+        )
 
     @staticmethod
     def full_line_keys(
@@ -298,7 +323,7 @@ class Sancov:
     ) -> list[pd.DataFrame]:
         """Load per-tool coverage frames from merged symcov paths on each Sancov."""
         if source_code_filter is None:
-            source_code_filter = DEFAULT_SOURCE_CODE_FILTER
+            source_code_filter = ""
         return Sancov.load_coverage_dfs(
             [s.get_merged_symcov_path() for s in sancovs],
             source_code_filter,

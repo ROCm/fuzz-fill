@@ -159,7 +159,7 @@ Under `$OUTPUT_DIR`:
 | Path | Contents |
 |------|----------|
 | `baseline/line_coverage_summary.csv` | Per-line baseline coverage (joint llc + opt): `covered`, `partially`, or `uncovered` |
-| `baseline/line_coverage_uncovered.csv` | Baseline lines with no suite coverage — input to `incremental` and `target-lines` |
+| `baseline/line_coverage_uncovered.csv` | Baseline lines with no suite coverage (all instrumented paths) — input to `incremental` and `target-lines` |
 | `baseline/llc_address_line_map.csv` | llc address-to-line map — input to `incremental` |
 | `baseline/lit_failures.json` | Failed lit tests from the baseline run (llvm-lit `--report-failures-only` JSON: `name`, `code`, `output`, `elapsed`) |
 | `baseline/processed_sancov/` | Merged, symbolized symcov files — debugging artifact from baseline |
@@ -263,7 +263,13 @@ The workflows above call these modules. Use `--help` on any command for the full
 
 Default when omitted: `AMDGPU` (see `DEFAULT_LIT_FILTER_DIRS` in [`src/coverage/constants.py`](src/coverage/constants.py)).
 
-Baseline symcov CSVs always include source paths under `llvm/lib` (see `DEFAULT_SOURCE_CODE_FILTER` in [`src/coverage/constants.py`](src/coverage/constants.py)).
+Baseline symcov CSVs include **all** instrumented source paths from the LIT run. Use `--source-filter` on `coverage incremental` to scope gap finding (default: `(?:^|/)llvm/lib/`; see `DEFAULT_SOURCE_CODE_FILTER` in [`src/coverage/constants.py`](src/coverage/constants.py)).
+
+### `coverage incremental` filters
+
+| Flag | Meaning |
+|------|---------|
+| `--source-filter REGEX` | Only consider baseline gaps whose source file path matches this Python regex (default: `(?:^|/)llvm/lib/`; pass `""` to disable) |
 
 ### Environment variables
 

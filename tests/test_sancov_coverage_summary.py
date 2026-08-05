@@ -143,6 +143,23 @@ class BuildCoverageSummaryTest(unittest.TestCase):
         self.assertEqual(result[(FILE, 30)], "uncovered")
 
 
+class GetCoverageDfTest(unittest.TestCase):
+    def test_dedupes_duplicate_file_line_point_rows(self) -> None:
+        symcov = {
+            "point-symbol-info": {
+                "/usr/include/c++/13/bits/alloc_traits.h": {
+                    "instantiation_a": {"0x1001": "482:0"},
+                    "instantiation_b": {"0x1001": "482:0"},
+                }
+            },
+            "covered-points": ["0x1001"],
+        }
+        df = Sancov.get_coverage_df(symcov, "")
+        self.assertEqual(len(df), 1)
+        self.assertEqual(int(df.iloc[0]["covered"]), 1)
+        Sancov.build_coverage_summary([df])
+
+
 def _address_line_map(rows: list[tuple[str, int, str, int]]) -> pd.DataFrame:
     return Sancov.build_address_line_map(_coverage_df(rows))
 

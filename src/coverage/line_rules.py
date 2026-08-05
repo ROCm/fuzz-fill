@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pandas as pd
 
 from coverage.sancov import Sancov
@@ -27,3 +29,19 @@ def gap_address_line_map(
     uncovered_keys = pd.DataFrame(list(baseline_uncovered), columns=["file", "line"])
     uncovered_keys["line"] = uncovered_keys["line"].astype(int)
     return llc_address_line_map.merge(uncovered_keys, on=["file", "line"])
+
+
+def filter_uncovered_lines(
+    baseline_uncovered: frozenset[tuple[str, int]],
+    source_filter: str,
+) -> frozenset[tuple[str, int]]:
+    """Keep only ``(file, line)`` pairs whose file path matches *source_filter* regex."""
+    if not source_filter:
+        return baseline_uncovered
+    try:
+        pattern = re.compile(source_filter)
+    except re.error as exc:
+        raise ValueError(f"invalid source filter regex: {source_filter!r}") from exc
+    return frozenset(
+        (file, line) for file, line in baseline_uncovered if pattern.search(file)
+    )
