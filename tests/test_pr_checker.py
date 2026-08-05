@@ -19,8 +19,10 @@ from pr_check.checker import (
     build_report_payload,
     count_csv_data_rows,
     count_lit_failures,
+    diff_report_entries,
     entry_key,
     evaluate_output_dir,
+    filter_report_payload,
     load_gap_rows,
     load_state,
     plan_work,
@@ -236,7 +238,160 @@ class ReportGenerationTest(unittest.TestCase):
             written = write_reports(report_dir, payload, write_run_snapshot=True)
             self.assertTrue(written["latest_json"].is_file())
             self.assertTrue(written["latest_md"].is_file())
+            self.assertTrue(written["new_prs_md"].is_file())
             self.assertTrue(written["run_snapshot"].is_file())
+
+            new_prs_text = written["new_prs_md"].read_text(encoding="utf-8")
+            self.assertIn("new checks", new_prs_text)
+            self.assertIn("#123", new_prs_text)
+
+
+class ReportDeltaTest(unittest.TestCase):
+    def _sample_entry(
+        self,
+        *,
+        pr_number: int = 123,
+        backend: str = "amdgpu",
+        checked_at: str = "2026-07-29T18:00:00+00:00",
+        head_sha: str = "abc123def456",
+        status: str = "gaps",
+        gap_count: int = 1,
+    ) -> dict[str, object]:
+        return {
+            "key": entry_key(pr_number, backend),
+            "pr_number": pr_number,
+            "backend": backend,
+            "title": "Fix foo",
+            "head_sha": head_sha,
+            "status": status,
+            "gap_count": gap_count,
+            "lit_failure_count": 0,
+            "checked_at": checked_at,
+            "output_dir": "/tmp/out",
+            "error": None,
+            "pr_url": f"https://github.com/llvm/llvm-project/pull/{pr_number}",
+            "sample_gaps": [],
+        }
+
+    def _sample_payload(self, entries: list[dict[str, object]]) -> dict[str, object]:
+        with_gaps = [entry for entry in entries if entry["status"] == "gaps"]
+        failed = [entry for entry in entries if entry["status"] == "failed"]
+        status_counts = {"gaps": 0, "clean": 0, "failed": 0}
+        for entry in entries:
+            status_counts[str(entry["status"])] += 1
+        return {
+            "generated_at": "2026-08-05T08:00:00+00:00",
+            "github_repo": "llvm/llvm-project",
+            "summary": {
+                "total_entries": len(entries),
+                "with_gaps": status_counts["gaps"],
+                "clean": status_counts["clean"],
+                "failed": status_counts["failed"],
+            },
+            "entries_with_gaps": with_gaps,
+            "failed_entries": failed,
+            "all_entries": entries,
+        }
+
+    def test_diff_detects_new_and_changed_entries(self) -> None:
+        previous = self._sample_payload(
+            [
+                self._sample_entry(pr_number=1, checked_at="2026-01-01T00:00:00+00:00"),
+                self._sample_entry(
+                    pr_number=2,
+                    backend="spirv",
+                    status="clean",
+                    gap_count=0,
+                    checked_at="2026-01-01T00:00:00+00:00",
+                ),
+            ]
+        )
+        current = self._sample_payload(
+            [
+                self._sample_entry(
+                    pr_number=1,
+                    checked_at="2026-01-02T00:00:00+00:00",
+                    head_sha="updated-sha",
+                ),
+                self._sample_entry(
+                    pr_number=2,
+                    backend="spirv",
+                    status="clean",
+                    gap_count=0,
+                    checked_at="2026-01-01T00:00:00+00:00",
+                ),
+                self._sample_entry(pr_number=3, checked_at="2026-01-02T00:00:00+00:00"),
+            ]
+        )
+
+        changed = diff_report_entries(current, previous)
+        self.assertEqual(changed, {"1:amdgpu", "3:amdgpu"})
+
+    def test_diff_without_previous_treats_all_entries_as_new(self) -> None:
+        current = self._sample_payload([self._sample_entry()])
+        self.assertEqual(diff_report_entries(current, None), {"123:amdgpu"})
+
+    def test_filter_report_payload_recomputes_summary(self) -> None:
+        payload = self._sample_payload(
+            [
+                self._sample_entry(pr_number=1),
+                self._sample_entry(
+                    pr_number=2,
+                    status="clean",
+                    gap_count=0,
+                    checked_at="2026-01-01T00:00:00+00:00",
+                ),
+            ]
+        )
+        filtered = filter_report_payload(payload, {"1:amdgpu"})
+        self.assertEqual(filtered["summary"]["total_entries"], 1)
+        self.assertEqual(filtered["summary"]["with_gaps"], 1)
+        self.assertEqual(len(filtered["all_entries"]), 1)
+
+    def test_write_reports_emits_delta_against_previous_latest_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report_dir = Path(tmp) / "reports"
+            previous = self._sample_payload([self._sample_entry(pr_number=1)])
+            current = self._sample_payload(
+                [
+                    self._sample_entry(pr_number=1),
+                    self._sample_entry(
+                        pr_number=2,
+                        status="clean",
+                        gap_count=0,
+                        checked_at="2026-08-05T09:00:00+00:00",
+                    ),
+                ]
+            )
+
+            write_reports(report_dir, previous, write_run_snapshot=False)
+            written = write_reports(report_dir, current, write_run_snapshot=False)
+
+            new_prs_text = written["new_prs_md"].read_text(encoding="utf-8")
+            self.assertIn("New or updated since last report: 1 PR/backend pair(s)", new_prs_text)
+            self.assertIn("1 clean", new_prs_text)
+            self.assertNotIn("#1", new_prs_text)
+
+    def test_write_reports_with_no_changes_writes_empty_delta(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report_dir = Path(tmp) / "reports"
+            payload = self._sample_payload([self._sample_entry()])
+
+            write_reports(report_dir, payload, write_run_snapshot=False)
+            written = write_reports(report_dir, payload, write_run_snapshot=False)
+
+            new_prs_text = written["new_prs_md"].read_text(encoding="utf-8")
+            self.assertIn(
+                "No PRs with coverage gaps or failed checks since the last report.",
+                new_prs_text,
+            )
+            self.assertIn("0 PR/backend pair(s)", new_prs_text)
+
+    def test_render_report_markdown_delta_mode(self) -> None:
+        payload = self._sample_payload([self._sample_entry()])
+        markdown = render_report_markdown(payload, delta=True)
+        self.assertIn("# LLVM PR coverage gap report — new checks", markdown)
+        self.assertIn("New or updated since last report:", markdown)
 
 
 class DiscoverPrsTest(unittest.TestCase):

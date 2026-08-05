@@ -78,3 +78,4 @@ echo
 echo "Report updated:"
 echo "  ${REPORT_DIR}/latest.md"
 echo "  ${REPORT_DIR}/latest.json"
+echo "  ${REPORT_DIR}/new-prs.md"

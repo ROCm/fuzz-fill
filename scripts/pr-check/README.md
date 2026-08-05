@@ -64,7 +64,7 @@ Daily cron entry point (AMDGPU only, drains the full queue):
    - Build Docker image `fuzz-fill-test:llvm-pr-<n>-<backend>` via [`build-image-pr.sh`](../docker/build-image-pr.sh)
    - Run [`pr-cov-gaps-detection.sh`](../docker/pr-cov-gaps-detection.sh)
    - Record `gaps`, `clean`, or `failed` in state
-4. **Report** — write `data/pr-check/reports/latest.json` and `latest.md`
+4. **Report** — write `data/pr-check/reports/latest.json`, `latest.md`, and `new-prs.md`
 
 ### CLI options
 
@@ -83,6 +83,7 @@ Daily cron entry point (AMDGPU only, drains the full queue):
 | `data/pr-check/runs/<pr>-<backend>/` | Per-check artifacts (`baseline/`, `commit_lines_report/`, …) |
 | `data/pr-check/reports/latest.json` | Machine-readable summary of all checked PRs |
 | `data/pr-check/reports/latest.md` | Human-readable gap report with PR links |
+| `data/pr-check/reports/new-prs.md` | PRs new or updated since the previous report (diff vs prior `latest.json`) |
 | `data/pr-check/reports/runs/<timestamp>.json` | Snapshot from each report generation |
 
 A PR has **coverage gaps** when `target_lines_uncovered.csv` is non-empty (added lines not covered by the regression suite).
@@ -95,7 +96,7 @@ Reports are built from `state.json`, not by scanning `runs/`. After a failed or 
 ./scripts/pr-check/get-latest.sh
 ```
 
-Use this when `latest.md` looks stale (e.g. fewer entries than `state.json`, or checks finished but the orchestrator exited early). The markdown body lists only PRs **with gaps**; clean PRs appear in the summary line and in `latest.json`.
+Use this when `latest.md` looks stale (e.g. fewer entries than `state.json`, or checks finished but the orchestrator exited early). The markdown body lists only PRs **with gaps**; clean PRs appear in the summary line and in `latest.json`. The same refresh also updates `new-prs.md` by diffing the current state against the previous `latest.json` — useful after an interrupted run where checks completed but report generation did not.
 
 The main orchestrator also refreshes reports at normal exit. An EXIT trap regenerates the report if at least one check ran but the process did not finish cleanly (Ctrl+C, OOM, or unexpected early exit during `--drain-queue`).
 

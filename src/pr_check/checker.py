@@ -774,6 +774,105 @@ def _attach_sample_gaps(frame: pd.DataFrame, *, max_gap_lines: int) -> pd.DataFr
     return enriched
 
 
+def _entry_key_from_record(entry: dict[str, Any]) -> str:
+    return entry_key(int(entry["pr_number"]), str(entry["backend"]))
+
+
+def _index_report_entries(payload: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """Map ``"<pr>:<backend>"`` keys to entries from a report payload."""
+    if payload is None:
+        return {}
+    indexed: dict[str, dict[str, Any]] = {}
+    for entry in payload.get("all_entries", []):
+        if isinstance(entry, dict):
+            indexed[_entry_key_from_record(entry)] = entry
+    return indexed
+
+
+def diff_report_entries(
+    current: dict[str, Any],
+    previous: dict[str, Any] | None,
+) -> set[str]:
+    """Return keys for entries that are new or updated since the previous report."""
+    current_index = _index_report_entries(current)
+    if previous is None:
+        return set(current_index)
+
+    previous_index = _index_report_entries(previous)
+    changed: set[str] = set()
+    for key, entry in current_index.items():
+        prior = previous_index.get(key)
+        if prior is None:
+            changed.add(key)
+            continue
+        if entry.get("checked_at") != prior.get("checked_at"):
+            changed.add(key)
+            continue
+        if entry.get("head_sha") != prior.get("head_sha"):
+            changed.add(key)
+    return changed
+
+
+def filter_report_payload(payload: dict[str, Any], keys: set[str]) -> dict[str, Any]:
+    """Return a copy of a report payload limited to the given entry keys."""
+    if not keys:
+        return {
+            "generated_at": payload["generated_at"],
+            "github_repo": payload["github_repo"],
+            "summary": {
+                "total_entries": 0,
+                "with_gaps": 0,
+                "clean": 0,
+                "failed": 0,
+            },
+            "entries_with_gaps": [],
+            "failed_entries": [],
+            "all_entries": [],
+        }
+
+    def keep(entry: dict[str, Any]) -> bool:
+        return _entry_key_from_record(entry) in keys
+
+    entries_with_gaps = [
+        entry for entry in payload.get("entries_with_gaps", []) if keep(entry)
+    ]
+    failed_entries = [entry for entry in payload.get("failed_entries", []) if keep(entry)]
+    all_entries = [entry for entry in payload.get("all_entries", []) if keep(entry)]
+
+    status_counts = {"gaps": 0, "clean": 0, "failed": 0}
+    for entry in all_entries:
+        status = entry.get("status")
+        if status in status_counts:
+            status_counts[status] += 1
+
+    return {
+        "generated_at": payload["generated_at"],
+        "github_repo": payload["github_repo"],
+        "summary": {
+            "total_entries": len(all_entries),
+            "with_gaps": status_counts["gaps"],
+            "clean": status_counts["clean"],
+            "failed": status_counts["failed"],
+        },
+        "entries_with_gaps": entries_with_gaps,
+        "failed_entries": failed_entries,
+        "all_entries": all_entries,
+    }
+
+
+def load_previous_report(latest_json: Path) -> dict[str, Any] | None:
+    """Load the previous latest.json report snapshot, if it exists."""
+    if not latest_json.is_file():
+        return None
+    try:
+        payload = json.loads(latest_json.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise PrCheckerError(f"invalid report file {latest_json}: {exc.msg}") from exc
+    if not isinstance(payload, dict):
+        raise PrCheckerError(f"invalid report file {latest_json}: expected object at top level")
+    return payload
+
+
 def build_report_payload(
     state: dict[str, Any],
     *,
@@ -827,27 +926,37 @@ def _markdown_escape_cell(value: str) -> str:
     return value.replace("|", "\\|").replace("\n", " ")
 
 
-def render_report_markdown(report: dict[str, Any]) -> str:
+def render_report_markdown(report: dict[str, Any], *, delta: bool = False) -> str:
     """Render a human-readable Markdown summary."""
+    title = (
+        "# LLVM PR coverage gap report — new checks"
+        if delta
+        else "# LLVM PR coverage gap report"
+    )
     lines = [
-        "# LLVM PR coverage gap report",
+        title,
         "",
         f"Generated: {report['generated_at']}",
         f"Repository: {report['github_repo']}",
     ]
     summary = report["summary"]
-    lines.extend(
-        [
-            (
-                "Entries: "
-                f"{summary['total_entries']} total, "
-                f"{summary['with_gaps']} with gaps, "
-                f"{summary['clean']} clean, "
-                f"{summary['failed']} failed"
-            ),
-            "",
-        ]
-    )
+    if delta:
+        summary_line = (
+            "New or updated since last report: "
+            f"{summary['total_entries']} PR/backend pair(s) "
+            f"({summary['with_gaps']} with gaps, "
+            f"{summary['clean']} clean, "
+            f"{summary['failed']} failed)"
+        )
+    else:
+        summary_line = (
+            "Entries: "
+            f"{summary['total_entries']} total, "
+            f"{summary['with_gaps']} with gaps, "
+            f"{summary['clean']} clean, "
+            f"{summary['failed']} failed"
+        )
+    lines.extend([summary_line, ""])
 
     entries_with_gaps = report.get("entries_with_gaps", [])
     if entries_with_gaps:
@@ -898,7 +1007,12 @@ def render_report_markdown(report: dict[str, Any]) -> str:
         lines.append("")
 
     if not entries_with_gaps and not failed_entries:
-        lines.append("No PRs with coverage gaps or failed checks in the current state.")
+        if delta:
+            lines.append(
+                "No PRs with coverage gaps or failed checks since the last report."
+            )
+        else:
+            lines.append("No PRs with coverage gaps or failed checks in the current state.")
         lines.append("")
 
     return "\n".join(lines)
@@ -910,15 +1024,30 @@ def write_reports(
     *,
     write_run_snapshot: bool = True,
 ) -> dict[str, Path]:
-    """Write latest.json, latest.md, and an optional timestamped snapshot."""
+    """Write latest.json, latest.md, new-prs.md, and an optional timestamped snapshot."""
     report_dir.mkdir(parents=True, exist_ok=True)
 
     latest_json = report_dir / "latest.json"
     latest_md = report_dir / "latest.md"
+    new_prs_md = report_dir / "new-prs.md"
+
+    previous_payload = load_previous_report(latest_json)
+    changed_keys = diff_report_entries(payload, previous_payload)
+    delta_payload = filter_report_payload(payload, changed_keys)
+    log.info(
+        "Report delta: %d new or updated PR/backend pair(s) since last report",
+        len(changed_keys),
+    )
+
     latest_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     latest_md.write_text(render_report_markdown(payload) + "\n", encoding="utf-8")
+    new_prs_md.write_text(render_report_markdown(delta_payload, delta=True) + "\n", encoding="utf-8")
 
-    written = {"latest_json": latest_json, "latest_md": latest_md}
+    written = {
+        "latest_json": latest_json,
+        "latest_md": latest_md,
+        "new_prs_md": new_prs_md,
+    }
     if write_run_snapshot:
         runs_dir = report_dir / "runs"
         runs_dir.mkdir(parents=True, exist_ok=True)
