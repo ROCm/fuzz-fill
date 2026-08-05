@@ -22,9 +22,9 @@ git clone https://github.com/ROCm/fuzz-fill.git
 cd fuzz-fill
 ```
 
-**LLVM pull request** — requires [GitHub CLI](https://cli.github.com/) (`gh`) with read-only permissions. It builds a PR image and runs detection in one step (first build compiles LLVM in Docker and can take a while). It is not necessary to mount anything within Docker before running this step, the script takes care of everthing.
+**LLVM pull request** — requires [GitHub CLI](https://cli.github.com/) (`gh`) with read-only permissions. It builds a PR image and runs detection in one step (first build compiles LLVM in Docker and can take a while). The image will contain all necessary dependencies to run `fuzz-fill` for the targeted PR, including the LLVM build.
 
-The PR commits will be squashed onto the baseline commit associated with that PR, so that the resulting line numbers match those that appear in git.
+All commits included in the PR, as shown in the GitHub PR view, will be squashed into a single commit. This ensures that the resulting line numbers match those displayed in GitHub.
 
 ```bash
 ./scripts/docker/pr-cov-gaps-detection.sh \
