@@ -259,13 +259,13 @@ The workflows above call these modules. Use `--help` on any command for the full
 
 Default when omitted: `AMDGPU` (see `DEFAULT_LIT_FILTER_DIRS` in [`src/coverage/constants.py`](src/coverage/constants.py)).
 
-Baseline symcov CSVs include **all** instrumented source paths from the LIT run. Use `--source-filter` on `coverage incremental` to scope gap finding (default: `llvm/lib`; see `DEFAULT_SOURCE_CODE_FILTER` in [`src/coverage/constants.py`](src/coverage/constants.py)).
+Baseline symcov CSVs include **all** instrumented source paths from the LIT run. Use `--source-filter` on `coverage incremental` to scope gap finding (default: `(?:^|/)llvm/lib/`; see `DEFAULT_SOURCE_CODE_FILTER` in [`src/coverage/constants.py`](src/coverage/constants.py)).
 
 ### `coverage incremental` filters
 
 | Flag | Meaning |
 |------|---------|
-| `--source-filter SUBSTRING` | Only consider baseline gaps whose source file path contains this substring (default: `llvm/lib`; pass `""` to disable) |
+| `--source-filter REGEX` | Only consider baseline gaps whose source file path matches this regex (default: `(?:^|/)llvm/lib/`; pass `""` to disable) |
 
 ### Environment variables
 

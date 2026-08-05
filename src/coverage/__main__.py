@@ -186,10 +186,10 @@ def main():
     p_incremental.add_argument(
         "--source-filter",
         default=DEFAULT_SOURCE_CODE_FILTER,
-        metavar="SUBSTRING",
+        metavar="REGEX",
         help=(
-            "Only consider baseline gaps whose source file path contains this "
-            f"substring (default: {DEFAULT_SOURCE_CODE_FILTER!r}). "
+            "Only consider baseline gaps whose source file path matches this "
+            f"regex (default: {DEFAULT_SOURCE_CODE_FILTER!r}). "
             "Pass an empty string to disable filtering."
         ),
     )

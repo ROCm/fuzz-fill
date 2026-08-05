@@ -6,6 +6,7 @@ import unittest
 
 import pandas as pd
 
+from coverage.constants import DEFAULT_SOURCE_CODE_FILTER
 from coverage.line_rules import (
     filter_uncovered_lines,
     gap_address_line_map,
@@ -14,6 +15,7 @@ from coverage.line_rules import (
 
 FILE = "/build/llvm/llvm/lib/Foo.cpp"
 OTHER_FILE = "/build/llvm/llvm/include/Bar.h"
+LIBEXTRA_FILE = "/build/llvm/llvm/libextra/Baz.cpp"
 
 
 class GapAddressLineMapTest(unittest.TestCase):
@@ -51,10 +53,31 @@ class FilterUncoveredLinesTest(unittest.TestCase):
         uncovered = frozenset({(FILE, 10), (OTHER_FILE, 20)})
         self.assertEqual(filter_uncovered_lines(uncovered, ""), uncovered)
 
-    def test_substring_filter_keeps_matching_files_only(self) -> None:
+    def test_default_filter_keeps_matching_files_only(self) -> None:
         uncovered = frozenset({(FILE, 10), (OTHER_FILE, 20), (FILE, 30)})
-        filtered = filter_uncovered_lines(uncovered, "llvm/lib")
+        filtered = filter_uncovered_lines(uncovered, DEFAULT_SOURCE_CODE_FILTER)
         self.assertEqual(filtered, frozenset({(FILE, 10), (FILE, 30)}))
+
+    def test_default_filter_excludes_libextra_paths(self) -> None:
+        uncovered = frozenset({(LIBEXTRA_FILE, 10), (FILE, 20)})
+        filtered = filter_uncovered_lines(uncovered, DEFAULT_SOURCE_CODE_FILTER)
+        self.assertEqual(filtered, frozenset({(FILE, 20)}))
+
+    def test_alternation_filter_keeps_matching_files_only(self) -> None:
+        uncovered = frozenset({(FILE, 10), (OTHER_FILE, 20), (FILE, 30)})
+        filtered = filter_uncovered_lines(
+            uncovered, r"(?:^|/)llvm/lib/|(?:^|/)llvm/include/"
+        )
+        self.assertEqual(filtered, uncovered)
+
+    def test_non_matching_regex_excludes_all_lines(self) -> None:
+        uncovered = frozenset({(FILE, 10), (OTHER_FILE, 20)})
+        filtered = filter_uncovered_lines(uncovered, r"no/such/path/")
+        self.assertEqual(filtered, frozenset())
+
+    def test_invalid_regex_raises_value_error(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid source filter regex"):
+            filter_uncovered_lines(frozenset({(FILE, 10)}), r"(")
 
     def test_gap_map_scopes_address_rows_to_filtered_uncovered(self) -> None:
         """Filtering uncovered lines is enough; gap merge excludes other paths."""
@@ -70,7 +93,7 @@ class FilterUncoveredLinesTest(unittest.TestCase):
         )
         uncovered = filter_uncovered_lines(
             frozenset({(FILE, 10), (OTHER_FILE, 20), (FILE, 30)}),
-            "llvm/lib",
+            DEFAULT_SOURCE_CODE_FILTER,
         )
         gap = gap_address_line_map(address_map, uncovered)
         self.assertEqual(set(zip(gap["file"], gap["line"])), frozenset({(FILE, 10), (FILE, 30)}))
