@@ -22,7 +22,6 @@ from coverage.lit_config import (
     resolved_lit_filter,
     seed_lit_priority_test_times,
 )
-)
 from coverage.line_coverage_summary import write_line_coverage_summary_splits
 from coverage.sancov import Sancov
 from fuzz_fill.log import get_logger, log_timing, run_subprocess
