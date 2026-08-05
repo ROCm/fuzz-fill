@@ -29,7 +29,7 @@ BACKEND_SEARCH_QUERIES: dict[str, list[str]] = {
         'label:"backend:AMDGPU"',
     ],
     "spirv": [
-        'path:"llvm/lib/Target/SPIRV"',
+        'label:"backend:SPIRV"',
     ],
 }
 

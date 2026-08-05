@@ -58,7 +58,7 @@ Daily cron entry point (AMDGPU only, drains the full queue):
 
 ## What each run does
 
-1. **Discover** — `gh search prs` for open PRs touching `llvm/lib/Target/AMDGPU` and/or `llvm/lib/Target/SPIRV`
+1. **Discover** — `gh search prs` for open PRs with label `backend:AMDGPU` and/or `backend:SPIRV`, then keep only those with changed files under `llvm/lib/Target/AMDGPU/` or `llvm/lib/Target/SPIRV/`
 2. **Plan** — compare against `state.json`; queue entries that are new or have a changed head SHA
 3. **Check** — for each planned `(PR, backend)` pair (up to `PR_CHECK_MAX_PER_RUN`):
    - Build Docker image `fuzz-fill-test:llvm-pr-<n>-<backend>` via [`build-image-pr.sh`](../docker/build-image-pr.sh)

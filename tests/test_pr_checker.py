@@ -403,6 +403,14 @@ class DiscoverPrsTest(unittest.TestCase):
         self.assertIn('label:"backend:AMDGPU"', terms[0])
         self.assertRegex(terms[0], r'created:>\d{4}-\d{2}-\d{2}')
 
+    def test_backend_search_terms_include_label_and_age_filter_for_spirv(self) -> None:
+        from pr_check.checker import _backend_search_terms
+
+        terms = _backend_search_terms("spirv", max_age_days=30)
+        self.assertEqual(len(terms), 1)
+        self.assertIn('label:"backend:SPIRV"', terms[0])
+        self.assertRegex(terms[0], r'created:>\d{4}-\d{2}-\d{2}')
+
     def test_pr_touches_backend_path_matches_target_prefix(self) -> None:
         from pr_check.checker import _pr_touches_backend_path
 
