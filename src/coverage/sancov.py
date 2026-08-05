@@ -107,11 +107,20 @@ class Sancov:
         """Collapse duplicate ``(file, line, point)`` rows from symcov flattening.
 
         Header and STL paths can map the same instrumentation point through multiple
-        function entries. Keep one row per triple; ``covered`` is 1 if any duplicate
-        was hit.
+        function entries. Duplicate rows must agree on ``covered``; keep one row per
+        triple.
         """
         if df.empty:
             return df
+        covered_nunique = (
+            df.groupby(["file", "line", "point"], dropna=False)["covered"]
+            .nunique()
+        )
+        conflicts = covered_nunique[covered_nunique > 1]
+        assert conflicts.empty, (
+            "duplicate (file, line, point) rows disagree on covered: "
+            f"{conflicts.reset_index()[['file', 'line', 'point']].to_dict('records')}"
+        )
         return (
             df.groupby(["file", "line", "point"], as_index=False, dropna=False)["covered"]
             .max()
