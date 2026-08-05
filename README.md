@@ -265,7 +265,7 @@ Baseline symcov CSVs include **all** instrumented source paths from the LIT run.
 
 | Flag | Meaning |
 |------|---------|
-| `--source-filter REGEX` | Only consider baseline gaps whose source file path matches this regex (default: `(?:^|/)llvm/lib/`; pass `""` to disable) |
+| `--source-filter REGEX` | Only consider baseline gaps whose source file path matches this Python regex (default: `(?:^|/)llvm/lib/`; pass `""` to disable) |
 
 ### Environment variables
 
