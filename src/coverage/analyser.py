@@ -22,7 +22,6 @@ class CoverageAnalyzer:
         self,
         filepaths: Filepaths,
         mode: Literal["partial", "full"],
-        *,
         source_filter: str = DEFAULT_SOURCE_CODE_FILTER,
     ):
         self.filepaths = filepaths
