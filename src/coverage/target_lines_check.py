@@ -11,24 +11,15 @@ from fuzz_fill.log import get_logger
 logger = get_logger("coverage.target_lines")
 
 
-def _build_symcov_suffix_index(
-    summary_files: set[str],
-) -> dict[tuple[str, ...], str]:
-    """Index summary file paths by every trailing path-component suffix."""
-    index: dict[tuple[str, ...], str] = {}
-    for abs_f in sorted(summary_files):
-        parts = Path(abs_f).as_posix().split("/")
-        for n in range(1, len(parts) + 1):
-            index.setdefault(tuple(parts[-n:]), abs_f)
-    return index
-
-
-def _match_symcov_file(
-    rel_path: str, symcov_suffix_index: dict[tuple[str, ...], str]
-) -> str | None:
+def _match_symcov_file(rel_path: str, summary_files: set[str]) -> str | None:
     """Map git-style relative path to an absolute path string present in the summary."""
-    rel_parts = tuple(Path(rel_path).as_posix().split("/"))
-    return symcov_suffix_index.get(rel_parts)
+    rel_parts = Path(rel_path).as_posix().split("/")
+    n = len(rel_parts)
+    for abs_f in summary_files:
+        parts = Path(abs_f).as_posix().split("/")
+        if len(parts) >= n and parts[-n:] == rel_parts:
+            return abs_f
+    return None
 
 
 def run_target_lines_check(
@@ -43,10 +34,14 @@ def run_target_lines_check(
 
     A line is listed only when its matched ``(file, line)`` is present in the
     baseline uncovered CSV produced by ``coverage baseline``.
+
+    The report uses the same uncovered-lines contract as ``coverage baseline``:
+    columns ``file`` and ``line`` with absolute paths matching the baseline
+    summary / LLC address map. An optional ``text`` column preserves the source
+    line for review.
     """
     uncovered_lines = load_uncovered_lines_csv(line_coverage_uncovered_csv)
     summary_files: set[str] = {file for file, _ in uncovered_lines}
-    symcov_suffix_index = _build_symcov_suffix_index(summary_files)
 
     llvm_repo = llvm_repo.resolve()
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,7 +72,7 @@ def run_target_lines_check(
                 ) from e
             text = row.get("text", "")
 
-            sym_file = _match_symcov_file(rel, symcov_suffix_index)
+            sym_file = _match_symcov_file(rel, summary_files)
             if sym_file is None:
                 cand = (llvm_repo / rel).resolve()
                 if str(cand) in summary_files:
@@ -91,15 +86,15 @@ def run_target_lines_check(
                 stats["reported"] += 1
                 uncovered_rows.append(
                     {
-                        "file": rel,
-                        "line_no": str(line_no),
+                        "file": sym_file,
+                        "line": str(line_no),
                         "text": text,
                     }
                 )
             else:
                 stats["not_in_uncovered_list"] += 1
 
-    fieldnames = ["file", "line_no", "text"]
+    fieldnames = ["file", "line", "text"]
     with report_path.open("w", encoding="utf-8", newline="") as out:
         w = csv.DictWriter(out, fieldnames=fieldnames)
         w.writeheader()
