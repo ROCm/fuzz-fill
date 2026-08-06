@@ -8,10 +8,28 @@
 # RUN: %repo-root/scripts/prepare-pr-llvm.sh --pr-id 214457 --dest %t/llvm-project --plain-clone --squash-commit-file %t/squash-commit
 # RUN: test -x %t/build-sancov/bin/llvm-lit || %repo-root/scripts/build-llvm-sancov.sh %repo-root/scripts/allowlist-amdgpu.txt %t/llvm-project %t/build-sancov --bootstrap-bin %e2e-bootstrap-bin --ignorelist %repo-root/scripts/ignorelist-amdgpu.txt
 # RUN: %repo-root/scripts/gap-finding-pr.sh --output-dir %t/out --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --commit $(cat %t/squash-commit) --backend-tests amdgpu
+# RUN: %repo-root/scripts/gap-finding-baseline.sh --output-dir %t/out-direct --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --backend-tests amdgpu
 
 # RUN: test -f %t/out/baseline/line_coverage_uncovered.csv
 # RUN: test -f %t/out/added-lines/added-lines.csv
 # RUN: test -f %t/out/commit_lines_report/target_lines_uncovered.csv
+
+# COM: PR and standalone baseline must produce identical line-level coverage.
+# COM: We diff only line_coverage_*.csv, not address_line_map / line_point_summary
+# COM: artifacts. Two separate LIT runs can disagree on per-point hits for header
+# COM: inlines (e.g. llvm/ADT/DenseMap.h, DenseSet.h, libstdc++ stl_algo.h): the
+# COM: same source line can show different hit bits or llc/opt point groupings (~14
+# COM: differing rows across the four point-level CSVs: 4 in llc/opt address_line_map,
+# COM: 4 in llc_line_point_summary, 2 in opt_line_point_summary).
+# COM: This is a very tiny fraction of the point ids. One way to explain this could be rare non-determinisim in the basic block ordering execution.
+# RUN: diff %t/out/baseline/line_coverage_summary.csv %t/out-direct/baseline/line_coverage_summary.csv
+# RUN: diff %t/out/baseline/line_coverage_covered.csv %t/out-direct/baseline/line_coverage_covered.csv
+# RUN: diff %t/out/baseline/line_coverage_partially.csv %t/out-direct/baseline/line_coverage_partially.csv
+# RUN: diff %t/out/baseline/line_coverage_uncovered.csv %t/out-direct/baseline/line_coverage_uncovered.csv
+
+# COM: SIISelLowering.cpp:1783 must be reported covered.
+# RUN: %FileCheck %s --input-file=%t/out/baseline/line_coverage_covered.csv --check-prefix=COVERED
+# COVERED: {{.*}}SIISelLowering.cpp,1783{{$}}
 
 # COM: PR #214457 changes SIFoldOperands.cpp line 1712 (Src0Idx -> Src1Idx).
 # RUN: %FileCheck %s --input-file=%t/out/added-lines/added-lines.csv --check-prefix=ADDED
