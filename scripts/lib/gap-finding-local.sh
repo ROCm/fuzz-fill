@@ -184,7 +184,7 @@ gap_finding_local_prepare_output_dir() {
 }
 
 gap_finding_local_setup_llvm_env() {
-    setup_local_llvm_env_explicit "$llvm_repo" "$llvm_bin" "$instrumented_bin_dir"
+    setup_local_llvm_env "$llvm_repo" "$llvm_bin" "$instrumented_bin_dir"
     export LIT_ALLOW_FAILURES=1
     if [[ -n "$jobs" ]]; then
         export JOBS="$jobs"
