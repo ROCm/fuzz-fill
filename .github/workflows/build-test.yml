@@ -1,0 +1,115 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# Build the fuzz-fill test environment and run unit + integration tests.
+
+name: Build and test
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: build-test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: aws-linux-scale-rocm-customer-dev
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: write
+    container:
+      image: ubuntu:24.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      WORK_ROOT: /work
+      LLVM_RELEASE_VERSION: "22.1.8"
+      SANCOV_ALLOWLIST: scripts/allowlist-amdgpu.txt
+      SANCOV_IGNORELIST: scripts/ignorelist-amdgpu.txt
+      LLVM_RELEASE_DIR: /work/llvm-release
+      LLVM_RELEASE_BIN: /work/llvm-release/bin
+      LLVM_PROJECT_DIR: /work/llvm-project
+      LLVM_BUILD_DIR: /work/llvm-build-sancov
+      LLVM_BUILD_BIN: /work/llvm-build-sancov/bin
+      VENV_DIR: /work/fuzz-fill-venv
+      VENV_BIN: /work/fuzz-fill-venv/bin
+      FUZZ_FILL_SANCOV: /work/llvm-build-sancov/bin/sancov
+      FUZZ_FILL_LLVM_LIT: /work/llvm-build-sancov/bin/llvm-lit
+      FUZZ_FILL_LLC: /work/llvm-build-sancov/bin/llc
+      FUZZ_FILL_OPT: /work/llvm-build-sancov/bin/opt
+      FUZZ_FILL_LLVM_REDUCE: /work/llvm-build-sancov/bin/llvm-reduce
+      FUZZ_FILL_LLVM_DIS: /work/llvm-build-sancov/bin/llvm-dis
+      FUZZ_FILL_LLVM_REPO: /work/llvm-project
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install apt packages
+        run: ./scripts/image/install-apt-packages.sh all
+
+      - name: Restore LLVM release bootstrap binaries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache-llvm-release
+        with:
+          path: ${{ env.LLVM_RELEASE_DIR }}
+          key: fuzz-fill-llvm-release-${{ env.LLVM_RELEASE_VERSION }}
+
+      - name: Download LLVM release bootstrap binaries
+        if: steps.cache-llvm-release.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "${LLVM_RELEASE_DIR}"
+          curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_RELEASE_VERSION}/LLVM-${LLVM_RELEASE_VERSION}-Linux-X64.tar.xz" \
+            | tar -xJ --strip-components=1 -C "${LLVM_RELEASE_DIR}"
+
+      - name: Restore LLVM source
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache-llvm-source
+        with:
+          path: ${{ env.LLVM_PROJECT_DIR }}
+          key: fuzz-fill-llvm-source-${{ env.LLVM_RELEASE_VERSION }}
+
+      - name: Download llvm-project source
+        if: steps.cache-llvm-source.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "${LLVM_PROJECT_DIR}"
+          curl -fsSL "https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-${LLVM_RELEASE_VERSION}.tar.gz" \
+            | tar -xz --strip-components=1 -C "${LLVM_PROJECT_DIR}"
+
+      - name: Build sancov LLVM
+        run: |
+          ./scripts/build-llvm-sancov.sh \
+            "${SANCOV_ALLOWLIST}" \
+            "${LLVM_PROJECT_DIR}" \
+            "${LLVM_BUILD_DIR}" \
+            --bootstrap-bin "${LLVM_RELEASE_BIN}" \
+            --ignorelist "${SANCOV_IGNORELIST}" \
+            "$(nproc)"
+
+      - name: Install fuzz-fill venv
+        run: |
+          python3 -m venv "${VENV_DIR}"
+          "${VENV_BIN}/pip" install --no-cache-dir -e "${GITHUB_WORKSPACE}"
+
+      - name: Run unit tests
+        run: |
+          source "${VENV_DIR}/bin/activate"
+          python -m unittest discover -s tests -v
+
+      - name: Run integration tests
+        run: |
+          source "${VENV_DIR}/bin/activate"
+          ./integration-tests/test.sh \
+            --venv "${VENV_DIR}" \
+            --llvm-build "${LLVM_BUILD_BIN}" \
+            --llvm-sancov-build "${LLVM_BUILD_BIN}" \
+            --llvm-src "${LLVM_PROJECT_DIR}" \
+            -v integration-tests/

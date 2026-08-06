@@ -1,0 +1,9 @@
+build-essential
+ca-certificates
+cmake
+curl
+file
+git
+ninja-build
+python3
+xz-utils
