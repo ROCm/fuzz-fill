@@ -2,11 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
 # Build the fuzz-fill test environment and run unit + integration tests.
+# Runs on PRs and after every merge to main.
 
 name: Build and test
 
 on:
   pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 defaults:
