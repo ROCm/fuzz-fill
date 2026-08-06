@@ -27,3 +27,8 @@ jobs:
       # appear under Security -> Code scanning, filterable by
       # `Tool: gitleaks` separately from any other scanner.
       security-events: write
+      # upload-sarif looks up the current workflow run
+      # (GET /repos/{owner}/{repo}/actions/runs/{run_id}) to attach the
+      # SARIF to the right commit; without this the call fails with
+      # "Resource not accessible by integration".
+      actions: read
