@@ -18,6 +18,12 @@ DEFAULT_LINE_COVERAGE_SUMMARY_FILE = "line_coverage_summary.csv"
 DEFAULT_LINE_COVERAGE_COVERED_FILE = "line_coverage_covered.csv"
 DEFAULT_LINE_COVERAGE_PARTIALLY_FILE = "line_coverage_partially.csv"
 DEFAULT_LINE_COVERAGE_UNCOVERED_FILE = "line_coverage_uncovered.csv"
+DEFAULT_CANDIDATE_TEST_SETTINGS_FILE = "candidate_test_settings.csv"
+DEFAULT_CANDIDATE_TEST_MANIFEST_FILE = "candidate_test_manifest.csv"
+DEFAULT_MIN_CANDIDATE_TESTS_CSV = "min_candidate_tests.csv"
+DEFAULT_MIN_CANDIDATE_TESTS_POINTS_CSV = "min_candidate_tests_points.csv"
+DEFAULT_MIN_CANDIDATE_TESTS_SOURCE_FILES_CSV = "min_candidate_tests_source_files.csv"
+DEFAULT_MIN_CANDIDATE_TESTS_BATCH_SIZE = 1000
 DEFAULT_NEW_COVERAGE_CSV = "new_coverage.csv"
 DEFAULT_TARGET_LINES_REPORT = "target_lines_uncovered.csv"
 DEFAULT_LIT_FAILURES_REPORT = "lit_failures.json"
@@ -38,6 +44,3 @@ BASELINE_LIT_PRIORITY_TESTS = (
     "CodeGen/AMDGPU/bf16.ll",
 )
 BASELINE_LIT_PRIORITY_ELAPSED = 1e6
-
-# New test flags
-TEST_FLAGS = ["-O0", "-O1", "-O2", "-O3"]

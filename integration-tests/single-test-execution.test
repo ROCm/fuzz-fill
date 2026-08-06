@@ -1,22 +1,50 @@
 # COM: Run the coverage pipeline over a single standalone test file and validate
 # COM: that every execution succeeded. With --n 1, candidate-test runs the one input
-# COM: file once per entry in TEST_FLAGS (-O0/-O1/-O2/-O3), so a fully successful
-# COM: run must report all executions complete and none skipped.
+# COM: file once per default settings row (-Ox x -global-isel=0/1), so a fully
+# COM: successful run must report all eight executions complete and none skipped.
 
 # RUN: rm -rf %t && mkdir -p %t/candidate_tests
 # RUN: %coverage candidate-test --output-dir %t/candidate_tests --llc %sancov-llc --candidate-tests-dir %S/fixtures/coverage-new-tests --n 1 2>&1 | tee %t/candidate_tests.log
 
-# COM: The final progress line reports the tallies across all four flag runs.
+# COM: The final progress line reports the tallies across all eight settings runs.
 # RUN: %FileCheck %s --input-file=%t/candidate_tests.log --check-prefix=EXEC
-# EXEC: complete=4  skipped=0  remaining=0
+# EXEC: complete=8  skipped=0  remaining=0
 
-# COM: Every flag run must leave its own successful test directory behind (skipped
-# COM: runs are torn down), so all four per-flag output dirs must exist.
+# COM: Every settings run must leave its own successful test directory behind (skipped
+# COM: runs are torn down), so all eight per-settings output dirs must exist.
 # RUN: test -d %t/candidate_tests/test_0_standalone-empty-kernel.ll
 # RUN: test -d %t/candidate_tests/test_1_standalone-empty-kernel.ll
 # RUN: test -d %t/candidate_tests/test_2_standalone-empty-kernel.ll
 # RUN: test -d %t/candidate_tests/test_3_standalone-empty-kernel.ll
+# RUN: test -d %t/candidate_tests/test_4_standalone-empty-kernel.ll
+# RUN: test -d %t/candidate_tests/test_5_standalone-empty-kernel.ll
+# RUN: test -d %t/candidate_tests/test_6_standalone-empty-kernel.ll
+# RUN: test -d %t/candidate_tests/test_7_standalone-empty-kernel.ll
 
 # COM: Each successful run must have produced sancov coverage output.
 # RUN: ls %t/candidate_tests/test_0_standalone-empty-kernel.ll/*.sancov
-# RUN: ls %t/candidate_tests/test_3_standalone-empty-kernel.ll/*.sancov
+# RUN: ls %t/candidate_tests/test_7_standalone-empty-kernel.ll/*.sancov
+
+# COM: Settings and manifest metadata must match the default eight-variant matrix.
+# RUN: %FileCheck %s --input-file=%t/candidate_tests/candidate_test_settings.csv --check-prefix=SETTINGS_CSV
+# RUN: %FileCheck %s --input-file=%t/candidate_tests/candidate_test_manifest.csv --check-prefix=MANIFEST_CSV
+
+# SETTINGS_CSV: llc_flags
+# SETTINGS_CSV-NEXT: -O0 -global-isel=0
+# SETTINGS_CSV-NEXT: -O0 -global-isel=1
+# SETTINGS_CSV-NEXT: -O1 -global-isel=0
+# SETTINGS_CSV-NEXT: -O1 -global-isel=1
+# SETTINGS_CSV-NEXT: -O2 -global-isel=0
+# SETTINGS_CSV-NEXT: -O2 -global-isel=1
+# SETTINGS_CSV-NEXT: -O3 -global-isel=0
+# SETTINGS_CSV-NEXT: -O3 -global-isel=1
+
+# MANIFEST_CSV: test_id,source_file,llc_flags,test_dir
+# MANIFEST_CSV-NEXT: 0,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O0 -global-isel=0,test_0_standalone-empty-kernel.ll
+# MANIFEST_CSV-NEXT: 1,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O0 -global-isel=1,test_1_standalone-empty-kernel.ll
+# MANIFEST_CSV-NEXT: 2,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O1 -global-isel=0,test_2_standalone-empty-kernel.ll
+# MANIFEST_CSV-NEXT: 3,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O1 -global-isel=1,test_3_standalone-empty-kernel.ll
+# MANIFEST_CSV-NEXT: 4,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O2 -global-isel=0,test_4_standalone-empty-kernel.ll
+# MANIFEST_CSV-NEXT: 5,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O2 -global-isel=1,test_5_standalone-empty-kernel.ll
+# MANIFEST_CSV-NEXT: 6,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O3 -global-isel=0,test_6_standalone-empty-kernel.ll
+# MANIFEST_CSV-NEXT: 7,{{.*}}/fixtures/coverage-new-tests/standalone-empty-kernel.ll,-O3 -global-isel=1,test_7_standalone-empty-kernel.ll

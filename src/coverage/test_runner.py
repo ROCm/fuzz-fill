@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import concurrent.futures
 import os
 import shutil
@@ -8,10 +9,16 @@ import sys
 import pandas as pd
 from pathlib import Path
 
+from coverage.candidate_test_settings import (
+    DEFAULT_LLC_FLAG_VARIANTS,
+    write_manifest_csv,
+    write_settings_csv,
+)
 from coverage.constants import (
     BASELINE_LIT_PRIORITY_TESTS,
+    DEFAULT_CANDIDATE_TEST_MANIFEST_FILE,
+    DEFAULT_CANDIDATE_TEST_SETTINGS_FILE,
     DEFAULT_LIT_FAILURES_REPORT,
-    TEST_FLAGS,
 )
 from coverage.filepaths import Filepaths
 from coverage.lit_config import (
@@ -63,6 +70,7 @@ class TestRunner:
         lit_priority_slow_tests: bool = True,
         require_sancov: bool = True,
         candidate_tests_limit: int | None = None,
+        llc_flag_variants: list[str] | None = None,
         timeout: int = 5,
         debug: bool = False,
     ) -> None:
@@ -85,6 +93,11 @@ class TestRunner:
 
         elif self.mode == "standalone":
             self._candidate_tests_limit = candidate_tests_limit
+            self._llc_flag_variants = (
+                list(DEFAULT_LLC_FLAG_VARIANTS)
+                if llc_flag_variants is None
+                else llc_flag_variants
+            )
             self._jobs = jobs if jobs is not None else (os.cpu_count() or 1)
             self._jobs = max(1, self._jobs)
             self._timeout = timeout
@@ -110,10 +123,11 @@ class TestRunner:
         return env
 
     def collect_llc_input_files(self) -> list[Path]:
-        """Sorted paths under ``test_root`` with suffix ``.ll`` or ``.bc``."""
+        """Sorted absolute paths under ``test_root`` with suffix ``.ll`` or ``.bc``."""
+        root = self.filepaths.candidate_tests_dir.resolve()
         paths: set[Path] = set()
         for pattern in ("*.ll", "*.bc"):
-            paths.update(p for p in self.filepaths.candidate_tests_dir.rglob(pattern) if p.is_file())
+            paths.update(p.resolve() for p in root.rglob(pattern) if p.is_file())
         return sorted(paths)
 
     def run(self) -> None:
@@ -122,7 +136,7 @@ class TestRunner:
                 self.run_lit_tests()
             self.get_aggregate_coverage()
         elif self.mode == "standalone":
-            self.run_standalone_tests()
+            asyncio.run(self.run_standalone_tests())
         else:
             raise ValueError(f"Invalid mode: {self.mode!r}")
 
@@ -215,51 +229,68 @@ class TestRunner:
             msg = f"{msg}  |  {label}"
         print(msg, flush=True)
 
-    def run_standalone_tests(self) -> None:
-        """Generate each standalone test directory and run it before moving to the next."""
+    def _prepare_standalone_work(self) -> list[tuple[Path, Path, str]]:
+        paths = self.collect_llc_input_files()
+        limit = self._candidate_tests_limit
+        to_run = paths if limit is None else paths[:limit]
+        self.standalone_total_tests = len(to_run) * len(self._llc_flag_variants)
+        self.standalone_test_id = 0
+        self.standalone_tests_complete = 0
+        self.standalone_tests_skipped = 0
+
+        work: list[tuple[Path, Path, str]] = []
+        tid = 0
+        for test_path in to_run:
+            for llc_flags in self._llc_flag_variants:
+                test_dir = self.filepaths.output_dir / f"test_{tid}_{test_path.name}"
+                work.append((test_dir, test_path, llc_flags))
+                tid += 1
+        return work
+
+    def _record_standalone_outcome(self, name: str, outcome: str) -> None:
+        if outcome == "success":
+            self.standalone_tests_complete += 1
+        else:
+            self.standalone_tests_skipped += 1
+        self._print_standalone_progress(f"[{name}]")
+
+    async def run_standalone_tests(self) -> None:
+        """Generate each standalone test directory and run it concurrently."""
 
         with log_timing(logger, "standalone candidate tests"):
-            paths = self.collect_llc_input_files()
-            limit = self._candidate_tests_limit
-            to_run = paths if limit is None else paths[:limit]
-            self.standalone_total_tests = len(to_run) * len(TEST_FLAGS)
-            self.standalone_test_id = 0
-            self.standalone_tests_complete = 0
-            self.standalone_tests_skipped = 0
-
+            work = self._prepare_standalone_work()
             if self.standalone_total_tests == 0:
                 self._print_standalone_progress("(no standalone inputs)")
                 return
 
-            # Pre-assign ids in nested order so dir names match the sequential
-            # version and workers never share mutable id state.
-            work = []
-            tid = 0
-            for test_path in to_run:
-                for flag in TEST_FLAGS:
-                    test_dir = self.filepaths.output_dir / f"test_{tid}_{test_path.name}"
-                    work.append((test_dir, test_path, flag))
-                    tid += 1
+            output_dir = self.filepaths.output_dir
+            write_settings_csv(
+                self._llc_flag_variants,
+                output_dir / DEFAULT_CANDIDATE_TEST_SETTINGS_FILE,
+            )
+            write_manifest_csv(
+                work,
+                output_dir / DEFAULT_CANDIDATE_TEST_MANIFEST_FILE,
+            )
 
-            def _run_one(item):
-                test_dir, test_path, flag = item
-                self.create_standalone_test_script(test_dir, test_path, flag)
-                return test_dir.name, self.run_standalone_test(test_dir)
+            sem = asyncio.Semaphore(self._jobs)
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self._jobs) as pool:
-                futures = [pool.submit(_run_one, item) for item in work]
-                # Drain on the main thread: counters/prints stay single-threaded.
-                for future in concurrent.futures.as_completed(futures):
-                    name, outcome = future.result()
-                    if outcome == "success":
-                        self.standalone_tests_complete += 1
-                    else:
-                        self.standalone_tests_skipped += 1
-                    self._print_standalone_progress(f"[{name}]")
+            async def _run_one(item: tuple[Path, Path, str]) -> tuple[str, str]:
+                test_dir, test_path, llc_flags = item
+                self.create_standalone_test_script(test_dir, test_path, llc_flags)
+                async with sem:
+                    return test_dir.name, await self._run_standalone_test(test_dir)
+
+            tasks = [asyncio.create_task(_run_one(item)) for item in work]
+            for coro in asyncio.as_completed(tasks):
+                name, outcome = await coro
+                self._record_standalone_outcome(name, outcome)
 
     def create_standalone_test_script(
-        self, test_dir: Path, test_path: Path, flag: str
+        self, test_dir: Path, test_path: Path, llc_flags: str
     ) -> None:
+        test_dir = test_dir.resolve()
+        test_path = test_path.resolve()
         test_dir.mkdir(parents=True, exist_ok=True)
         script = test_dir / "test.sh"
         with open(script, "w") as f:
@@ -268,32 +299,41 @@ class TestRunner:
             f.write(
                 f"export UBSAN_OPTIONS={self.ubsan_environ_with_coverage(out_dir=test_dir)['UBSAN_OPTIONS']}\n"
             )
-            f.write(f"timeout -s9 {self._timeout} {self.llc} {flag} {test_path} -o /dev/null\n")
+            f.write(
+                f"timeout -s9 {self._timeout} {self.llc} {llc_flags} {test_path} -o /dev/null\n"
+            )
+            f.flush()
+            # Help overlay/network FS settle before exec; reduces ETXTBSY flakes under parallel runs.
+            os.fsync(f.fileno())
         script.chmod(0o755)
 
-    def run_standalone_test(self, test_dir: Path) -> str:
+    async def _run_standalone_test(self, test_dir: Path) -> str:
+        test_dir = test_dir.resolve()
+        script = test_dir / "test.sh"
         if any(test_dir.glob("*.sancov")):
             print(f"Sancov files already exist in {test_dir}, skipping test {test_dir}")
             return "skipped"
 
-        argv = [str(test_dir / "test.sh")]
-        env = os.environ.copy()
-
         if self.debug:
-            print(f"\tRunning: {argv}")
-            print(f"\tCWD: {test_dir}")
+            print(f"\tRunning: {script}")
+            print(f"\tCWD: {self.filepaths.candidate_tests_dir}")
             print(f"\tCoverage directory: {self.raw_sancov_output_dir}")
             return "skipped"
 
+        proc = await asyncio.create_subprocess_exec(
+            str(script),
+            cwd=self.filepaths.candidate_tests_dir.resolve(),
+            env=os.environ.copy(),
+        )
         try:
-            run_subprocess(
-                logger,
-                argv,
-                cwd=self.filepaths.candidate_tests_dir,
-                env=env,
-                check=True,
-            )
-        except subprocess.CalledProcessError:
+            await asyncio.wait_for(proc.wait(), timeout=self._timeout + 2)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            shutil.rmtree(test_dir, ignore_errors=True)
+            return "skipped"
+
+        if proc.returncode != 0:
             shutil.rmtree(test_dir)
             return "skipped"
 

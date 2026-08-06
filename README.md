@@ -125,7 +125,7 @@ baseline  →  candidate-test  →  incremental  →  reduce
 ```
 
 1. **`baseline`** — run a filtered slice of the LLVM LIT suite with SanitizerCoverage to establish baseline coverage: which source lines the existing tests already hit.
-2. **`candidate-test`** — run a directory of fuzz-generated tests (`.ll` / `.bc`) through instrumented `llc` and collect their coverage.
+2. **`candidate-test`** — run a directory of fuzz-generated tests (`.ll` / `.bc`) through instrumented `llc` and collect their coverage. By default each input is compiled **8 times** (cross product of `-O0..-O3` and `-global-isel=0/1`). Override variants with `--settings-csv` (see [Candidate-test settings](#candidate-test-settings)).
 3. **`incremental`** — compare fuzz-test coverage against the suite baseline and report which fuzz tests cover lines the suite misses — these are candidate gap-fillers. A fuzz test qualifies for a line only when it fully covers that line and the line appears in the baseline `line_coverage_uncovered.csv`.
 4. **`reduce`** — shrink promising tests into minimal cases suitable for adding to the suite (see [Reduce interesting tests](#reduce-interesting-tests) below).
 
@@ -271,13 +271,25 @@ Baseline symcov CSVs include **all** instrumented source paths from the LIT run.
 |------|---------|
 | `--source-filter REGEX` | Only consider baseline gaps whose source file path matches this Python regex (default: `(?:^|/)llvm/lib/`; pass `""` to disable) |
 
+### Candidate-test settings
+
+Each row in `--settings-csv` is one `llc` invocation (flags passed before the input path). The CSV must have a single column header `llc_flags`:
+
+```csv
+llc_flags
+-O0 -global-isel=0
+-O0 -global-isel=1
+```
+
+When `--settings-csv` is omitted, fuzz-fill uses the built-in default: all combinations of `-O0`, `-O1`, `-O2`, `-O3` with `-global-isel=0` and `-global-isel=1` (**8 runs per input file**). Total jobs = `(number of .ll/.bc files) × (rows in settings)`.
+
 ### Environment variables
 
 Several commands accept LLVM tool paths via environment variables when the matching CLI flag is omitted. A flag on the command line always wins.
 
 | Env var | CLI flag | Commands |
 |---------|----------|----------|
-| `FUZZ_FILL_SANCOV` | `--sancov` | `coverage baseline`, `coverage incremental` |
+| `FUZZ_FILL_SANCOV` | `--sancov` | `coverage baseline`, `coverage incremental`, `coverage min-candidate-tests` (mainly for maintainers) |
 | `FUZZ_FILL_LLVM_LIT` | `--llvm-lit` | `coverage baseline` |
 | `FUZZ_FILL_LLC` | `--llc` | `coverage baseline`, `coverage candidate-test`, `reduce` |
 | `FUZZ_FILL_OPT` | `--opt` | `coverage baseline` |
@@ -333,6 +345,14 @@ FILTER=CodeGen/AMDGPU ./scripts/test_coverage.sh
 
 Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `INSTRUMENTED_BIN_DIR`, …); only the `FUZZ_FILL_*` variables are read by the Python CLIs.
 
+### Utility commands
+
+Optional commands outside the main workflows in fuzz-fill.
+
+| Command | Purpose |
+|---------|---------|
+| `python -m coverage min-candidate-tests` | From `candidate-test` output, selects a minimal set of tests that cover the same SanitizerCoverage instrumentation points; writes `min_candidate_tests.csv`, `min_candidate_tests_points.csv`, and `min_candidate_tests_source_files.csv`. Requires `candidate_test_manifest.csv` and `candidate_test_settings.csv` emitted by `candidate-test`. |
+
 ---
 
 ## Docker test image
@@ -357,6 +377,7 @@ By default the image is tagged `fuzz-fill-test:latest`. LLVM source is downloade
 | `--llvm-release-version <ver>` | Official LLVM release for bootstrap toolchain (default: `22.1.8`) |
 | `--tag <tag>` | Docker image tag (default: `latest`) |
 | `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist baked into the instrumented build (default: `amdgpu`; AMDGPU also applies [`scripts/ignorelist-amdgpu.txt`](scripts/ignorelist-amdgpu.txt)) |
+| `--sancov-instrumentation-mode func\|bb\|edge` | SanitizerCoverage instrumentation mode (default: `bb`; produces `-fsanitize-coverage=<mode>,trace-pc-guard`) |
 | `-j <n>`, `--jobs <n>` | Limit ninja parallelism for the sancov build (default: unconstrained) |
 
 Examples:
@@ -364,6 +385,7 @@ Examples:
 ```bash
 ./scripts/docker/build-image.sh --llvm-dir llvm-project --tag local-llvm
 ./scripts/docker/build-image.sh --allowlist spirv --tag spirv
+./scripts/docker/build-image.sh --sancov-instrumentation-mode edge --tag edge
 ./scripts/docker/build-image.sh -j "$(nproc)"
 ```
 
@@ -380,6 +402,7 @@ Examples:
 | `--llvm-repo <path>` | Local `llvm-project` clone |
 | `--pr-id <n>` | GitHub pull request number |
 | `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist |
+| `--sancov-instrumentation-mode func\|bb\|edge` | SanitizerCoverage instrumentation mode (default: `bb`) |
 | `--github-repo <owner/repo>` | GitHub repo hosting the PR (default: `llvm/llvm-project`) |
 | `-j <n>`, `--jobs <n>` | Limit ninja parallelism for both LLVM builds (default: unconstrained) |
 

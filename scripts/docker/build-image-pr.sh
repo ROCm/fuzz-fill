@@ -10,6 +10,7 @@ pr_id=""
 github_repo=""
 image_tag=""
 allowlist=""
+sancov_instrumentation_mode=""
 ninja_jobs=""
 keep_clone=0
 no_cache=0
@@ -27,6 +28,9 @@ Required:
   --allowlist <target>   SanitizerCoverage allowlist: amdgpu or spirv
 
 Options:
+  --sancov-instrumentation-mode func|bb|edge
+                         SanitizerCoverage instrumentation mode (default: bb).
+                         fuzz-fill expects basic-block (bb) coverage; func or edge will likely break it.
   --github-repo <owner/repo>
                          GitHub repo hosting the PR (default: llvm/llvm-project)
   --tag <tag>            Docker image tag (default: llvm-pr-<pr-id>)
@@ -48,7 +52,7 @@ Requires: git, gh, docker (BuildKit), and scripts/build-image.sh.
 Examples:
   $(basename "$0") --llvm-repo ../llvm-project --pr-id 185430 --allowlist amdgpu
   $(basename "$0") --llvm-repo ../llvm-project --pr-id 185430 --allowlist spirv --keep-clone
-  $(basename "$0") --llvm-repo ../llvm-project --pr-id 42 --allowlist amdgpu --tag llvm-pr-42 -j 8
+  $(basename "$0") --llvm-repo ../llvm-project --pr-id 42 --allowlist amdgpu --sancov-instrumentation-mode edge --tag llvm-pr-42 -j 8
 EOF
 }
 
@@ -146,6 +150,14 @@ while [[ $# -gt 0 ]]; do
             allowlist="$2"
             shift 2
             ;;
+        --sancov-instrumentation-mode)
+            if [[ $# -lt 2 ]]; then
+                echo "error: --sancov-instrumentation-mode requires a value" >&2
+                exit 1
+            fi
+            sancov_instrumentation_mode="$2"
+            shift 2
+            ;;
         -j|--jobs)
             if [[ $# -lt 2 ]]; then
                 echo "error: $1 requires a value" >&2
@@ -216,6 +228,14 @@ case "$allowlist" in
     amdgpu|spirv) ;;
     *)
         echo "error: --allowlist must be amdgpu or spirv: ${allowlist}" >&2
+        exit 1
+        ;;
+esac
+
+case "$sancov_instrumentation_mode" in
+    ""|func|bb|edge) ;;
+    *)
+        echo "error: --sancov-instrumentation-mode must be func, bb, or edge: ${sancov_instrumentation_mode}" >&2
         exit 1
         ;;
 esac
@@ -315,11 +335,20 @@ if ! git -C "$docker_llvm_path" rev-parse HEAD >/dev/null 2>&1; then
 fi
 
 build_args=(--llvm-dir "$docker_llvm_path" --tag "$image_tag" --allowlist "$allowlist")
+if [[ -n "$sancov_instrumentation_mode" ]]; then
+    build_args+=(--sancov-instrumentation-mode "$sancov_instrumentation_mode")
+fi
 if [[ -n "$ninja_jobs" ]]; then
     build_args+=(-j "$ninja_jobs")
 fi
 if [[ "$no_cache" -eq 1 ]]; then
     build_args+=(--no-cache)
+fi
+
+if [[ -n "$sancov_instrumentation_mode" ]]; then
+    echo "SanitizerCoverage instrumentation mode: ${sancov_instrumentation_mode}"
+else
+    echo "SanitizerCoverage instrumentation mode: bb (default)"
 fi
 
 echo "Building Docker image ${IMAGE_NAME:-fuzz-fill-test}:${image_tag}"

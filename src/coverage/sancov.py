@@ -351,9 +351,14 @@ class Sancov:
             raise RuntimeError(
                 f"sancov --print failed for {sancov_file}: {err or e}"
             ) from e
+        return Sancov.parse_print_output(proc.stdout)
+
+    @staticmethod
+    def parse_print_output(stdout: str) -> set[str]:
+        """Parse ``sancov --print`` stdout into normalized point IDs."""
         return {
             Sancov.format_hex_address(line.strip())
-            for line in proc.stdout.splitlines()
+            for line in stdout.splitlines()
             if line.strip()
         }
 

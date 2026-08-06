@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from coverage.candidate_test_settings import load_llc_flag_variants
 from coverage.filepaths import Filepaths
 from coverage.test_runner import TestRunner
 from coverage.constants import (
@@ -12,6 +13,9 @@ from coverage.constants import (
     DEFAULT_OPT_LINE_POINT_SUMMARY_FILE,
     DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
     DEFAULT_OUTPUT_DIR,
+    DEFAULT_MIN_CANDIDATE_TESTS_CSV,
+    DEFAULT_MIN_CANDIDATE_TESTS_POINTS_CSV,
+    DEFAULT_MIN_CANDIDATE_TESTS_BATCH_SIZE,
     DEFAULT_NEW_COVERAGE_CSV,
     DEFAULT_SOURCE_CODE_FILTER,
     DEFAULT_TARGET_LINES_REPORT,
@@ -19,6 +23,7 @@ from coverage.constants import (
 )
 
 from coverage.analyser import CoverageAnalyzer
+from coverage.min_candidate_tests import MinCandidateTestsSelector
 from coverage.target_lines_check import run_target_lines_check
 from fuzz_fill.env import (
     FUZZ_FILL_LLC,
@@ -54,12 +59,19 @@ def main():
 
     sub = parser.add_subparsers(
         dest="subcmd",
-        metavar="{baseline,candidate-test,incremental,target-lines}",
+        metavar="{baseline,candidate-test,incremental,min-candidate-tests,target-lines}",
         required=True,
     )
     p_baseline = sub.add_parser("baseline")
     p_candidate_test = sub.add_parser("candidate-test")
     p_incremental = sub.add_parser("incremental")
+    p_min_candidate_tests = sub.add_parser(
+        "min-candidate-tests",
+        help=(
+            "Greedily select candidate-test runs to cover instrumentation points; "
+            "yields a minimal set, not necessarily the minimum. "
+        ),
+    )
     p_target_lines = sub.add_parser(
         "target-lines",
         help=(
@@ -71,6 +83,7 @@ def main():
     add_shared_arguments(p_baseline)
     add_shared_arguments(p_candidate_test)
     add_shared_arguments(p_incremental)
+    add_shared_arguments(p_min_candidate_tests)
     add_shared_arguments(p_target_lines)
 
     p_baseline.add_argument(
@@ -162,6 +175,15 @@ def main():
     p_candidate_test.add_argument("--timeout", type=int, default=5,
         help="Per-test wall-clock timeout in seconds; the test is killed with "
              "SIGKILL (timeout -s9) when exceeded. Default: 5.")
+    p_candidate_test.add_argument(
+        "--settings-csv",
+        type=Path,
+        default=None,
+        help=(
+            "CSV of llc flag variants (column llc_flags). "
+            "Default: -O0..-O3 crossed with -global-isel=0/1 (8 variants per input)."
+        ),
+    )
 
     p_incremental.add_argument(
         "--sancov",
@@ -201,6 +223,38 @@ def main():
             "Only consider baseline gaps whose source file path matches this "
             f"regex (default: {DEFAULT_SOURCE_CODE_FILTER!r}). "
             "Pass an empty string to disable filtering."
+        ),
+    )
+
+    p_min_candidate_tests.add_argument(
+        "--sancov",
+        type=Path,
+        default=None,
+        help=f"Path to the sancov executable (or set {FUZZ_FILL_SANCOV}).",
+    )
+    p_min_candidate_tests.add_argument(
+        "--candidate-tests-output-dir",
+        type=existing_dir_path,
+        required=True,
+        help="Directory containing candidate-test output (manifest, settings, test dirs)",
+    )
+    p_min_candidate_tests.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=None,
+        help=(
+            "Number of parallel sancov --print workers within each batch. "
+            "Defaults to the number of detected CPUs."
+        ),
+    )
+    p_min_candidate_tests.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_MIN_CANDIDATE_TESTS_BATCH_SIZE,
+        help=(
+            "Number of runs to load and minimize per batch "
+            f"(default: {DEFAULT_MIN_CANDIDATE_TESTS_BATCH_SIZE})."
         ),
     )
 
@@ -270,12 +324,14 @@ def main():
     elif args.subcmd == "candidate-test":
         tools = candidate_test_tools_from_args(llc=args.llc)
         filepaths = get_filepaths(args, tools=tools)
+        llc_flag_variants = load_llc_flag_variants(args.settings_csv)
         logger.info("getting coverage for the candidate tests")
         with log_timing(logger, "candidate-test"):
             test_runner = TestRunner(
                 mode="standalone",
                 filepaths=filepaths,
                 candidate_tests_limit=args.n,
+                llc_flag_variants=llc_flag_variants,
                 jobs=args.jobs,
                 timeout=args.timeout,
             )
@@ -299,6 +355,22 @@ def main():
             )
 
             coverage_analyzer.get_incremental_coverage()
+
+    elif args.subcmd == "min-candidate-tests":
+        tools = incremental_tools_from_args(sancov=args.sancov)
+        logger.info(
+            "min-candidate-tests: selecting minimal set of candidate "
+            "tests by instrumentation point coverage"
+        )
+        with log_timing(logger, "min-candidate-tests"):
+            selector = MinCandidateTestsSelector(
+                candidate_tests_output_dir=args.candidate_tests_output_dir,
+                output_dir=args.output_dir,
+                sancov_bin=tools.sancov,
+                jobs=args.jobs,
+                batch_size=args.batch_size,
+            )
+            selector.run()
 
     elif args.subcmd == "target-lines":
         args.llvm_repo = path_from_flag_or_env(

@@ -11,6 +11,9 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
   sancov_build_dir  Output directory for the SanitizerCoverage-instrumented LLVM build
   --bootstrap-bin   Directory with clang and clang++ (e.g. official LLVM release bin/)
   --ignorelist      Sanitizer coverage ignorelist file (optional)
+  --instrumentation-mode func|bb|edge
+                    SanitizerCoverage instrumentation granularity (default: bb).
+                    fuzz-fill expects basic-block (bb) coverage; func or edge will likely break it.
   ninja_jobs        Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
 
 Builds llvm-tblgen from the source tree, then instrumented llc/opt (Debug + SanitizerCoverage)
@@ -24,6 +27,7 @@ LLVM_DIR=""
 SANCOV_BUILD_DIR=""
 BOOTSTRAP_BIN=""
 IGNORELIST=""
+INSTRUMENTATION_MODE="bb"
 NINJA_JOBS=""
 
 while [[ $# -gt 0 ]]; do
@@ -44,6 +48,15 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             IGNORELIST="$2"
+            shift 2
+            ;;
+        --instrumentation-mode)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --instrumentation-mode requires a value" >&2
+                usage >&2
+                exit 1
+            fi
+            INSTRUMENTATION_MODE="$2"
             shift 2
             ;;
         --help|-h)
@@ -78,6 +91,16 @@ if [[ -z "$ALLOWLIST" || -z "$LLVM_DIR" || -z "$SANCOV_BUILD_DIR" || -z "$BOOTST
     usage >&2
     exit 1
 fi
+
+INSTRUMENTATION_MODE="${INSTRUMENTATION_MODE:-bb}"
+
+case "$INSTRUMENTATION_MODE" in
+    func|bb|edge) ;;
+    *)
+        echo "Error: --instrumentation-mode must be func, bb, or edge: ${INSTRUMENTATION_MODE}" >&2
+        exit 1
+        ;;
+esac
 
 if [[ ! -f "$ALLOWLIST" ]]; then
     echo "Error: allowlist file not found: $ALLOWLIST" >&2
@@ -149,7 +172,7 @@ HELPERS_BUILD_DIR="${SANCOV_BUILD_DIR}-helpers"
 SANCOV_BIN="$SANCOV_BUILD_DIR/bin"
 HELPERS_BIN="$HELPERS_BUILD_DIR/bin"
 
-SANCOV_FLAGS="-fno-inline -fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=bb,trace-pc-guard"
+SANCOV_FLAGS="-fno-inline -fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=${INSTRUMENTATION_MODE},trace-pc-guard"
 if [[ -n "$IGNORELIST" ]]; then
     SANCOV_FLAGS+=" -fsanitize-coverage-ignorelist=$IGNORELIST"
 fi
@@ -175,6 +198,7 @@ fi
 
 echo "Building LLVM for fuzz-fill (Release helpers + instrumented tree)..."
 echo "  Allowlist:        $ALLOWLIST"
+echo "  Instrumentation:  $INSTRUMENTATION_MODE (trace-pc-guard)"
 if [[ -n "$IGNORELIST" ]]; then
     echo "  Ignorelist:       $IGNORELIST"
 fi
