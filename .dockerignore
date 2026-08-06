@@ -19,7 +19,7 @@ scratch/
 data/
 logs/
 coverage_output/
-integration-tests/Output/
+integration-tests/**/Output/
 .backups/
 candidate-tests-dataset/
 
