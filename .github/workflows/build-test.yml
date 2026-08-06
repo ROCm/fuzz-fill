@@ -133,4 +133,5 @@ jobs:
             --llvm-sancov-build "${LLVM_BUILD_BIN}" \
             --llvm-src "${LLVM_PROJECT_DIR}" \
             --param e2e=1 \
+            -j 1 \
             -v integration-tests/e2e/
