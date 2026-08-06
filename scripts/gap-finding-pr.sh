@@ -135,7 +135,7 @@ if ! gap_finding_local_validate_required_paths; then
     exit 1
 fi
 
-if ! gap_finding_local_default_lit_filters multi; then
+if ! gap_finding_local_default_lit_filters; then
     usage >&2
     exit 1
 fi

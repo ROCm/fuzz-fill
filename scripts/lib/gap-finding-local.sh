@@ -149,10 +149,7 @@ gap_finding_local_validate_required_paths() {
     return 0
 }
 
-# mode: single (one prefix) or multi (full allowlist list).
 gap_finding_local_default_lit_filters() {
-    local mode="$1"
-
     if [[ ${#lit_filters[@]} -gt 0 ]]; then
         return 0
     fi
@@ -162,20 +159,8 @@ gap_finding_local_default_lit_filters() {
         return 1
     fi
 
-    case "$mode" in
-        single)
-            lit_filters=("$(lit_filter_for_allowlist "$backend_tests")")
-            echo "backend-tests: ${backend_tests} -> lit-filter: ${lit_filters[0]}"
-            ;;
-        multi)
-            mapfile -t lit_filters < <(default_lit_filters_for_allowlist "$backend_tests")
-            echo "backend-tests: ${backend_tests} -> ${#lit_filters[@]} lit-filter prefix(es)"
-            ;;
-        *)
-            echo "error: gap_finding_local_default_lit_filters: unknown mode: ${mode}" >&2
-            exit 1
-            ;;
-    esac
+    mapfile -t lit_filters < <(default_lit_filters_for_allowlist "$backend_tests")
+    echo "backend-tests: ${backend_tests} -> ${#lit_filters[@]} lit-filter prefix(es)"
 }
 
 gap_finding_local_prepare_output_dir() {

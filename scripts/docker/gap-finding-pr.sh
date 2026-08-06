@@ -93,7 +93,7 @@ fi
 DOCKER_IMAGE_MISSING_HINT="pass --build-image with --llvm-repo and --backend-tests to build it first"
 docker_image_cli_prepare
 
-docker_gap_default_lit_filters_from_image multi
+docker_gap_default_lit_filters_from_image
 
 docker_gap_finding_prepare_output_dir
 docker_gap_finding_write_lit_filters_file
