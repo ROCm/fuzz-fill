@@ -302,6 +302,9 @@ class TestRunner:
             f.write(
                 f"timeout -s9 {self._timeout} {self.llc} {llc_flags} {test_path} -o /dev/null\n"
             )
+            f.flush()
+            # Help overlay/network FS settle before exec; reduces ETXTBSY flakes under parallel runs.
+            os.fsync(f.fileno())
         script.chmod(0o755)
 
     async def _run_standalone_test(self, test_dir: Path) -> str:
