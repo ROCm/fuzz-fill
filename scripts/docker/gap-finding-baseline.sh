@@ -57,52 +57,15 @@ Examples:
 EOF
 }
 
-while [[ $# -gt 0 ]]; do
-    if docker_image_cli_try_parse "$1" "${2:-}"; then
-        shift "${DOCKER_IMAGE_CLI_SHIFT}"
-        continue
-    fi
-    if docker_gap_cli_try_parse_common "$1" "${2:-}"; then
-        shift "${DOCKER_GAP_CLI_SHIFT}"
-        continue
-    fi
-    if docker_gap_finding_try_parse_workflow "$1" "${2:-}"; then
-        shift "${DOCKER_GAP_FINDING_SHIFT}"
-        continue
-    fi
-    case "$1" in
-        --help|-h)
-            usage
-            exit 0
-            ;;
-        --)
-            shift
-            break
-            ;;
-        -*)
-            echo "error: unknown option: $1" >&2
-            usage >&2
-            exit 2
-            ;;
-        *)
-            echo "error: unexpected argument: $1" >&2
-            usage >&2
-            exit 2
-            ;;
-    esac
-done
-
-if ! docker_gap_finding_finish_arg_parse "$@"; then
+if ! docker_gap_finding_parse_host_args "$@"; then
     usage >&2
     exit 2
 fi
 
-if ! docker_gap_finding_require_output_dir; then
+if ! docker_gap_finding_validate_host_prerequisites; then
     usage >&2
     exit 1
 fi
-
-validate_jobs "$jobs"
 
 DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --backend-tests"
 docker_image_cli_prepare
@@ -114,12 +77,7 @@ docker_gap_finding_prepare_output_dir
 rm -rf "${output_dir}/baseline"
 
 docker_env=(-e "IN_CONTAINER=1" -e "LIT_FILTER=${lit_filter}")
-docker_gap_append_jobs_env docker_env
-
-extra_mounts=()
-docker_gap_append_bind_repo_mount extra_mounts
-
-docker_gap_run "$CONTAINER_SCRIPT" "$output_dir" "$image_ref" docker_env extra_mounts
+docker_gap_finding_prepare_and_run docker_env
 
 echo "Image: ${image_ref}"
 echo "LIT filter: ${lit_filter}"

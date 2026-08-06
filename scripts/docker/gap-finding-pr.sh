@@ -28,6 +28,22 @@ docker_gap_finding_source_host_libs "$0"
 
 commit_rev=""
 
+docker_gap_finding_try_parse_extra() {
+    DOCKER_GAP_FINDING_EXTRA_SHIFT=0
+
+    case "$1" in
+        --commit)
+            [[ $# -ge 2 ]] || { echo "error: --commit requires a value" >&2; exit 2; }
+            commit_rev="$2"
+            DOCKER_GAP_FINDING_EXTRA_SHIFT=2
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 usage() {
     cat <<EOF
 Usage: $(basename "$0") (--image <ref> | --pr-id <n>) --output-dir <path> [options]
@@ -59,68 +75,20 @@ Examples:
 EOF
 }
 
-while [[ $# -gt 0 ]]; do
-    if docker_image_cli_try_parse "$1" "${2:-}"; then
-        shift "${DOCKER_IMAGE_CLI_SHIFT}"
-        continue
-    fi
-    if docker_gap_cli_try_parse_common "$1" "${2:-}"; then
-        shift "${DOCKER_GAP_CLI_SHIFT}"
-        continue
-    fi
-    if docker_gap_finding_try_parse_workflow "$1" "${2:-}"; then
-        shift "${DOCKER_GAP_FINDING_SHIFT}"
-        continue
-    fi
-    case "$1" in
-        --commit)
-            [[ $# -ge 2 ]] || { echo "error: --commit requires a value" >&2; exit 2; }
-            commit_rev="$2"
-            shift 2
-            ;;
-        --help|-h)
-            usage
-            exit 0
-            ;;
-        --)
-            shift
-            break
-            ;;
-        -*)
-            echo "error: unknown option: $1" >&2
-            usage >&2
-            exit 2
-            ;;
-        *)
-            echo "error: unexpected argument: $1" >&2
-            usage >&2
-            exit 2
-            ;;
-    esac
-done
-
-if ! docker_gap_finding_finish_arg_parse "$@"; then
+if ! docker_gap_finding_parse_host_args "$@"; then
     usage >&2
     exit 2
 fi
 
-if [[ -n "$image_ref" && -n "$pr_id" ]]; then
-    echo "error: pass only one of --image or --pr-id" >&2
-    exit 1
-fi
-
-if [[ -z "$image_ref" && -z "$pr_id" ]]; then
-    echo "error: one of --image or --pr-id is required" >&2
+if ! docker_gap_finding_validate_image_selection required; then
     usage >&2
     exit 1
 fi
 
-if ! docker_gap_finding_require_output_dir; then
+if ! docker_gap_finding_validate_host_prerequisites; then
     usage >&2
     exit 1
 fi
-
-validate_jobs "$jobs"
 
 DOCKER_IMAGE_MISSING_HINT="pass --build-image with --llvm-repo and --backend-tests to build it first"
 docker_image_cli_prepare
@@ -134,12 +102,7 @@ docker_env=(-e "IN_CONTAINER=1")
 if [[ -n "$commit_rev" ]]; then
     docker_env+=(-e "COMMIT_REV=${commit_rev}")
 fi
-docker_gap_append_jobs_env docker_env
-
-extra_mounts=()
-docker_gap_append_bind_repo_mount extra_mounts
-
-docker_gap_run "$CONTAINER_SCRIPT" "$output_dir" "$image_ref" docker_env extra_mounts
+docker_gap_finding_prepare_and_run docker_env
 
 report="${output_dir}/commit_lines_report/target_lines_uncovered.csv"
 echo "Wrote ${report}"

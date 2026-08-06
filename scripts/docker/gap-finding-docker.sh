@@ -126,3 +126,89 @@ docker_gap_finding_write_lit_filters_file() {
     local filters_file="${output_dir}/.lit-filters"
     printf '%s\n' "${lit_filters[@]}" > "$filters_file"
 }
+
+# Override in entrypoints to parse workflow-specific flags (e.g. --commit).
+docker_gap_finding_try_parse_extra() {
+    return 1
+}
+
+# Parse shared host-side flags. Exits on --help or unknown options.
+# Remaining args are passed to docker_gap_finding_finish_arg_parse.
+docker_gap_finding_parse_host_args() {
+    while [[ $# -gt 0 ]]; do
+        if docker_image_cli_try_parse "$1" "${2:-}"; then
+            shift "${DOCKER_IMAGE_CLI_SHIFT}"
+            continue
+        fi
+        if docker_gap_cli_try_parse_common "$1" "${2:-}"; then
+            shift "${DOCKER_GAP_CLI_SHIFT}"
+            continue
+        fi
+        if docker_gap_finding_try_parse_workflow "$1" "${2:-}"; then
+            shift "${DOCKER_GAP_FINDING_SHIFT}"
+            continue
+        fi
+        if docker_gap_finding_try_parse_extra "$1" "${2:-}"; then
+            shift "${DOCKER_GAP_FINDING_EXTRA_SHIFT:-1}"
+            continue
+        fi
+        case "$1" in
+            --help|-h)
+                usage
+                exit 0
+                ;;
+            --)
+                shift
+                break
+                ;;
+            -*)
+                echo "error: unknown option: $1" >&2
+                usage >&2
+                exit 2
+                ;;
+            *)
+                echo "error: unexpected argument: $1" >&2
+                usage >&2
+                exit 2
+                ;;
+        esac
+    done
+
+    docker_gap_finding_finish_arg_parse "$@"
+}
+
+docker_gap_finding_validate_host_prerequisites() {
+    if ! docker_gap_finding_require_output_dir; then
+        return 1
+    fi
+    validate_jobs "$jobs"
+    return 0
+}
+
+# require_mode: required | optional
+docker_gap_finding_validate_image_selection() {
+    local require_mode="${1:-optional}"
+
+    if [[ -n "$image_ref" && -n "$pr_id" ]]; then
+        echo "error: pass only one of --image or --pr-id" >&2
+        exit 1
+    fi
+
+    if [[ "$require_mode" == required && -z "$image_ref" && -z "$pr_id" ]]; then
+        echo "error: one of --image or --pr-id is required" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+docker_gap_finding_prepare_and_run() {
+    local -n _env=$1
+
+    docker_gap_append_jobs_env _env
+
+    local extra_mounts=()
+    docker_gap_append_bind_repo_mount extra_mounts
+
+    docker_gap_run "$CONTAINER_SCRIPT" "$output_dir" "$image_ref" _env extra_mounts
+}
