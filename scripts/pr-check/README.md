@@ -98,6 +98,28 @@ Reports are built from `state.json`, not by scanning `runs/`. After a failed or 
 
 Use this when `latest.md` looks stale (e.g. fewer entries than `state.json`, or checks finished but the orchestrator exited early). The markdown body lists only PRs **with gaps**; clean PRs appear in the summary line and in `latest.json`. The same refresh also updates `new-prs.md` by diffing the current state against the previous `latest.json` — useful after an interrupted run where checks completed but report generation did not.
 
+### Rebuilding `state.json` from run artifacts
+
+If `state.json` is missing or corrupted (for example after a disk-full write), rebuild it from completed directories under `data/pr-check/runs/` without re-running coverage checks:
+
+```bash
+# Preview what would be written
+./scripts/pr-check/rebuild-state.sh --dry-run
+
+# Rebuild state, then refresh reports
+./scripts/pr-check/rebuild-state.sh
+./scripts/pr-check/get-latest.sh
+```
+
+The rebuild:
+
+1. Scans `data/pr-check/runs/<pr>-<backend>/` and skips incomplete directories (no `commit_lines_report/target_lines_uncovered.csv`).
+2. Recomputes `gap_count`, `lit_failure_count`, and `status` from on-disk artifacts.
+3. Fills `title`, `head_sha`, and `checked_at` from `reports/latest.json` and `reports/runs/*.json` when available.
+4. Falls back to `gh pr view` for any remaining runs (uses the **current** PR head SHA — if a PR was updated after the run, `--plan-only` may queue a re-check).
+
+Incomplete or empty run directories (for example a check interrupted before detection finished) are skipped and are not added to state.
+
 The main orchestrator also refreshes reports at normal exit. An EXIT trap regenerates the report if at least one check ran but the process did not finish cleanly (Ctrl+C, OOM, or unexpected early exit during `--drain-queue`).
 
 ## Daily AMDGPU cron

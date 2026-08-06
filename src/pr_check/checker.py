@@ -713,6 +713,248 @@ def evaluate_output_dir(output_dir: Path) -> dict[str, Any]:
     }
 
 
+_STATE_ENTRY_FIELDS = (
+    "pr_number",
+    "backend",
+    "title",
+    "head_sha",
+    "status",
+    "gap_count",
+    "lit_failure_count",
+    "checked_at",
+    "output_dir",
+    "error",
+)
+
+
+def parse_run_dir_name(name: str) -> tuple[int, str]:
+    """Parse a run directory name ``<pr_number>-<backend>``."""
+    if "-" not in name:
+        raise PrCheckerError(f"invalid run directory name (expected <pr>-<backend>): {name!r}")
+    backend = name.rsplit("-", 1)[1]
+    if backend not in BACKEND_SEARCH_QUERIES:
+        raise PrCheckerError(
+            f"invalid run directory name {name!r}: unknown backend {backend!r}"
+        )
+    try:
+        pr_number = int(name[: -(len(backend) + 1)])
+    except ValueError as exc:
+        raise PrCheckerError(f"invalid run directory name (bad PR number): {name!r}") from exc
+    if pr_number <= 0:
+        raise PrCheckerError(f"invalid run directory name (bad PR number): {name!r}")
+    return pr_number, backend
+
+
+def is_evaluable_run(output_dir: Path) -> bool:
+    """Return True when *output_dir* has the artifacts produced by a completed check."""
+    return (output_dir / "commit_lines_report" / "target_lines_uncovered.csv").is_file()
+
+
+def output_dir_checked_at(output_dir: Path) -> str:
+    """Approximate check completion time from the newest artifact under *output_dir*."""
+    newest_mtime = output_dir.stat().st_mtime
+    for path in output_dir.rglob("*"):
+        if path.is_file():
+            newest_mtime = max(newest_mtime, path.stat().st_mtime)
+    return datetime.fromtimestamp(newest_mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _report_entry_to_state_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    return {field: entry.get(field) for field in _STATE_ENTRY_FIELDS}
+
+
+def _checked_at_sort_key(checked_at: str) -> str:
+    return checked_at or ""
+
+
+def load_report_entry_index(report_dir: Path | None) -> dict[str, dict[str, Any]]:
+    """Load PR/backend metadata from ``latest.json`` and ``runs/*.json`` report snapshots."""
+    if report_dir is None:
+        return {}
+
+    candidates: list[Path] = []
+    latest_json = report_dir / "latest.json"
+    if latest_json.is_file():
+        candidates.append(latest_json)
+    runs_dir = report_dir / "runs"
+    if runs_dir.is_dir():
+        candidates.extend(sorted(runs_dir.glob("*.json")))
+
+    indexed: dict[str, dict[str, Any]] = {}
+    for path in candidates:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            log.warning("Skipping invalid report file %s: %s", path, exc.msg)
+            continue
+        if not isinstance(payload, dict):
+            log.warning("Skipping invalid report file %s: expected object at top level", path)
+            continue
+
+        for raw in payload.get("all_entries", []):
+            if not isinstance(raw, dict):
+                continue
+            try:
+                key = _entry_key_from_record(raw)
+                state_entry = _report_entry_to_state_entry(raw)
+            except (KeyError, TypeError, ValueError):
+                log.warning("Skipping malformed report entry in %s", path)
+                continue
+
+            existing = indexed.get(key)
+            if existing is None or _checked_at_sort_key(state_entry["checked_at"]) >= _checked_at_sort_key(
+                existing.get("checked_at", "")
+            ):
+                indexed[key] = state_entry
+
+    log.info(
+        "Loaded metadata for %d PR/backend pair(s) from report files under %s",
+        len(indexed),
+        report_dir,
+    )
+    return indexed
+
+
+def fetch_pr_metadata(pr_number: int, *, github_repo: str) -> tuple[str, str]:
+    """Return ``(title, head_sha)`` for an open PR via ``gh pr view``."""
+    payload = _view_pr(pr_number, github_repo)
+    head_sha = payload.get("headRefOid")
+    if not head_sha:
+        raise PrCheckerError(f"could not resolve headRefOid for {github_repo}#{pr_number}")
+    title = str(payload.get("title") or "")
+    return title, str(head_sha)
+
+
+def rebuild_state_from_runs(
+    *,
+    output_root: Path,
+    github_repo: str = DEFAULT_GITHUB_REPO,
+    report_dir: Path | None = None,
+    existing_state: dict[str, Any] | None = None,
+    fetch_missing_pr_metadata: bool = True,
+) -> tuple[dict[str, Any], dict[str, int]]:
+    """Rebuild ``state.json`` entries from on-disk run artifacts.
+
+    Completed runs under *output_root* are re-evaluated with
+    :func:`evaluate_output_dir`. ``title``, ``head_sha``, and ``checked_at`` are
+    taken from prior report snapshots when available; remaining PRs can optionally
+    be resolved via ``gh pr view`` (current head SHA — see README caveat).
+    """
+    if not output_root.is_dir():
+        raise PrCheckerError(f"output root is not a directory: {output_root}")
+
+    entries: dict[str, dict[str, Any]] = {}
+    if existing_state is not None:
+        for key, raw in existing_state.get("entries", {}).items():
+            if isinstance(raw, dict):
+                entries[key] = dict(raw)
+
+    report_index = load_report_entry_index(report_dir)
+    stats = {
+        "runs_seen": 0,
+        "runs_evaluated": 0,
+        "runs_skipped_incomplete": 0,
+        "metadata_from_reports": 0,
+        "metadata_from_existing_state": 0,
+        "metadata_from_github": 0,
+        "metadata_missing": 0,
+    }
+
+    for run_dir in sorted(output_root.iterdir()):
+        if not run_dir.is_dir():
+            continue
+        stats["runs_seen"] += 1
+        if not is_evaluable_run(run_dir):
+            stats["runs_skipped_incomplete"] += 1
+            log.info("Skipping incomplete run directory (no gap report): %s", run_dir.name)
+            continue
+
+        pr_number, backend = parse_run_dir_name(run_dir.name)
+        key = entry_key(pr_number, backend)
+        evaluation = evaluate_output_dir(run_dir)
+        output_dir = str(run_dir.resolve())
+
+        entry: dict[str, Any] = {
+            "pr_number": pr_number,
+            "backend": backend,
+            "title": "",
+            "head_sha": "",
+            "status": evaluation["status"],
+            "gap_count": evaluation["gap_count"],
+            "lit_failure_count": evaluation["lit_failure_count"],
+            "checked_at": output_dir_checked_at(run_dir),
+            "output_dir": output_dir,
+            "error": None,
+        }
+
+        metadata_source = report_index.get(key)
+        metadata_origin: str | None = None
+        if metadata_source is not None:
+            metadata_origin = "reports"
+        elif key in entries:
+            metadata_source = entries[key]
+            metadata_origin = "existing_state"
+
+        if metadata_source is not None:
+            entry["title"] = str(metadata_source.get("title") or "")
+            entry["head_sha"] = str(metadata_source.get("head_sha") or "")
+            if metadata_source.get("checked_at"):
+                entry["checked_at"] = str(metadata_source["checked_at"])
+            if metadata_source.get("status") == "failed":
+                entry["status"] = "failed"
+                entry["error"] = metadata_source.get("error")
+            if metadata_source.get("output_dir"):
+                entry["output_dir"] = str(metadata_source["output_dir"])
+            if metadata_origin == "reports":
+                stats["metadata_from_reports"] += 1
+            elif metadata_origin == "existing_state":
+                stats["metadata_from_existing_state"] += 1
+
+        if fetch_missing_pr_metadata and not entry["head_sha"]:
+            try:
+                title, head_sha = fetch_pr_metadata(pr_number, github_repo=github_repo)
+            except PrCheckerError as exc:
+                stats["metadata_missing"] += 1
+                log.warning(
+                    "Skipping %s: could not resolve PR metadata (%s)",
+                    run_dir.name,
+                    exc,
+                )
+                continue
+            entry["title"] = title
+            entry["head_sha"] = head_sha
+            stats["metadata_from_github"] += 1
+            log.info(
+                "Resolved PR metadata from GitHub for #%d (%s): head=%s",
+                pr_number,
+                backend,
+                head_sha[:12],
+            )
+        elif not entry["head_sha"]:
+            stats["metadata_missing"] += 1
+            log.warning(
+                "Skipping %s: missing head_sha (pass --fetch-pr-metadata or provide report snapshots)",
+                run_dir.name,
+            )
+            continue
+
+        entries[key] = entry
+        stats["runs_evaluated"] += 1
+
+    state = {"version": STATE_VERSION, "entries": entries}
+    log.info(
+        "Rebuild summary: %d run dir(s) seen, %d evaluated, %d incomplete skipped, "
+        "%d metadata from reports, %d from GitHub, %d missing",
+        stats["runs_seen"],
+        stats["runs_evaluated"],
+        stats["runs_skipped_incomplete"],
+        stats["metadata_from_reports"],
+        stats["metadata_from_github"],
+        stats["metadata_missing"],
+    )
+    return state, stats
+
+
 def pr_url(github_repo: str, pr_number: int) -> str:
     return f"https://github.com/{github_repo}/pull/{pr_number}"
 
@@ -1116,6 +1358,58 @@ def cmd_record(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rebuild_state(args: argparse.Namespace) -> int:
+    existing_state: dict[str, Any] | None = None
+    if args.merge_existing_state and args.state_file.is_file():
+        try:
+            existing_state = load_state(args.state_file)
+        except PrCheckerError as exc:
+            log.warning("Ignoring invalid existing state file %s: %s", args.state_file, exc)
+
+    report_dir = args.report_dir
+    if report_dir is None:
+        report_dir = args.state_file.parent / "reports"
+
+    state, stats = rebuild_state_from_runs(
+        output_root=args.output_root,
+        github_repo=args.github_repo,
+        report_dir=report_dir,
+        existing_state=existing_state,
+        fetch_missing_pr_metadata=args.fetch_pr_metadata,
+    )
+
+    if args.dry_run:
+        print(
+            json.dumps(
+                {
+                    "dry_run": True,
+                    "entry_count": len(state["entries"]),
+                    "stats": stats,
+                },
+                indent=2,
+            )
+        )
+        return 0
+
+    if args.state_file.is_file() and args.backup:
+        backup_path = args.state_file.with_suffix(args.state_file.suffix + ".bak")
+        backup_path.write_text(args.state_file.read_text(encoding="utf-8"), encoding="utf-8")
+        log.info("Backed up existing state to %s", backup_path)
+
+    save_state(args.state_file, state)
+    print(
+        json.dumps(
+            {
+                "state_file": str(args.state_file),
+                "entry_count": len(state["entries"]),
+                "stats": stats,
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
 def cmd_evaluate_output(args: argparse.Namespace) -> int:
     log.info("Evaluating output directory: %s", args.output_dir)
     payload = evaluate_output_dir(args.output_dir)
@@ -1265,6 +1559,60 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluate_parser.add_argument("--output-dir", type=Path, required=True)
     evaluate_parser.set_defaults(func=cmd_evaluate_output)
+
+    rebuild_parser = subparsers.add_parser(
+        "rebuild-state",
+        help="Rebuild state.json from run artifacts and saved reports",
+        parents=[logging_parent, github_repo_parent],
+    )
+    rebuild_parser.add_argument(
+        "--state-file",
+        type=Path,
+        required=True,
+        help="Path to write rebuilt state.json",
+    )
+    rebuild_parser.add_argument(
+        "--output-root",
+        type=Path,
+        required=True,
+        help="Directory containing per-run output folders (<pr>-<backend>)",
+    )
+    rebuild_parser.add_argument(
+        "--report-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Directory with latest.json and runs/*.json snapshots "
+            "(default: <state-file-parent>/reports)"
+        ),
+    )
+    rebuild_parser.add_argument(
+        "--fetch-pr-metadata",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Resolve title/head_sha via gh for runs missing report metadata "
+            "(default: enabled)"
+        ),
+    )
+    rebuild_parser.add_argument(
+        "--merge-existing-state",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Reuse metadata from an existing state file when valid (default: enabled)",
+    )
+    rebuild_parser.add_argument(
+        "--backup",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Back up the existing state file to state.json.bak (default: enabled)",
+    )
+    rebuild_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print rebuild stats without writing state.json",
+    )
+    rebuild_parser.set_defaults(func=cmd_rebuild_state)
 
     report_parser = subparsers.add_parser(
         "report",

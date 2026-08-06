@@ -506,5 +506,90 @@ class DiscoverPrsTest(unittest.TestCase):
         self.assertEqual(discovered, [])
 
 
+class RebuildStateTest(unittest.TestCase):
+    def _write_completed_run(
+        self,
+        root: Path,
+        *,
+        pr_number: int,
+        backend: str,
+        gap_rows: list[list[object]] | None = None,
+    ) -> Path:
+        run_dir = root / f"{pr_number}-{backend}"
+        gap_csv = run_dir / "commit_lines_report" / "target_lines_uncovered.csv"
+        rows: list[list[object]] = [["file", "line_no", "text"]]
+        if gap_rows:
+            rows.extend(gap_rows)
+        _write_gap_csv(gap_csv, rows)
+        lit_json = run_dir / "baseline" / "lit_failures.json"
+        lit_json.parent.mkdir(parents=True, exist_ok=True)
+        lit_json.write_text(json.dumps({"tests": []}), encoding="utf-8")
+        return run_dir
+
+    def test_rebuild_state_from_completed_run(self) -> None:
+        from pr_check.checker import rebuild_state_from_runs
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runs = root / "runs"
+            reports = root / "reports"
+            self._write_completed_run(
+                runs,
+                pr_number=42,
+                backend="amdgpu",
+                gap_rows=[["llvm/lib/Target/AMDGPU/Foo.cpp", "10", "assert(x);"]],
+            )
+            report_payload = {
+                "all_entries": [
+                    {
+                        "key": "42:amdgpu",
+                        "pr_number": 42,
+                        "backend": "amdgpu",
+                        "title": "AMDGPU fix",
+                        "head_sha": "abc123def456",
+                        "status": "gaps",
+                        "gap_count": 1,
+                        "lit_failure_count": 0,
+                        "checked_at": "2026-01-01T00:00:00+00:00",
+                        "output_dir": str(runs / "42-amdgpu"),
+                        "error": None,
+                    }
+                ]
+            }
+            reports.mkdir()
+            (reports / "latest.json").write_text(json.dumps(report_payload), encoding="utf-8")
+
+            state, stats = rebuild_state_from_runs(
+                output_root=runs,
+                report_dir=reports,
+                fetch_missing_pr_metadata=False,
+            )
+
+        self.assertEqual(stats["runs_evaluated"], 1)
+        self.assertEqual(stats["metadata_from_reports"], 1)
+        entry = state["entries"]["42:amdgpu"]
+        self.assertEqual(entry["title"], "AMDGPU fix")
+        self.assertEqual(entry["head_sha"], "abc123def456")
+        self.assertEqual(entry["status"], "gaps")
+        self.assertEqual(entry["gap_count"], 1)
+
+    def test_rebuild_state_skips_incomplete_run(self) -> None:
+        from pr_check.checker import rebuild_state_from_runs
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runs = root / "runs"
+            incomplete = runs / "99-spirv"
+            incomplete.mkdir(parents=True)
+
+            state, stats = rebuild_state_from_runs(
+                output_root=runs,
+                fetch_missing_pr_metadata=False,
+            )
+
+        self.assertEqual(state["entries"], {})
+        self.assertEqual(stats["runs_skipped_incomplete"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
