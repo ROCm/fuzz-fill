@@ -1,0 +1,24 @@
+# REQUIRES: e2e, e2e-bootstrap, gh-token
+# COM: End-to-end PR gap finding for llvm/llvm-project#214457.
+# COM: Clones llvm-project, builds SanitizerCoverage, runs the full amdgpu
+# COM: baseline slice, and checks that the PR's added line in SIFoldOperands.cpp
+# COM: is reported as uncovered.
+
+# RUN: rm -rf %t && mkdir -p %t
+# RUN: %repo-root/scripts/prepare-pr-llvm.sh --pr-id 214457 --dest %t/llvm-project --plain-clone --squash-commit-file %t/squash-commit
+# RUN: test -x %t/build-sancov/bin/llvm-lit || %repo-root/scripts/build-llvm-sancov.sh %repo-root/scripts/allowlist-amdgpu.txt %t/llvm-project %t/build-sancov --bootstrap-bin %e2e-bootstrap-bin --ignorelist %repo-root/scripts/ignorelist-amdgpu.txt
+# RUN: %repo-root/scripts/gap-finding-pr.sh --output-dir %t/out --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --commit $(cat %t/squash-commit) --backend-tests amdgpu
+
+# RUN: test -f %t/out/baseline/line_coverage_uncovered.csv
+# RUN: test -f %t/out/added-lines/added-lines.csv
+# RUN: test -f %t/out/commit_lines_report/target_lines_uncovered.csv
+
+# COM: PR #214457 changes SIFoldOperands.cpp line 1712 (Src0Idx -> Src1Idx).
+# RUN: %FileCheck %s --input-file=%t/out/added-lines/added-lines.csv --check-prefix=ADDED
+# ADDED: path,line_no,text
+# ADDED: llvm/lib/Target/AMDGPU/SIFoldOperands.cpp,1712,
+
+# COM: The changed line must appear in the uncovered PR target lines report.
+# RUN: %FileCheck %s --input-file=%t/out/commit_lines_report/target_lines_uncovered.csv --check-prefix=TARGET
+# TARGET: file,line,text
+# TARGET: {{.*}}SIFoldOperands.cpp,1712,

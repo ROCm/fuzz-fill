@@ -83,6 +83,7 @@ def _tool(bin_dir: str, name: str) -> str:
 
 
 _llvm_build_dir = os.path.dirname(_llvm_bin_dir)
+_repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _venv_cmd = f". {shlex.quote(_venv_activate)}"
 _venv_python = shlex.quote(os.path.join(_venv_dir, "bin", "python"))
 
@@ -90,6 +91,7 @@ config.name = "fuzz-fill-integration-tests"
 config.suffixes = [".test"]
 config.test_format = lit.formats.ShTest(execute_external=True)
 config.environment["VIRTUAL_ENV"] = _venv_dir
+config.environment["FUZZ_FILL_VENV_DIR"] = _venv_dir
 config.substitutions.extend(
     [
         ("%sancov-llc", _tool(_llvm_sancov_bin_dir, "llc")),
@@ -100,9 +102,31 @@ config.substitutions.extend(
         ("%not", _tool(_llvm_bin_dir, "not")),
         ("%llvm-build-dir", shlex.quote(_llvm_build_dir)),
         ("%llvm-repo", shlex.quote(_llvm_src_dir)),
+        ("%repo-root", shlex.quote(_repo_root)),
         ("%venv", _venv_cmd),
         ("%coverage", f"{_venv_python} -m coverage"),
         ("%reduce", f"{_venv_python} -m reduce"),
         ("%added-lines", f"{_venv_cmd} && python -m added_lines"),
     ]
 )
+
+# E2E tests are opt-in: pass --param e2e=1 to enable them.
+if lit_config.params.get("e2e"):
+    config.available_features.add("e2e")
+    _e2e_bootstrap = os.environ.get("FUZZ_FILL_E2E_BOOTSTRAP_BIN")
+    if _e2e_bootstrap and os.path.isfile(
+        os.path.join(os.path.abspath(os.path.expanduser(_e2e_bootstrap)), "clang")
+    ):
+        _e2e_bootstrap = os.path.abspath(os.path.expanduser(_e2e_bootstrap))
+        config.available_features.add("e2e-bootstrap")
+        config.environment["FUZZ_FILL_E2E_BOOTSTRAP_BIN"] = _e2e_bootstrap
+        config.substitutions.append(
+            ("%e2e-bootstrap-bin", shlex.quote(_e2e_bootstrap))
+        )
+
+# PR prepare uses gh api; tests that clone by PR id require GH_TOKEN (e.g. CI:
+# GH_TOKEN: ${{ github.token }}).
+_gh_token = os.environ.get("GH_TOKEN")
+if _gh_token:
+    config.available_features.add("gh-token")
+    config.environment["GH_TOKEN"] = _gh_token
