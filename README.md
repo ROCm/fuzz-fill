@@ -134,20 +134,26 @@ baseline  →  line_coverage_uncovered.csv
 
 ### Configure and run
 
-Edit the variables at the top of [`scripts/gap-finding-baseline.sh`](scripts/gap-finding-baseline.sh):
+Required flags mirror the [Docker gap-finding runners](#gap-finding-baseline-in-docker): `--output-dir`, LIT filters via `--lit-filter` or `--backend-tests`, plus explicit LLVM paths for local builds.
 
-| Variable | Meaning |
-|----------|---------|
-| `LLVM_REPO` | Path to your `llvm-project` checkout |
-| `LLVM_BIN` | Uninstrumented `bin` directory (`sancov`) |
-| `INSTRUMENTED_BIN_DIR` | Instrumented `bin` directory |
-| `OUTPUT_DIR` | Root for artifacts |
-| `FILTER` | LIT directory prefix (default: `AMDGPU`) |
-
-Then run from the fuzz-fill repo root:
+| Flag | Meaning |
+|------|---------|
+| `--output-dir` | Root for artifacts |
+| `--llvm-repo` | Path to your `llvm-project` checkout |
+| `--llvm-bin` | Uninstrumented `bin` directory (`sancov`) |
+| `--instrumented-bin-dir` | SanitizerCoverage `bin` directory (`llvm-lit`, `llc`, `opt`) |
+| `--lit-filter` | LIT directory prefix; repeat for multiple |
+| `--backend-tests` | `amdgpu` or `spirv` — default LIT filter(s) when `--lit-filter` is omitted |
+| `-j`, `--jobs` | Parallel jobs for llvm-lit |
 
 ```bash
-./scripts/gap-finding-baseline.sh
+./scripts/gap-finding-baseline.sh \
+  --output-dir ./data/baseline-run \
+  --llvm-repo /path/llvm-project \
+  --llvm-bin /path/llvm-project/build/bin \
+  --instrumented-bin-dir /path/llvm-project/build-sancov/bin \
+  --backend-tests amdgpu \
+  -j "$(nproc)"
 ```
 
 ### Key outputs
@@ -185,20 +191,24 @@ Step 3 does **not** re-run LIT; you can repeat it with different `added-lines.cs
 
 ### Configure and run
 
-Edit the variables at the top of [`scripts/gap-finding-pr.sh`](scripts/gap-finding-pr.sh):
-
-| Variable | Meaning |
-|----------|---------|
-| `LLVM_REPO` | `llvm-project` checkout (same tree `added-lines` diffs against) |
-| `LLVM_BIN` / `INSTRUMENTED_BIN_DIR` | Same as baseline gap finding |
-| `OUTPUT_DIR` | Root for all artifacts |
-| `FILTER` | LIT directory prefix for baseline |
-| `COMMIT` | Revision to analyse (`HEAD`, a hash, `main~3`, …) |
-
-Then run:
+| Flag | Meaning |
+|------|---------|
+| `--output-dir` | Root for all artifacts |
+| `--commit` | Revision to analyse (`HEAD`, a hash, `main~3`, …) |
+| `--llvm-repo` | `llvm-project` checkout (same tree `added-lines` diffs against) |
+| `--llvm-bin` / `--instrumented-bin-dir` | Same as [baseline gap finding](#gap-finding-baseline) |
+| `--lit-filter` / `--backend-tests` | LIT filters for the baseline step |
+| `-j`, `--jobs` | Parallel jobs for llvm-lit |
 
 ```bash
-./scripts/gap-finding-pr.sh
+./scripts/gap-finding-pr.sh \
+  --output-dir ./data/gap-finding-pr \
+  --llvm-repo /path/llvm-project \
+  --llvm-bin /path/llvm-project/build/bin \
+  --instrumented-bin-dir /path/llvm-project/build-sancov/bin \
+  --commit HEAD \
+  --backend-tests amdgpu \
+  -j "$(nproc)"
 ```
 
 ### Key outputs
@@ -284,7 +294,12 @@ python -m coverage baseline \
 Or via the reference script:
 
 ```bash
-FILTER=CodeGen/AMDGPU ./scripts/gap-finding-baseline.sh
+./scripts/gap-finding-baseline.sh \
+  --output-dir ./data/baseline-codegen \
+  --llvm-repo /path/llvm-project \
+  --llvm-bin /path/llvm-project/build/bin \
+  --instrumented-bin-dir /path/llvm-project/build-sancov/bin \
+  --lit-filter CodeGen/AMDGPU
 ```
 
 Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `INSTRUMENTED_BIN_DIR`, …); only the `FUZZ_FILL_*` variables are read by the Python CLIs.
