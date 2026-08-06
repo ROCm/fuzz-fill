@@ -71,8 +71,10 @@ apt-get install -y --no-install-recommends \
     >/dev/null
 
 python3 -m venv /tmp/venv-lock
-/tmp/venv-lock/bin/pip install --upgrade pip setuptools wheel >/dev/null
-/tmp/venv-lock/bin/pip install pip-tools typing_extensions >/dev/null
+# pip 26.2 moved stdlib_pkgs out of pip._internal.utils.compat; current
+# pip-tools still imports it there, so cap pip below 26.2 for now.
+/tmp/venv-lock/bin/pip install --upgrade 'pip>=24,<26.2' setuptools wheel >/dev/null
+/tmp/venv-lock/bin/pip install 'pip-tools>=7.4.1' typing_extensions >/dev/null
 
 PIP_COMPILE=(/tmp/venv-lock/bin/pip-compile pyproject.toml --strip-extras --allow-unsafe --no-header --quiet)
 
