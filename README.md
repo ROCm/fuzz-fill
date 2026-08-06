@@ -232,8 +232,11 @@ The scripts above call these modules. Use `--help` on any command for the full f
 | Command | Role |
 |---------|------|
 | `python -m coverage baseline` | Baseline LIT coverage (gap finding) |
+| `python -m coverage candidate-test` | Coverage from a fuzz-generated test corpus (gap filling) |
+| `python -m coverage incremental` | Suite gaps filled by fuzz tests (gap filling) |
 | `python -m coverage target-lines` | PR added lines vs `line_coverage_uncovered.csv` |
 | `python -m added_lines` | Lines added by a git commit |
+| `python -m reduce` | Testcase reduction |
 
 ### Uncovered-lines CSV contract
 
@@ -254,7 +257,25 @@ PR gap finding input to `target-lines` remains `added-lines.csv` (`path`, `line_
 
 Default when omitted: `AMDGPU` (see `DEFAULT_LIT_FILTER_DIRS` in [`src/coverage/constants.py`](src/coverage/constants.py)).
 
-Baseline symcov CSVs always include source paths under `llvm/lib` (see `DEFAULT_SOURCE_CODE_FILTER` in [`src/coverage/constants.py`](src/coverage/constants.py)).
+Baseline symcov CSVs include **all** instrumented source paths from the LIT run. Use `--source-filter` on `coverage incremental` to scope gap finding (default: `(?:^|/)llvm/lib/`; see `DEFAULT_SOURCE_CODE_FILTER` in [`src/coverage/constants.py`](src/coverage/constants.py)).
+
+### `coverage incremental` filters
+
+| Flag | Meaning |
+|------|---------|
+| `--source-filter REGEX` | Only consider baseline gaps whose source file path matches this Python regex (default: `(?:^|/)llvm/lib/`; pass `""` to disable) |
+
+### Candidate-test settings
+
+Each row in `--settings-csv` is one `llc` invocation (flags passed before the input path). The CSV must have a single column header `llc_flags`:
+
+```csv
+llc_flags
+-O0 -global-isel=0
+-O0 -global-isel=1
+```
+
+When `--settings-csv` is omitted, fuzz-fill uses the built-in default: all combinations of `-O0`, `-O1`, `-O2`, `-O3` with `-global-isel=0` and `-global-isel=1` (**8 runs per input file**). Total jobs = `(number of .ll/.bc files) × (rows in settings)`.
 
 ### Environment variables
 
@@ -262,10 +283,12 @@ Several commands accept LLVM tool paths via environment variables when the match
 
 | Env var | CLI flag | Commands |
 |---------|----------|----------|
-| `FUZZ_FILL_SANCOV` | `--sancov` | `coverage baseline` |
+| `FUZZ_FILL_SANCOV` | `--sancov` | `coverage baseline`, `coverage incremental`, `coverage min-candidate-tests` (mainly for maintainers) |
 | `FUZZ_FILL_LLVM_LIT` | `--llvm-lit` | `coverage baseline` |
-| `FUZZ_FILL_LLC` | `--llc` | `coverage baseline` |
+| `FUZZ_FILL_LLC` | `--llc` | `coverage baseline`, `coverage candidate-test`, `reduce` |
 | `FUZZ_FILL_OPT` | `--opt` | `coverage baseline` |
+| `FUZZ_FILL_LLVM_REDUCE` | `--llvm-reduce` | `reduce` |
+| `FUZZ_FILL_LLVM_DIS` | `--llvm-dis` | `reduce` (required for `.bc` input with `llvm_reduce_ir`) |
 | `FUZZ_FILL_LLVM_REPO` | `--llvm-repo` | `added_lines`, `coverage target-lines` |
 
 The [Docker test image](#docker-test-image) sets these per-tool defaults so interactive container use can omit tool flags. Integration tests use explicit CLI flags instead (see [Integration tests](#integration-tests)).
@@ -303,6 +326,14 @@ Or via the reference script:
 ```
 
 Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `INSTRUMENTED_BIN_DIR`, …); only the `FUZZ_FILL_*` variables are read by the Python CLIs.
+
+### Utility commands
+
+Optional commands outside the main workflows in fuzz-fill.
+
+| Command | Purpose |
+|---------|---------|
+| `python -m coverage min-candidate-tests` | From `candidate-test` output, selects a minimal set of tests that cover the same SanitizerCoverage instrumentation points; writes `min_candidate_tests.csv`, `min_candidate_tests_points.csv`, and `min_candidate_tests_source_files.csv`. Requires `candidate_test_manifest.csv` and `candidate_test_settings.csv` emitted by `candidate-test`. |
 
 ---
 
