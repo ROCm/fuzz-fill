@@ -65,7 +65,7 @@
 # COM: The same coverage gaps reported by incremental (GAP_CSV) must be reported as
 # COM: all-points-uncovered by target-lines when fed as target lines.
 # RUN: %FileCheck %s --input-file=%t/target_lines/target_lines_uncovered.csv --check-prefix=TARGET_CSV
-# TARGET_CSV-DAG: file,line_no,text
+# TARGET_CSV-DAG: file,line,text
 # TARGET_CSV-DAG: {{.*}}AMDGPUAsmPrinter.cpp,211,
 # TARGET_CSV-DAG: {{.*}}AMDGPUAsmPrinter.cpp,222,
 # TARGET_CSV-DAG: {{.*}}AMDGPUAsmPrinter.cpp,581,

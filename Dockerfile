@@ -141,6 +141,7 @@ COPY --chown=${UID}:${GID} pyproject.toml LICENCE.txt README.md /work/fuzz-fill/
 COPY --chown=${UID}:${GID} src /work/fuzz-fill/src
 COPY --chown=${UID}:${GID} tests /work/fuzz-fill/tests
 COPY --chown=${UID}:${GID} integration-tests /work/fuzz-fill/integration-tests
+COPY --chown=${UID}:${GID} scripts /work/fuzz-fill/scripts
 
 RUN echo "=== fuzz-fill image LLVM source: $(cat /work/.llvm-source) ===" \
  && echo "=== fuzz-fill image SanitizerCoverage allowlist: $(cat /work/.sancov-allowlist) ===" \
