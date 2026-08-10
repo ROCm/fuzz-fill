@@ -5,6 +5,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
+# shellcheck source=scripts/lib/prepare-pr-llvm.sh
+source "${REPO_ROOT}/scripts/lib/prepare-pr-llvm.sh"
+
 llvm_repo=""
 pr_id=""
 github_repo=""
@@ -66,44 +69,6 @@ validate_ninja_jobs() {
 require_command() {
     if ! command -v "$1" >/dev/null 2>&1; then
         echo "error: required command not found: $1" >&2
-        exit 1
-    fi
-}
-
-export_self_contained_clone() {
-    local repo="$1"
-    local minimal_path="${repo}.minimal"
-
-    # Worktrees and reference clones use alternates; Docker copies .git verbatim,
-    # so git commands fail inside the image unless the repo is self-contained.
-    # Depth 2 is enough for git show --first-parent on HEAD (squash + merge-base).
-    rm -rf "$minimal_path"
-    git clone --depth 2 --no-local "file://${repo}" "$minimal_path"
-    rm -rf "$repo"
-    mv "$minimal_path" "$repo"
-}
-
-commit_available() {
-    local repo="$1"
-    local sha="$2"
-    git -C "$repo" rev-parse --verify "${sha}^{commit}" >/dev/null 2>&1
-}
-
-ensure_commit_available() {
-    local repo="$1"
-    local sha="$2"
-    local label="$3"
-    local fetch_url="$4"
-
-    if commit_available "$repo" "$sha"; then
-        return 0
-    fi
-
-    echo "${label} ${sha} not in local object store; fetching from ${fetch_url}"
-    git -C "$repo" fetch "$fetch_url" "${sha}"
-    if ! commit_available "$repo" "$sha"; then
-        echo "error: could not resolve ${label} ${sha} from --llvm-repo or ${fetch_url}" >&2
-        echo "hint: check --github-repo, network access, and that the PR still exists" >&2
         exit 1
     fi
 }
@@ -269,70 +234,21 @@ if [[ -z "$image_tag" ]]; then
     image_tag="llvm-pr-${pr_id}"
 fi
 
-base_ref_oid="$(gh api "repos/${github_repo}/pulls/${pr_id}" --jq .base.sha)"
-pr_title="$(gh pr view "$pr_id" --repo "$github_repo" --json title -q .title)"
-
-if [[ -z "$base_ref_oid" || "$base_ref_oid" == "null" ]]; then
-    echo "error: could not resolve base ref for ${github_repo}#${pr_id}" >&2
-    exit 1
-fi
-
-echo "Preparing ${github_repo}#${pr_id}: ${pr_title}"
-echo "  base (target branch tip): ${base_ref_oid}"
-
-pr_head_ref="refs/fuzz-fill/pr-${pr_id}/head"
-pr_fetch_url="https://github.com/${github_repo}.git"
-
 ts="$(date -u +%Y%m%dT%H%M%SZ)"
 branch="fuzz-fill/pr-${pr_id}-squash-${ts}"
 pr_build_root="${REPO_ROOT}/.fuzz-fill-llvm-pr-worktrees"
 docker_llvm_path="${pr_build_root}/pr-${pr_id}-${ts}"
+squash_msg="Squash ${github_repo}#${pr_id} for fuzz-fill image build (${ts})"
 
 mkdir -p "$pr_build_root"
-rm -rf "$docker_llvm_path"
 
-echo "Creating standalone llvm-project clone at ${docker_llvm_path}"
-git clone --reference "$llvm_repo" -n "file://${llvm_repo}" "$docker_llvm_path"
-
-ensure_commit_available "$docker_llvm_path" "$base_ref_oid" "PR base commit" "$pr_fetch_url"
-
-echo "Fetching PR head via ${pr_fetch_url}"
-git -C "$docker_llvm_path" fetch "$pr_fetch_url" "pull/${pr_id}/head:${pr_head_ref}"
-
-merge_base_oid="$(git -C "$docker_llvm_path" merge-base "$base_ref_oid" "$pr_head_ref")"
-if [[ -z "$merge_base_oid" ]]; then
-    echo "error: could not find merge-base between base and PR head for ${github_repo}#${pr_id}" >&2
-    exit 1
-fi
-
-pr_head_oid="$(git -C "$docker_llvm_path" rev-parse "$pr_head_ref")"
-pr_tree_oid="$(git -C "$docker_llvm_path" rev-parse "${pr_head_ref}^{tree}")"
-merge_base_tree_oid="$(git -C "$docker_llvm_path" rev-parse "${merge_base_oid}^{tree}")"
-
-echo "  merge-base: ${merge_base_oid}"
-echo "  PR head: ${pr_head_oid}"
-
-if [[ "$merge_base_tree_oid" == "$pr_tree_oid" ]]; then
-    echo "error: PR has no changes vs merge-base ${merge_base_oid}: ${github_repo}#${pr_id}" >&2
-    exit 1
-fi
-
-echo "Creating single squash commit (PR head tree, merge-base parent)"
-squash_msg="Squash ${github_repo}#${pr_id} for fuzz-fill image build (${ts})"
-squash_oid="$(git -C "$docker_llvm_path" commit-tree "$pr_tree_oid" -p "$merge_base_oid" -m "$squash_msg")"
-if [[ -z "$squash_oid" ]]; then
-    echo "error: failed to create squash commit for ${github_repo}#${pr_id}" >&2
-    exit 1
-fi
-
-git -C "$docker_llvm_path" checkout -B "$branch" "$squash_oid"
-
-echo "Exporting self-contained clone for Docker build (depth 2)"
-export_self_contained_clone "$docker_llvm_path"
-if ! git -C "$docker_llvm_path" rev-parse HEAD >/dev/null 2>&1; then
-    echo "error: failed to create standalone llvm-project clone for Docker build" >&2
-    exit 1
-fi
+prepare_pr_llvm_worktree \
+    --pr-id "$pr_id" \
+    --dest "$docker_llvm_path" \
+    --github-repo "$github_repo" \
+    --reference "$llvm_repo" \
+    --branch "$branch" \
+    --squash-message "$squash_msg"
 
 build_args=(--llvm-dir "$docker_llvm_path" --tag "$image_tag" --allowlist "$allowlist")
 if [[ -n "$sancov_instrumentation_mode" ]]; then
