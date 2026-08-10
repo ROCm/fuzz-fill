@@ -40,3 +40,7 @@
 # RUN: %FileCheck %s --input-file=%t/out/commit_lines_report/target_lines_uncovered.csv --check-prefix=TARGET
 # TARGET: file,line,text
 # TARGET: {{.*}}SIFoldOperands.cpp,1712,
+
+# COM: Drop the llvm-project clone and sancov build after coverage runs to save disk space.
+# COM: Delete at the end so it is deleted only on success.
+# RUN: rm -rf %t/llvm-project %t/build-sancov %t/build-sancov-helpers
