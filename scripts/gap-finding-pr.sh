@@ -16,7 +16,17 @@ gap_finding_local_source_libs
 # shellcheck source=scripts/lib/gap-finding-pr.sh
 source "${SCRIPT_DIR}/lib/gap-finding-pr.sh"
 
+<<<<<<< HEAD
+# shellcheck source=scripts/lib/prepare-pr-llvm.sh
+source "${SCRIPT_DIR}/lib/prepare-pr-llvm.sh"
+
 commit_rev=""
+pr_id=""
+github_repo="llvm/llvm-project"
+reference_repo=""
+=======
+commit_rev=""
+>>>>>>> origin/main
 
 gap_finding_local_try_parse_extra() {
     GAP_FINDING_LOCAL_EXTRA_SHIFT=0
@@ -28,6 +38,21 @@ gap_finding_local_try_parse_extra() {
             GAP_FINDING_LOCAL_EXTRA_SHIFT=2
             return 0
             ;;
+<<<<<<< HEAD
+        --pr-id)
+            [[ $# -ge 2 ]] || { echo "error: --pr-id requires a value" >&2; exit 2; }
+            pr_id="$2"
+            GAP_FINDING_LOCAL_EXTRA_SHIFT=2
+            return 0
+            ;;
+        --github-repo)
+            [[ $# -ge 2 ]] || { echo "error: --github-repo requires a value" >&2; exit 2; }
+            github_repo="$2"
+            GAP_FINDING_LOCAL_EXTRA_SHIFT=2
+            return 0
+            ;;
+=======
+>>>>>>> origin/main
         *)
             return 1
             ;;
@@ -37,35 +62,62 @@ gap_finding_local_try_parse_extra() {
 usage() {
     cat <<EOF
 Usage: $(basename "$0") --output-dir <path> --llvm-repo <path> --llvm-bin <path> \\
+<<<<<<< HEAD
+    --instrumented-bin-dir <path> (--commit <rev> | --pr-id <n>) [options]
+=======
     --instrumented-bin-dir <path> --commit <rev> [options]
+>>>>>>> origin/main
 
 Run PR gap finding locally (no Docker): baseline, added_lines, target-lines.
 Artifacts are written under --output-dir/.
 
 Required:
   --output-dir <path>             Output directory (created if missing)
+<<<<<<< HEAD
+  One of:
+    --commit <rev>                Revision for added_lines (HEAD, hash, main~3, ...)
+    --pr-id <n>                   GitHub PR number (squashes PR into worktree)
+$(gap_finding_local_usage_llvm_options)
+
+Options:
+  --github-repo <owner/repo>      With --pr-id (default: llvm/llvm-project)
+=======
   --commit <rev>                  Revision for added_lines (HEAD, hash, main~3, ...)
 $(gap_finding_local_usage_llvm_options)
 
 Options:
+>>>>>>> origin/main
 $(gap_finding_local_usage_common_options)
 
 Examples:
   $(basename "$0") \\
       --output-dir ./data/gap-finding-pr \\
       --llvm-repo /path/llvm-project \\
+<<<<<<< HEAD
+      --llvm-bin /path/llvm-project/build-sancov/bin \\
+=======
       --llvm-bin /path/llvm-project/build/bin \\
+>>>>>>> origin/main
       --instrumented-bin-dir /path/llvm-project/build-sancov/bin \\
       --commit HEAD \\
       --backend-tests amdgpu -j "\$(nproc)"
 
   $(basename "$0") \\
+<<<<<<< HEAD
+      --output-dir ./data/gap-finding-pr-214457 \\
+      --llvm-repo /path/llvm-project \\
+      --llvm-bin /path/to/pr-tree/build-sancov/bin \\
+      --instrumented-bin-dir /path/to/pr-tree/build-sancov/bin \\
+      --pr-id 214457 \\
+      --backend-tests amdgpu -j "\$(nproc)"
+=======
       --output-dir ./data/gap-finding-pr \\
       --llvm-repo /path/llvm-project \\
       --llvm-bin /path/llvm-project/build/bin \\
       --instrumented-bin-dir /path/llvm-project/build-sancov/bin \\
       --commit b01fe4e \\
       --lit-filter CodeGen/AMDGPU -j "\$(nproc)"
+>>>>>>> origin/main
 EOF
 }
 
@@ -74,12 +126,49 @@ if ! gap_finding_local_parse_args "$@"; then
     exit 2
 fi
 
+<<<<<<< HEAD
+if [[ -n "$commit_rev" && -n "$pr_id" ]]; then
+    echo "error: pass only one of --commit or --pr-id" >&2
+=======
 if [[ -z "$commit_rev" ]]; then
     echo "error: --commit is required" >&2
+>>>>>>> origin/main
     usage >&2
     exit 1
 fi
 
+<<<<<<< HEAD
+if [[ -z "$commit_rev" && -z "$pr_id" ]]; then
+    echo "error: one of --commit or --pr-id is required" >&2
+    usage >&2
+    exit 1
+fi
+
+if [[ -n "$pr_id" ]]; then
+    if [[ ! "$pr_id" =~ ^[0-9]+$ ]] || [[ "$pr_id" -eq 0 ]]; then
+        echo "error: --pr-id must be a positive integer: ${pr_id}" >&2
+        exit 1
+    fi
+
+    reference_repo="$llvm_repo"
+    worktree_root="${REPO_ROOT}/.fuzz-fill-llvm-pr-worktrees/pr-${pr_id}"
+    pr_llvm="${worktree_root}/llvm-project"
+    squash_commit_file="${worktree_root}/squash-commit"
+
+    prepare_pr_llvm_worktree \
+        --pr-id "$pr_id" \
+        --dest "$pr_llvm" \
+        --github-repo "$github_repo" \
+        --reference "$reference_repo" \
+        --squash-commit-file "$squash_commit_file" \
+        --reuse
+
+    llvm_repo="$PREPARE_PR_REPO_DIR"
+    commit_rev="$PREPARE_PR_SQUASH_OID"
+fi
+
+=======
+>>>>>>> origin/main
 if ! gap_finding_local_validate_required_paths; then
     usage >&2
     exit 1
