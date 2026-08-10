@@ -81,8 +81,8 @@ Use `spirv` instead of `amdgpu` for SPIR-V backend tests.
   - [Run a container](#run-a-container)
 - [Tests](#tests)
 - [Contributions](#contributions)
-  - [AMDGPU](#amdgpu)
-  - [SPIR-V](#spir-v)
+  - [Gaps filled in existing LLVM code](#gaps-filled-in-existing-llvm-code)
+  - [Gaps detected on PRs](#gaps-detected-on-prs)
 
 ## Setup
 
@@ -586,7 +586,13 @@ Both `--llvm-build` and `--llvm-sancov-build` point at the same SanitizerCoverag
 
 ## Contributions
 
-### AMDGPU
+fuzz-fill targets two kinds of coverage gap: lines **already in LLVM** that tests miss, and lines **introduced or changed in a PR** that tests still miss after the PR's own tests run.
+
+### Gaps filled in existing LLVM code
+
+Baseline coverage gaps — lines already present in LLVM that the LIT suite did not exercise. Identified with baseline gap finding and closed with new or expanded LIT tests.
+
+#### AMDGPU
 
 | Date | Commit | Summary |
 |------|--------|---------|
@@ -595,7 +601,7 @@ Both `--llvm-build` and `--llvm-sancov-build` point at the same SanitizerCoverag
 | 2026-03-31 | [67d4842910b8](https://github.com/llvm/llvm-project/commit/67d4842910b8cb79f31b9041bdf56c206cd768e9) | New cases in `si-lower-sgpr-spills.mir` for `SILowerSGPRSpills` ([#189426](https://github.com/llvm/llvm-project/pull/189426)) |
 | 2026-06-12 | [4a3946fc690c](https://github.com/llvm/llvm-project/commit/4a3946fc690c461417d38b6264a1f7a70f5dd364) | Expanded `float-sopc-vopc.ll` coverage for `SIInstrInfo` ([#200414](https://github.com/llvm/llvm-project/pull/200414)) |
 
-### SPIR-V
+#### SPIR-V
 
 | Date | Commit | Summary |
 |------|--------|---------|
@@ -605,3 +611,23 @@ Both `--llvm-build` and `--llvm-sancov-build` point at the same SanitizerCoverag
 | 2026-03-27 | [294dc1b89452](https://github.com/llvm/llvm-project/commit/294dc1b894520506cdd8d260f51c3f8fec6a7118) | New `SPIRVEmitIntrinsics-get-element-ptr.ll` ([#188962](https://github.com/llvm/llvm-project/pull/188962)) |
 | 2026-03-27 | [9238b0f765ad](https://github.com/llvm/llvm-project/commit/9238b0f765ada177cd7034cf75a57acf26f2ac46) | New `SPIRVEmitIntrinsics-infer-ptr-type.ll` ([#188950](https://github.com/llvm/llvm-project/pull/188950)) |
 | 2026-03-31 | [a839e500e8a1](https://github.com/llvm/llvm-project/commit/a839e500e8a1934d3ad0a346d3789904c2a865a9) | New `SPIRVEmitIntrinsics-infer-fnptr-todo-type.ll` ([#189413](https://github.com/llvm/llvm-project/pull/189413)) |
+
+### Gaps detected on PRs
+
+Lines added or changed in LLVM pull requests that baseline coverage (including tests in the PR) still does not hit. Identified with PR gap finding and reported as review feedback on the PR.
+
+#### AMDGPU
+
+| Date | PR | Summary |
+|------|-----|---------|
+| 2026-08-04 | [#211465](https://github.com/llvm/llvm-project/pull/211465#issuecomment-5179521133) | [AMDGPU] TFE D16 format buffer loads |
+| 2026-08-04 | [#213202](https://github.com/llvm/llvm-project/pull/213202#issuecomment-5179767021) | [AMDGPU] Negated f16 and fp conversion DAG combines |
+| 2026-08-04 | [#212507](https://github.com/llvm/llvm-project/pull/212507#issuecomment-5179801936) | [AMDGPU] FLAT_SCRATCH in SILoadStoreOptimizer |
+| 2026-08-04 | [#212536](https://github.com/llvm/llvm-project/pull/212536#issuecomment-5179822882) | [AMDGPU] MachinePipeliner support |
+| 2026-08-04 | [#212539](https://github.com/llvm/llvm-project/pull/212539#issuecomment-5179840636) | [AMDGPU] Register pressure of pipelined loops |
+
+#### SPIR-V
+
+| Date | PR | Summary |
+|------|-----|---------|
+| 2026-08-05 | [#212999](https://github.com/llvm/llvm-project/pull/212999#issuecomment-5193889662) | [SPIRV] Legalize byte-buffer reinterpretation ptrcasts |
