@@ -8,7 +8,7 @@ coverage_output/*
 sbom/*
 requirements.txt
 **/__pycache__/*
-integration-tests/Output/*
+integration-tests/**/Output/
 .fuzz-fill-llvm-pr-worktrees/
 *.lit_test_times.txt
 *.sancov

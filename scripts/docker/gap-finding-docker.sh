@@ -96,9 +96,7 @@ docker_gap_finding_prepare_output_dir() {
     output_dir="$(realpath "$output_dir")"
 }
 
-# mode: single (one prefix) or multi (full allowlist list).
 docker_gap_default_lit_filters_from_image() {
-    local mode="$1"
     local allowlist
 
     if [[ ${#lit_filters[@]} -gt 0 ]]; then
@@ -106,20 +104,8 @@ docker_gap_default_lit_filters_from_image() {
     fi
 
     allowlist="$(docker_image_read_allowlist)"
-    case "$mode" in
-        single)
-            lit_filters=("$(lit_filter_for_allowlist "$allowlist")")
-            echo "Image allowlist: ${allowlist} -> lit-filter: ${lit_filters[0]}"
-            ;;
-        multi)
-            mapfile -t lit_filters < <(default_lit_filters_for_allowlist "$allowlist")
-            echo "Image allowlist: ${allowlist} -> ${#lit_filters[@]} lit-filter prefix(es)"
-            ;;
-        *)
-            echo "error: docker_gap_default_lit_filters_from_image: unknown mode: ${mode}" >&2
-            exit 1
-            ;;
-    esac
+    mapfile -t lit_filters < <(default_lit_filters_for_allowlist "$allowlist")
+    echo "Image allowlist: ${allowlist} -> ${#lit_filters[@]} lit-filter prefix(es)"
 }
 
 docker_gap_finding_write_lit_filters_file() {

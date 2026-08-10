@@ -15,12 +15,12 @@ if [[ "${IN_CONTAINER:-}" == 1 ]]; then
     # shellcheck source=scripts/lib/coverage-baseline.sh
     source "${REPO_ROOT}/scripts/lib/coverage-baseline.sh"
 
-    : "${LIT_FILTER:?LIT_FILTER is required}"
+    mapfile -t lit_filters < /mounted-output/.lit-filters
 
     export LIT_ALLOW_FAILURES=1
 
-    echo "=== coverage baseline (lit-filter=${LIT_FILTER}) ==="
-    run_coverage_baseline /mounted-output/baseline "$LIT_FILTER"
+    echo "=== coverage baseline (${#lit_filters[@]} lit-filter prefix(es)) ==="
+    run_coverage_baseline /mounted-output/baseline "${lit_filters[@]}"
     exit 0
 fi
 
@@ -45,7 +45,7 @@ $(docker_gap_finding_usage_image_build_options)
 
 Options:
   --bind-repo                   Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
-  --lit-filter <prefix>         LIT --filter= prefix (default: from image /work/.sancov-allowlist)
+  --lit-filter <prefix>         LIT --filter= prefix; repeat for multiple (default: from image /work/.sancov-allowlist)
   -j <n>, --jobs <n>            Parallel jobs for llvm-lit and ninja (build)
   --help, -h                    Show this help
 
@@ -70,17 +70,17 @@ fi
 DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --backend-tests"
 docker_image_cli_prepare
 
-docker_gap_default_lit_filters_from_image single
-lit_filter="${lit_filters[0]}"
+docker_gap_default_lit_filters_from_image
 
 docker_gap_finding_prepare_output_dir
+docker_gap_finding_write_lit_filters_file
 rm -rf "${output_dir}/baseline"
 
-docker_env=(-e "IN_CONTAINER=1" -e "LIT_FILTER=${lit_filter}")
+docker_env=(-e "IN_CONTAINER=1")
 docker_gap_finding_prepare_and_run docker_env
 
 echo "Image: ${image_ref}"
-echo "LIT filter: ${lit_filter}"
+echo "LIT filters: ${lit_filters[*]}"
 echo "Wrote ${output_dir}/baseline/"
 
 emit_lit_failures_warning "$output_dir" "downstream gap lists"

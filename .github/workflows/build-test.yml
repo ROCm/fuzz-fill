@@ -23,7 +23,7 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: aws-linux-scale-rocm-customer-dev
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
       actions: write
@@ -116,3 +116,22 @@ jobs:
             --llvm-sancov-build "${LLVM_BUILD_BIN}" \
             --llvm-src "${LLVM_PROJECT_DIR}" \
             -v integration-tests/
+
+      - name: Run e2e integration tests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FUZZ_FILL_E2E_BOOTSTRAP_BIN: ${{ env.LLVM_RELEASE_BIN }}
+        run: |
+          source "${VENV_DIR}/bin/activate"
+          if ! command -v gh >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y gh
+          fi
+          ./integration-tests/test.sh \
+            --venv "${VENV_DIR}" \
+            --llvm-build "${LLVM_BUILD_BIN}" \
+            --llvm-sancov-build "${LLVM_BUILD_BIN}" \
+            --llvm-src "${LLVM_PROJECT_DIR}" \
+            --param e2e=1 \
+            -j 1 \
+            -v integration-tests/e2e/

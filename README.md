@@ -195,10 +195,22 @@ Step 3 does **not** re-run LIT; you can repeat it with different `added-lines.cs
 |------|---------|
 | `--output-dir` | Root for all artifacts |
 | `--commit` | Revision to analyse (`HEAD`, a hash, `main~3`, …) |
-| `--llvm-repo` | `llvm-project` checkout (same tree `added-lines` diffs against) |
+| `--pr-id` | GitHub PR number — squashes PR into `.fuzz-fill-llvm-pr-worktrees/pr-<n>/` (exclusive with `--commit`) |
+| `--github-repo` | With `--pr-id` (default: `llvm/llvm-project`) |
+| `--llvm-repo` | `llvm-project` checkout (`added-lines` tree; with `--pr-id`, used as clone reference) |
 | `--llvm-bin` / `--instrumented-bin-dir` | Same as [baseline gap finding](#gap-finding-baseline) |
 | `--lit-filter` / `--backend-tests` | LIT filters for the baseline step |
 | `-j`, `--jobs` | Parallel jobs for llvm-lit |
+
+PR gap finding squashes all PR commits onto the merge-base in a self-contained worktree (same as the Docker PR image build). Use [`scripts/prepare-pr-llvm.sh`](scripts/prepare-pr-llvm.sh) directly if you only need the squashed tree:
+
+```bash
+./scripts/prepare-pr-llvm.sh \
+  --pr-id 214457 \
+  --dest ./.fuzz-fill-llvm-pr-worktrees/pr-214457/llvm-project \
+  --reference /path/llvm-project \
+  --squash-commit-file ./.fuzz-fill-llvm-pr-worktrees/pr-214457/squash-commit
+```
 
 ```bash
 ./scripts/gap-finding-pr.sh \
@@ -207,6 +219,19 @@ Step 3 does **not** re-run LIT; you can repeat it with different `added-lines.cs
   --llvm-bin /path/llvm-project/build/bin \
   --instrumented-bin-dir /path/llvm-project/build-sancov/bin \
   --commit HEAD \
+  --backend-tests amdgpu \
+  -j "$(nproc)"
+```
+
+GitHub pull request (squash + gap finding):
+
+```bash
+./scripts/gap-finding-pr.sh \
+  --output-dir ./data/gap-finding-pr-214457 \
+  --llvm-repo /path/llvm-project \
+  --llvm-bin ./.fuzz-fill-llvm-pr-worktrees/pr-214457/llvm-project/build-sancov/bin \
+  --instrumented-bin-dir ./.fuzz-fill-llvm-pr-worktrees/pr-214457/llvm-project/build-sancov/bin \
+  --pr-id 214457 \
   --backend-tests amdgpu \
   -j "$(nproc)"
 ```
@@ -581,6 +606,25 @@ Or use [`scripts/docker/test-image.sh`](scripts/docker/test-image.sh) with the [
 ```
 
 Both `--llvm-build` and `--llvm-sancov-build` point at the same SanitizerCoverage tree; `--llvm-src` is the llvm-project checkout root (used as `%llvm-repo` in tests).
+
+#### E2E integration tests
+
+Tests under `integration-tests/e2e/` are marked `# REQUIRES: e2e` and are **not** run by default. Pass `--param e2e=1` to lit explicitly:
+
+```bash
+export FUZZ_FILL_E2E_BOOTSTRAP_BIN=/path/to/LLVM-22.1.8/bin
+export GH_TOKEN="$(gh auth token)"   # or ${{ github.token }} in CI
+
+./integration-tests/test.sh \
+  --venv ./venv/ \
+  --llvm-build llvm-project/build-sancov/bin/ \
+  --llvm-sancov-build llvm-project/build-sancov/bin/ \
+  --llvm-src llvm-project/ \
+  --param e2e=1 \
+  -v integration-tests/e2e/gap-finding-pr/
+```
+
+E2E tests use [`scripts/prepare-pr-llvm.sh`](scripts/prepare-pr-llvm.sh) with `--plain-clone` (same squash + self-contained export as the Docker PR path), then build SanitizerCoverage and run gap finding. The first run can take several hours (LLVM build + amdgpu LIT slice).
 
 ---
 

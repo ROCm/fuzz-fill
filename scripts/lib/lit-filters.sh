@@ -6,19 +6,7 @@
 : "${SCRIPTS_DIR:=$(cd "${LIB_DIR}/.." && pwd)}"
 : "${REPO_ROOT:=$(cd "${SCRIPTS_DIR}/.." && pwd)}"
 
-# Single default prefix for docker gap-finding-baseline (one --lit-filter).
-lit_filter_for_allowlist() {
-    case "$1" in
-        amdgpu) echo "CodeGen/AMDGPU" ;;
-        spirv) echo "CodeGen/SPIRV" ;;
-        *)
-            echo "error: unsupported image allowlist: ${1} (expected amdgpu or spirv)" >&2
-            exit 1
-            ;;
-    esac
-}
-
-# Full filter list for docker gap-finding-pr and gap-filling-amdgpu defaults.
+# Default filter list for gap-finding baseline and PR entrypoints.
 # Prints one prefix per line (for mapfile).
 default_lit_filters_for_allowlist() {
     case "$1" in
