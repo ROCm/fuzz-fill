@@ -1,0 +1,4 @@
+test_name,file,line,covered-points
+test-a,/build/llvm/llvm/lib/Target/AMDGPU/FooA.cpp,100,0x1000
+test-b,/build/llvm/llvm/lib/Target/AMDGPU/FooB.cpp,200,0x3000;0x2000
+test-c,/build/llvm/llvm/lib/Target/AMDGPU/FooC.cpp,300,0x4000

@@ -1,0 +1,24 @@
+# COM: Scaffold-only batch-from-coverage for n=1 and n=3 (no llvm-reduce/creduce).
+
+# RUN: rm -rf %t && mkdir -p %t
+# RUN: bash %S/fixtures/reduction-batch/prepare-gap-fill-fixture.sh %t/gap-fill
+# RUN: %reduce batch-from-coverage --csv %t/gap-fill/incremental/new_coverage.csv --candidate-tests %t/gap-fill/candidate_tests --output %t/out-n1 --template-dir %repo-root/example/amd/new-test-1 --n 1
+# RUN: test -d %t/out-n1/t-00001-test-a
+# RUN: test -f %t/out-n1/t-00001-test-a/config.json
+# RUN: test -f %t/out-n1/t-00001-test-a/interesting_ir.sh
+# RUN: %FileCheck %s --input-file %t/out-n1/t-00001-test-a/config.json --check-prefix=CFG1
+# RUN: %FileCheck %s --input-file %t/out-n1/t-00001-test-a/interesting_ir.sh --check-prefix=IR1
+
+# RUN: %reduce batch-from-coverage --csv %t/gap-fill/incremental/new_coverage.csv --candidate-tests %t/gap-fill/candidate_tests --output %t/out-n3 --template-dir %repo-root/example/amd/new-test-1 --n 3
+# RUN: test -d %t/out-n3/t-00001-test-a
+# RUN: test -d %t/out-n3/t-00002-test-b
+# RUN: test -d %t/out-n3/t-00003-test-c
+# RUN: %FileCheck %s --input-file %t/out-n3/t-00002-test-b/config.json --check-prefix=CFG2
+# RUN: %FileCheck %s --input-file %t/out-n3/t-00002-test-b/interesting_ir.sh --check-prefix=IR2
+
+# CFG1: "line": 100,
+# CFG1: "file": "llvm/lib/Target/AMDGPU/FooA.cpp",
+# CFG2: "line": 200,
+# CFG2: "file": "llvm/lib/Target/AMDGPU/FooB.cpp",
+# IR1: COVERED="0x1000"
+# IR2: COVERED="0x2000"
