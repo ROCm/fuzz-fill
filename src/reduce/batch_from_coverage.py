@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Create per-line reduce harness directories from incremental/new_coverage.csv and
 matching folders under candidate_tests/.
@@ -19,7 +18,7 @@ lowest hex among addresses for that row.
 Each config.json sets output_dir to a reduced subdirectory next to it so
 reduction artifacts stay inside the case directory.
 
-With --llc and --llvm-reduce, runs python -m reduce --config <case>/config.json for each case.
+With --llc and --llvm-reduce, runs reduce for each prepared case.
 
 Use --n to process only the first N data rows of the CSV (after the header).
 
@@ -36,28 +35,16 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
 import re
 import shlex
 import shutil
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[1]
-
-
-def _known_pass_ids() -> frozenset[str]:
-    src = str(_repo_root() / "src")
-    if src not in sys.path:
-        sys.path.insert(0, src)
-    from reduce.pass_registry import known_pass_ids
-
-    return known_pass_ids()
-
+from fuzz_fill.llvm_tools import ReduceTools, reduce_tools_from_args
+from reduce.pass_registry import known_pass_ids
+from reduce.run_single import run_single_reduce
 
 _PASSES_NEEDING_EXTRACT_OPTS = frozenset(
     {"extract_mir_before_pass", "extract_ir_before_pass"}
@@ -65,34 +52,13 @@ _PASSES_NEEDING_EXTRACT_OPTS = frozenset(
 _PASSES_NEEDING_INTERESTING_MIR = frozenset({"llvm_reduce_mir"})
 
 
-def _reduce_subprocess_env() -> dict[str, str]:
-    """Prepend repo ``src`` on PYTHONPATH so ``python -m reduce`` resolves."""
-    env = os.environ.copy()
-    src = str(_repo_root() / "src")
-    prev = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = src if not prev else f"{src}{os.pathsep}{prev}"
-    return env
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
 
 
-def run_reduce(*, case_dir: Path, llc: Path, llvm_reduce: Path) -> None:
+def run_case_reduce(*, case_dir: Path, tools: ReduceTools) -> None:
     """Run reduce for one prepared case directory."""
-    config = case_dir / "config.json"
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "reduce",
-            "--config",
-            str(config),
-            "--llc",
-            str(llc.resolve()),
-            "--llvm-reduce",
-            str(llvm_reduce.resolve()),
-        ],
-        cwd=case_dir,
-        env=_reduce_subprocess_env(),
-        check=True,
-    )
+    run_single_reduce(config=case_dir / "config.json", tools=tools)
 
 
 def llvm_rel_source_path(abs_path: str) -> str:
@@ -395,7 +361,7 @@ def parse_pipeline_arg(value: str) -> list[str]:
     ids = [p.strip() for p in value.split(",") if p.strip()]
     if not ids:
         raise ValueError("--pipeline must list at least one pass id.")
-    known = _known_pass_ids()
+    known = known_pass_ids()
     bad = [p for p in ids if p not in known]
     if bad:
         raise ValueError(
@@ -684,13 +650,19 @@ def main(argv: list[str] | None = None) -> int:
         "--llc",
         type=Path,
         default=None,
-        help="Path to llc; with --llvm-reduce, run python -m reduce for each prepared case.",
+        help="Path to llc; with --llvm-reduce, run reduce for each prepared case.",
     )
     p.add_argument(
         "--llvm-reduce",
         type=Path,
         default=None,
-        help="Path to llvm-reduce; with --llc, run python -m reduce for each prepared case.",
+        help="Path to llvm-reduce; with --llc, run reduce for each prepared case.",
+    )
+    p.add_argument(
+        "--llvm-dis",
+        type=Path,
+        default=None,
+        help="Path to llvm-dis; required when reducing .bc input with llvm_reduce_ir.",
     )
     p.add_argument(
         "--n",
@@ -708,9 +680,19 @@ def main(argv: list[str] | None = None) -> int:
     candidate_tests = args.candidate_tests.resolve()
     llc = args.llc.resolve() if args.llc is not None else None
     llvm_reduce = args.llvm_reduce.resolve() if args.llvm_reduce is not None else None
+    llvm_dis = args.llvm_dis.resolve() if args.llvm_dis is not None else None
     if (llc is None) ^ (llvm_reduce is None):
         print("Pass both --llc and --llvm-reduce to run reduce, or omit both.", file=sys.stderr)
         return 2
+
+    tools: ReduceTools | None = None
+    if llc is not None:
+        tools = reduce_tools_from_args(
+            llc=llc,
+            llvm_reduce=llvm_reduce,
+            llvm_dis=llvm_dis,
+        )
+
     out_parent = args.output.resolve()
     out_parent.mkdir(parents=True, exist_ok=True)
 
@@ -804,20 +786,18 @@ def main(argv: list[str] | None = None) -> int:
                 mtriple=args.mtriple,
                 mir_codegen_only=args.mir_codegen_only,
             )
-            if llc is not None:
+            if tools is not None:
                 print(
                     f"Row {i}: running reduce (llc={llc}, llvm-reduce={llvm_reduce})...",
                     file=sys.stderr,
                     flush=True,
                 )
-                run_reduce(case_dir=dest, llc=llc, llvm_reduce=llvm_reduce)
+                run_case_reduce(case_dir=dest, tools=tools)
             print(dest)
             ok += 1
             if amb:
                 ambiguous_rows += 1
-        except subprocess.CalledProcessError as e:
-            print(f"Row {i}: reduce exited with status {e.returncode}", file=sys.stderr)
-        except (OSError, ValueError, FileNotFoundError) as e:
+        except (OSError, ValueError, FileNotFoundError, SystemExit) as e:
             print(f"Row {i}: {e}", file=sys.stderr)
 
     if ambiguous_rows:
@@ -843,7 +823,3 @@ def main(argv: list[str] | None = None) -> int:
     if ok == 0:
         return 1
     return 0 if ok == len(rows) else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

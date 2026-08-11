@@ -1,5 +1,5 @@
 import argparse
-from datetime import datetime
+import sys
 from pathlib import Path
 
 from fuzz_fill.env import FUZZ_FILL_LLC, FUZZ_FILL_LLVM_DIS, FUZZ_FILL_LLVM_REDUCE
@@ -8,17 +8,13 @@ from fuzz_fill.log import (
     add_log_level_argument,
     add_log_to_file_argument,
     configure_logging,
-    get_logger,
-    resolve_log_file,
 )
-from reduce.config import load_reduce_config, pipeline_steps_for_only_pass
-from reduce.reducer import Reducer, known_pass_ids
-from reduce.test import Test
-
-logger = get_logger("reduce")
+from reduce import batch_from_coverage
+from reduce.reducer import known_pass_ids
+from reduce.run_single import run_single_reduce
 
 
-def main():
+def _run_single_from_args(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Reduce tests using a JSON config (see example/config.json)."
     )
@@ -59,48 +55,26 @@ def main():
     )
     add_log_level_argument(parser)
     add_log_to_file_argument(parser)
-    ns = parser.parse_args()
+    ns = parser.parse_args(argv)
     configure_logging(ns.log_level)
     tools = reduce_tools_from_args(
         llc=ns.llc,
         llvm_reduce=ns.llvm_reduce,
         llvm_dis=ns.llvm_dis,
     )
-    print("[main] loading config...", flush=True)
-    cfg = load_reduce_config(ns.config)
-
-    if getattr(ns, "only_pass", None) is not None:
-        pipeline_steps = pipeline_steps_for_only_pass(cfg.pipeline, ns.only_pass)
-    else:
-        pipeline_steps = cfg.pipeline
-
-    test = Test(cfg.original_test, None, f"/{cfg.file}", cfg.line)
-
-    current_file = Path(__file__).resolve()
-    default_output_dir = (
-        current_file.parent.parent.parent
-        / "data"
-        / "output"
-        / cfg.original_test.name
-        / datetime.now().strftime("%Y%m%d-%H%M%S")
-    )
-    output_dir = cfg.output_dir or default_output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    configure_logging(
-        ns.log_level,
-        log_file=resolve_log_file(output_dir, ns.log_to_file),
+    run_single_reduce(
+        config=ns.config,
+        tools=tools,
+        only_pass=getattr(ns, "only_pass", None),
+        log_level=ns.log_level,
+        log_to_file=ns.log_to_file,
     )
 
-    pass_ids = [s.id for s in pipeline_steps]
-    logger.info("reduce (%d pass(es): %s)", len(pass_ids), ", ".join(pass_ids))
-    reducer = Reducer(
-        cfg.llvm_bin,
-        output_dir,
-        test,
-        pipeline_steps=pipeline_steps,
-    )
-    reducer.reduce()
+
+def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "batch-from-coverage":
+        raise SystemExit(batch_from_coverage.main(sys.argv[2:]))
+    _run_single_from_args()
 
 
 if __name__ == "__main__":
