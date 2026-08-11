@@ -69,96 +69,125 @@ reduction_local_validate_n() {
     fi
 }
 
+# Parse one reduction workflow flag. Returns 0 if consumed; sets REDUCTION_CLI_SHIFT.
+reduction_cli_try_parse() {
+    REDUCTION_CLI_SHIFT=0
+
+    case "$1" in
+        --gap-fill-dir)
+            [[ $# -ge 2 ]] || { echo "error: --gap-fill-dir requires a value" >&2; exit 2; }
+            gap_fill_dir="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        --new-coverage-csv)
+            [[ $# -ge 2 ]] || { echo "error: --new-coverage-csv requires a value" >&2; exit 2; }
+            new_coverage_csv="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        --candidate-tests-dir)
+            [[ $# -ge 2 ]] || { echo "error: --candidate-tests-dir requires a value" >&2; exit 2; }
+            candidate_tests_dir="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        --output-dir)
+            [[ $# -ge 2 ]] || { echo "error: --output-dir requires a value" >&2; exit 2; }
+            output_dir="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        -n|--n)
+            [[ $# -ge 2 ]] || { echo "error: $1 requires a value" >&2; exit 2; }
+            reduction_n="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        --scaffold-only)
+            scaffold_only=1
+            REDUCTION_CLI_SHIFT=1
+            return 0
+            ;;
+        --template-dir)
+            [[ $# -ge 2 ]] || { echo "error: --template-dir requires a value" >&2; exit 2; }
+            template_dir="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        --pipeline)
+            [[ $# -ge 2 ]] || { echo "error: --pipeline requires a value" >&2; exit 2; }
+            pipeline="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        --with-creduce)
+            with_creduce=1
+            REDUCTION_CLI_SHIFT=1
+            return 0
+            ;;
+        --creduce-n)
+            [[ $# -ge 2 ]] || { echo "error: --creduce-n requires a value" >&2; exit 2; }
+            creduce_n="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        --pass-under-test)
+            [[ $# -ge 2 ]] || { echo "error: --pass-under-test requires a value" >&2; exit 2; }
+            pass_under_test="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        --mtriple)
+            [[ $# -ge 2 ]] || { echo "error: --mtriple requires a value" >&2; exit 2; }
+            mtriple="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        --mir-codegen-only)
+            mir_codegen_only=1
+            REDUCTION_CLI_SHIFT=1
+            return 0
+            ;;
+        --extract-mir-output)
+            [[ $# -ge 2 ]] || { echo "error: --extract-mir-output requires a value" >&2; exit 2; }
+            extract_mir_output="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        --extract-ir-output)
+            [[ $# -ge 2 ]] || { echo "error: --extract-ir-output requires a value" >&2; exit 2; }
+            extract_ir_output="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        --llvm-repo)
+            [[ $# -ge 2 ]] || { echo "error: --llvm-repo requires a value" >&2; exit 2; }
+            llvm_repo="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        --llvm-bin)
+            [[ $# -ge 2 ]] || { echo "error: --llvm-bin requires a value" >&2; exit 2; }
+            llvm_bin="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        --instrumented-bin-dir)
+            [[ $# -ge 2 ]] || { echo "error: --instrumented-bin-dir requires a value" >&2; exit 2; }
+            instrumented_bin_dir="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 reduction_local_parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --gap-fill-dir)
-                [[ $# -ge 2 ]] || { echo "error: --gap-fill-dir requires a value" >&2; exit 2; }
-                gap_fill_dir="$2"
-                shift 2
-                ;;
-            --new-coverage-csv)
-                [[ $# -ge 2 ]] || { echo "error: --new-coverage-csv requires a value" >&2; exit 2; }
-                new_coverage_csv="$2"
-                shift 2
-                ;;
-            --candidate-tests-dir)
-                [[ $# -ge 2 ]] || { echo "error: --candidate-tests-dir requires a value" >&2; exit 2; }
-                candidate_tests_dir="$2"
-                shift 2
-                ;;
-            --output-dir)
-                [[ $# -ge 2 ]] || { echo "error: --output-dir requires a value" >&2; exit 2; }
-                output_dir="$2"
-                shift 2
-                ;;
-            -n|--n)
-                [[ $# -ge 2 ]] || { echo "error: $1 requires a value" >&2; exit 2; }
-                reduction_n="$2"
-                shift 2
-                ;;
-            --scaffold-only)
-                scaffold_only=1
-                shift
-                ;;
-            --template-dir)
-                [[ $# -ge 2 ]] || { echo "error: --template-dir requires a value" >&2; exit 2; }
-                template_dir="$2"
-                shift 2
-                ;;
-            --pipeline)
-                [[ $# -ge 2 ]] || { echo "error: --pipeline requires a value" >&2; exit 2; }
-                pipeline="$2"
-                shift 2
-                ;;
-            --with-creduce)
-                with_creduce=1
-                shift
-                ;;
-            --creduce-n)
-                [[ $# -ge 2 ]] || { echo "error: --creduce-n requires a value" >&2; exit 2; }
-                creduce_n="$2"
-                shift 2
-                ;;
-            --pass-under-test)
-                [[ $# -ge 2 ]] || { echo "error: --pass-under-test requires a value" >&2; exit 2; }
-                pass_under_test="$2"
-                shift 2
-                ;;
-            --mtriple)
-                [[ $# -ge 2 ]] || { echo "error: --mtriple requires a value" >&2; exit 2; }
-                mtriple="$2"
-                shift 2
-                ;;
-            --mir-codegen-only)
-                mir_codegen_only=1
-                shift
-                ;;
-            --extract-mir-output)
-                [[ $# -ge 2 ]] || { echo "error: --extract-mir-output requires a value" >&2; exit 2; }
-                extract_mir_output="$2"
-                shift 2
-                ;;
-            --extract-ir-output)
-                [[ $# -ge 2 ]] || { echo "error: --extract-ir-output requires a value" >&2; exit 2; }
-                extract_ir_output="$2"
-                shift 2
-                ;;
-            --llvm-repo)
-                [[ $# -ge 2 ]] || { echo "error: --llvm-repo requires a value" >&2; exit 2; }
-                llvm_repo="$2"
-                shift 2
-                ;;
-            --llvm-bin)
-                [[ $# -ge 2 ]] || { echo "error: --llvm-bin requires a value" >&2; exit 2; }
-                llvm_bin="$2"
-                shift 2
-                ;;
-            --instrumented-bin-dir)
-                [[ $# -ge 2 ]] || { echo "error: --instrumented-bin-dir requires a value" >&2; exit 2; }
-                instrumented_bin_dir="$2"
-                shift 2
-                ;;
             --help|-h)
                 usage
                 exit 0
@@ -167,13 +196,12 @@ reduction_local_parse_args() {
                 shift
                 break
                 ;;
-            -*)
-                echo "error: unknown option: $1" >&2
-                usage >&2
-                exit 2
-                ;;
             *)
-                echo "error: unexpected argument: $1" >&2
+                if reduction_cli_try_parse "$1" "${2:-}"; then
+                    shift "${REDUCTION_CLI_SHIFT}"
+                    continue
+                fi
+                echo "error: unknown option: $1" >&2
                 usage >&2
                 exit 2
                 ;;
@@ -237,6 +265,8 @@ reduction_local_validate_required_paths() {
 reduction_local_prepare_paths() {
     mkdir -p "$output_dir"
     output_dir="$(realpath "$output_dir")"
+    new_coverage_csv="$(realpath "$new_coverage_csv")"
+    candidate_tests_dir="$(realpath "$candidate_tests_dir")"
     if [[ -n "$template_dir" ]]; then
         template_dir="$(realpath "$template_dir")"
     fi
