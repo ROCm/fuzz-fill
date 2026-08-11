@@ -1,6 +1,6 @@
 # Shared AMDGPU llvm-lit --filter= regex fragments for baseline coverage runs.
-# Sourced by scripts/gap-filling-amdgpu.sh and
-# scripts/docker/gap-finding-pr.sh (default for amdgpu allowlist).
+# Sourced by scripts/lib/lit-filters.sh (via --backend-tests amdgpu) and referenced
+# by scripts/docker/gap-finding-pr.sh for default amdgpu allowlist filters.
 
 AMDGPU_LIT_FILTERS=(
     CodeGen/AMDGPU
