@@ -89,11 +89,18 @@ echo "Using coverage profile:"
 echo "  uncovered lines: ${line_coverage_uncovered_csv}"
 echo "  address map:     ${llc_address_line_map_csv}"
 echo "  candidate dir:   ${candidate_tests_dir} (n=${candidate_n})"
+if [[ -n "$settings_csv" ]]; then
+    echo "  settings csv:    ${settings_csv}"
+fi
 echo
 
 rm -rf "$candidate_tests_output_dir" "$incremental_output_dir"
 
-run_candidate_test "$candidate_tests_output_dir" "$candidate_tests_dir" "$candidate_n"
+run_candidate_test \
+    "$candidate_tests_output_dir" \
+    "$candidate_tests_dir" \
+    "$candidate_n" \
+    "$settings_csv"
 
 run_incremental \
     "$incremental_output_dir" \

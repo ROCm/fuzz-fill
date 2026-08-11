@@ -1,0 +1,2 @@
+llc_flags
+-O2 -global-isel=0

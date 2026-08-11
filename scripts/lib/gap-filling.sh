@@ -14,6 +14,7 @@ run_candidate_test() {
     local output_dir="$1"
     local candidate_tests_dir="$2"
     local n="$3"
+    local settings_csv="${4:-}"
 
     local -a args=(
         python -m coverage candidate-test
@@ -24,6 +25,9 @@ run_candidate_test() {
 
     if [[ -n "${COVERAGE_LLC:-}" ]]; then
         args+=(--llc "$COVERAGE_LLC")
+    fi
+    if [[ -n "$settings_csv" ]]; then
+        args+=(--settings-csv "$settings_csv")
     fi
     if [[ -n "${JOBS:-}" ]]; then
         args+=(-j "$JOBS")

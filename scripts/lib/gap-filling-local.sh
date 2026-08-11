@@ -18,6 +18,7 @@ gap_filling_local_source_libs() {
     llc_address_line_map_csv=""
     candidate_tests_dir=""
     candidate_n=""
+    settings_csv=""
     jobs=""
     llvm_repo=""
     llvm_bin=""
@@ -34,6 +35,7 @@ EOF
 
 gap_filling_local_usage_common_options() {
     cat <<EOF
+  --settings-csv <path>           Optional llc flag variants CSV for candidate-test
   -j <n>, --jobs <n>              Parallel jobs for candidate-test
   --help, -h                      Show this help
 EOF
@@ -73,6 +75,11 @@ gap_filling_local_parse_args() {
             -n|--n)
                 [[ $# -ge 2 ]] || { echo "error: $1 requires a value" >&2; exit 2; }
                 candidate_n="$2"
+                shift 2
+                ;;
+            --settings-csv)
+                [[ $# -ge 2 ]] || { echo "error: --settings-csv requires a value" >&2; exit 2; }
+                settings_csv="$2"
                 shift 2
                 ;;
             --llvm-repo)
@@ -172,6 +179,10 @@ gap_filling_local_validate_required_paths() {
         echo "error: --candidate-tests-dir is not a directory: ${candidate_tests_dir}" >&2
         return 1
     fi
+    if [[ -n "$settings_csv" ]] && [[ ! -f "$settings_csv" ]]; then
+        echo "error: --settings-csv is not a file: ${settings_csv}" >&2
+        return 1
+    fi
 
     validate_jobs "$jobs"
     resolve_gap_profile_csv_paths line_coverage_uncovered_csv llc_address_line_map_csv
@@ -182,6 +193,9 @@ gap_filling_local_prepare_output_dir() {
     mkdir -p "$output_dir"
     output_dir="$(realpath "$output_dir")"
     candidate_tests_dir="$(realpath "$candidate_tests_dir")"
+    if [[ -n "$settings_csv" ]]; then
+        settings_csv="$(realpath "$settings_csv")"
+    fi
 }
 
 gap_filling_local_setup_llvm_env() {
