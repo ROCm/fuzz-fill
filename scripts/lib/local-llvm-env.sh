@@ -31,6 +31,11 @@ require_local_coverage_bins() {
     require_bin "$INSTRUMENTED_BIN_DIR" opt
 }
 
+require_local_gap_fill_bins() {
+    require_bin "$LLVM_BIN" sancov
+    require_bin "$INSTRUMENTED_BIN_DIR" llc
+}
+
 require_local_reduce_bins() {
     require_bin "$INSTRUMENTED_BIN_DIR" llc
     require_bin "$LLVM_BIN" llvm-reduce

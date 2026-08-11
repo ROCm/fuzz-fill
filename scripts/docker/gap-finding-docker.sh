@@ -189,12 +189,13 @@ docker_gap_finding_validate_image_selection() {
 }
 
 docker_gap_finding_prepare_and_run() {
-    local -n _env=$1
+    local env_array_name="$1"
+    local -n _env="$env_array_name"
 
-    docker_gap_append_jobs_env _env
+    docker_gap_append_jobs_env "$env_array_name"
 
     local extra_mounts=()
     docker_gap_append_bind_repo_mount extra_mounts
 
-    docker_gap_run "$CONTAINER_SCRIPT" "$output_dir" "$image_ref" _env extra_mounts
+    docker_gap_run "$CONTAINER_SCRIPT" "$output_dir" "$image_ref" "$env_array_name" extra_mounts
 }

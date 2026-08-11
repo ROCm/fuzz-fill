@@ -41,6 +41,27 @@
 # TARGET: file,line,text
 # TARGET: {{.*}}SIFoldOperands.cpp,1712,
 
+# COM: Gap filling (baseline gaps): pinned candidate from integration-tests/e2e/fixtures/.
+# COM: Recalibrate GAP_FILL_* FileCheck lines if the fixture .bc or amdgpu baseline changes:
+# COM: run gap-filling.sh against this test's gap-finding artifacts and update the prefixes below.
+# RUN: %repo-root/scripts/gap-filling.sh --output-dir %t/gap-fill-baseline --line-coverage-uncovered-csv %t/out/baseline/line_coverage_uncovered.csv --llc-address-line-map-csv %t/out/baseline/llc_address_line_map.csv --candidate-tests-dir %S/../fixtures/candidate-tests --settings-csv %S/../fixtures/candidate-test-settings-e2e.csv -n 1 --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin -j 2
+# RUN: test -f %t/gap-fill-baseline/candidate_tests/candidate_test_manifest.csv
+# RUN: test -f %t/gap-fill-baseline/incremental/new_coverage.csv
+# RUN: %FileCheck %s --input-file=%t/gap-fill-baseline/incremental/new_coverage.csv --check-prefix=GAP_FILL_BASELINE
+# GAP_FILL_BASELINE-DAG: test_0_0000a5c12a4ab6566d1f8bf7495ff7fa30d9c93f326071d7e75cea0a1172a0c5.bc,{{.*}}/AMDGPUAttributor.cpp,1379,
+# GAP_FILL_BASELINE-DAG: test_0_0000a5c12a4ab6566d1f8bf7495ff7fa30d9c93f326071d7e75cea0a1172a0c5.bc,{{.*}}/AMDGPUCallLowering.cpp,567,
+# GAP_FILL_BASELINE-DAG: test_0_0000a5c12a4ab6566d1f8bf7495ff7fa30d9c93f326071d7e75cea0a1172a0c5.bc,{{.*}}/AMDGPUISelDAGToDAG.cpp,2805,
+# GAP_FILL_BASELINE-DAG: test_0_0000a5c12a4ab6566d1f8bf7495ff7fa30d9c93f326071d7e75cea0a1172a0c5.bc,{{.*}}/AMDGPUInstructionSelector.cpp,6832,
+# GAP_FILL_BASELINE-DAG: test_0_0000a5c12a4ab6566d1f8bf7495ff7fa30d9c93f326071d7e75cea0a1172a0c5.bc,{{.*}}/AMDGPULegalizerInfo.cpp,4415,
+
+# COM: Gap filling (PR gaps): PR-added uncovered lines; fuzz input must not fill SIFoldOperands.cpp:1712.
+# RUN: %repo-root/scripts/gap-filling.sh --output-dir %t/gap-fill-pr --line-coverage-uncovered-csv %t/out/commit_lines_report/target_lines_uncovered.csv --llc-address-line-map-csv %t/out/baseline/llc_address_line_map.csv --candidate-tests-dir %S/../fixtures/candidate-tests --settings-csv %S/../fixtures/candidate-test-settings-e2e.csv -n 1 --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin -j 2
+# RUN: test -f %t/gap-fill-pr/incremental/new_coverage.csv
+# RUN: %FileCheck %s --input-file=%t/gap-fill-pr/incremental/new_coverage.csv --check-prefix=GAP_FILL_PR_HDR
+# GAP_FILL_PR_HDR: test_name,file,line,covered-points
+# RUN: %FileCheck %s --input-file=%t/gap-fill-pr/incremental/new_coverage.csv --check-prefix=GAP_FILL_PR_NOT
+# GAP_FILL_PR_NOT-NOT: SIFoldOperands.cpp,1712,
+
 # COM: Drop the llvm-project clone and sancov build after coverage runs to save disk space.
 # COM: Delete at the end so it is deleted only on success.
 # RUN: rm -rf %t/llvm-project %t/build-sancov %t/build-sancov-helpers
