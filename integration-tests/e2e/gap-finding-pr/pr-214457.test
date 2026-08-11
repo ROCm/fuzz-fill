@@ -61,3 +61,7 @@
 # GAP_FILL_PR_HDR: test_name,file,line,covered-points
 # RUN: %FileCheck %s --input-file=%t/gap-fill-pr/incremental/new_coverage.csv --check-prefix=GAP_FILL_PR_NOT
 # GAP_FILL_PR_NOT-NOT: SIFoldOperands.cpp,1712,
+
+# COM: Drop the llvm-project clone and sancov build after coverage runs to save disk space.
+# COM: Delete at the end so it is deleted only on success.
+# RUN: rm -rf %t/llvm-project %t/build-sancov %t/build-sancov-helpers
