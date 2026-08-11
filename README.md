@@ -669,9 +669,11 @@ Lines added or changed in LLVM pull requests that baseline coverage (including t
 | 2026-08-04 | [#212507](https://github.com/llvm/llvm-project/pull/212507#issuecomment-5179801936) | [AMDGPU] FLAT_SCRATCH in SILoadStoreOptimizer |
 | 2026-08-04 | [#212536](https://github.com/llvm/llvm-project/pull/212536#issuecomment-5179822882) | [AMDGPU] MachinePipeliner support |
 | 2026-08-04 | [#212539](https://github.com/llvm/llvm-project/pull/212539#issuecomment-5179840636) | [AMDGPU] Register pressure of pipelined loops |
+| 2026-08-05 | [#212305](https://github.com/llvm/llvm-project/pull/212305#event-29086350474) | [AMDGPU] Fold fsub into fma_mix via free neg_lo modifier |
 
 #### SPIR-V
 
 | Date | PR | Summary |
 |------|-----|---------|
 | 2026-08-05 | [#212999](https://github.com/llvm/llvm-project/pull/212999#issuecomment-5193889662) | [SPIRV] Legalize byte-buffer reinterpretation ptrcasts |
+| 2026-08-05 | [#213986](https://github.com/llvm/llvm-project/pull/213986#issuecomment-5193921835) | [OpenCL][Clang] Add support for cooperative matrix extension |
