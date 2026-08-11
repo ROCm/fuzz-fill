@@ -42,25 +42,25 @@ $(gap_filling_local_usage_common_options)
 
 Examples:
   $(basename "$0") \\
-      --output-dir ./data/gap-fill \\
-      --line-coverage-uncovered-csv ./data/gap-finding/baseline/line_coverage_uncovered.csv \\
-      --llc-address-line-map-csv ./data/gap-finding/baseline/llc_address_line_map.csv \\
-      --candidate-tests-dir /path/to/corpus \\
+      --output-dir ./gap-fill-out \\
+      --line-coverage-uncovered-csv ./line_coverage_uncovered.csv \\
+      --llc-address-line-map-csv ./llc_address_line_map.csv \\
+      --candidate-tests-dir ./corpus \\
       -n 100 \\
-      --llvm-repo /path/llvm-project \\
-      --llvm-bin /path/llvm-project/build-sancov/bin \\
-      --instrumented-bin-dir /path/llvm-project/build-sancov/bin \\
+      --llvm-repo ./llvm-project \\
+      --llvm-bin ./llvm-project/build/bin \\
+      --instrumented-bin-dir ./llvm-project/build-sancov/bin \\
       -j "\$(nproc)"
 
   $(basename "$0") \\
-      --output-dir ./data/gap-fill-pr \\
-      --line-coverage-uncovered-csv ./data/gap-finding-pr/commit_lines_report/target_lines_uncovered.csv \\
-      --llc-address-line-map-csv ./data/gap-finding-pr/baseline/llc_address_line_map.csv \\
-      --candidate-tests-dir /path/to/corpus \\
+      --output-dir ./gap-fill-out \\
+      --line-coverage-uncovered-csv ./target_lines_uncovered.csv \\
+      --llc-address-line-map-csv ./llc_address_line_map.csv \\
+      --candidate-tests-dir ./corpus \\
       -n 100 \\
-      --llvm-repo /path/llvm-project \\
-      --llvm-bin /path/llvm-project/build-sancov/bin \\
-      --instrumented-bin-dir /path/llvm-project/build-sancov/bin \\
+      --llvm-repo ./llvm-project \\
+      --llvm-bin ./llvm-project/build/bin \\
+      --instrumented-bin-dir ./llvm-project/build-sancov/bin \\
       -j "\$(nproc)"
 EOF
 }
