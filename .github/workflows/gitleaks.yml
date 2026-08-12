@@ -40,10 +40,6 @@ on:
         required: false
         type: string
         default: "."
-# Reusable workflows declare the *minimum* permissions every caller
-# must grant.
-permissions:
-  contents: read
 
 jobs:
   scan:
