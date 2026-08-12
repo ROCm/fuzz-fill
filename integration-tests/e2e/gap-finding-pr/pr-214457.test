@@ -59,6 +59,10 @@
 # RUN: %FileCheck %s --input-file=%t/gap-fill-pr/incremental/new_coverage.csv --check-prefix=GAP_FILL_PR_NOT
 # GAP_FILL_PR_NOT-NOT: SIFoldOperands.cpp,1712,
 
+# COM: Optional reduction (pass --param e2e_reduce=1): full llvm-reduce on the first
+# COM: baseline gap-fill hit; assert reduced.ll exists and is smaller than disassembled input.
+# RUN: %repo-root/scripts/e2e/run-reduction-if-enabled.sh --gap-fill-dir %t/gap-fill-baseline --candidate-corpus-dir %S/../fixtures/candidate-tests --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin
+
 # COM: Drop the llvm-project clone and sancov build after coverage runs to save disk space.
 # COM: Delete at the end so it is deleted only on success.
 # RUN: rm -rf %t/llvm-project %t/build-sancov %t/build-sancov-helpers
