@@ -30,6 +30,7 @@ from coverage.lit_config import (
     seed_lit_priority_test_times,
 )
 from coverage.line_coverage_summary import write_line_coverage_summary_splits
+from coverage.revision_check import record_baseline_revision
 from coverage.sancov import Sancov
 from fuzz_fill.log import get_logger, log_timing, run_subprocess
 
@@ -135,6 +136,7 @@ class TestRunner:
             with log_timing(logger, "lit test suite"):
                 self.run_lit_tests()
             self.get_aggregate_coverage()
+            record_baseline_revision(self.filepaths.llvm_lit, self.filepaths.output_dir)
         elif self.mode == "standalone":
             asyncio.run(self.run_standalone_tests())
         else:

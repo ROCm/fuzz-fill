@@ -20,7 +20,7 @@ def _write_csv(path: Path, rows: list[list[object]]) -> None:
 
 
 def _run_source_mismatch_check(
-    root: Path, source_text: str, target_text: str
+    root: Path, source_text: str, target_text: str, source_text_check: bool = True
 ) -> list[dict[str, str]]:
     """Run target-lines with one uncovered ``Foo.cpp:2`` row and return the report rows.
 
@@ -45,6 +45,7 @@ def _run_source_mismatch_check(
         llvm_repo=root,
         target_lines_csv=target_csv,
         report_path=report,
+        source_text_check=source_text_check,
     )
 
     with report.open(newline="", encoding="utf-8") as f:
@@ -111,14 +112,26 @@ class RunTargetLinesCheckTest(unittest.TestCase):
                     report_path=root / "out.csv",
                 )
 
-    def test_line_text_mismatch_against_baseline_source_is_dropped(self) -> None:
+    def test_line_text_mismatch_against_baseline_source_is_an_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit) as ctx:
+                _run_source_mismatch_check(
+                    Path(tmp),
+                    source_text="line one\nold second line\nline three\n",
+                    target_text="new second line",
+                )
+            self.assertIn("do not match the source on disk", str(ctx.exception))
+
+    def test_line_text_mismatch_reported_when_check_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rows = _run_source_mismatch_check(
                 Path(tmp),
                 source_text="line one\nold second line\nline three\n",
                 target_text="new second line",
+                source_text_check=False,
             )
-            self.assertEqual(rows, [])
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["line"], "2")
 
     def test_line_text_match_against_baseline_source_is_reported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

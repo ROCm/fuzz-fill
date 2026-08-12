@@ -282,6 +282,25 @@ def main():
         required=True,
         help="CSV of source lines to check (columns path, line_no, text).",
     )
+    p_target_lines.add_argument(
+        "--commit-check",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Fail when the COMMIT files written by `coverage baseline` and "
+            "`added_lines` disagree with each other or with HEAD of "
+            "--llvm-repo (default: enabled)."
+        ),
+    )
+    p_target_lines.add_argument(
+        "--source-text-check",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Fail when a target line differs from the source on disk at that "
+            "line number (default: enabled)."
+        ),
+    )
 
     args = parser.parse_args()
     configure_logging(
@@ -388,6 +407,8 @@ def main():
                 llvm_repo=args.llvm_repo,
                 target_lines_csv=args.target_lines_csv,
                 report_path=report_path,
+                commit_check=args.commit_check,
+                source_text_check=args.source_text_check,
             )
 
     else:
