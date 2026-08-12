@@ -1,2 +1,2 @@
 llc_flags
--O2 -global-isel=0
+-O0 -global-isel=0
