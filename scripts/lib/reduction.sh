@@ -30,6 +30,9 @@ run_batch_from_coverage() {
     if [[ -n "${COVERAGE_LLVM_REDUCE:-}" ]]; then
         args+=(--llvm-reduce "$COVERAGE_LLVM_REDUCE")
     fi
+    if [[ -n "${REDUCTION_CORPUS_DIR:-}" ]]; then
+        args+=(--corpus-dir "$REDUCTION_CORPUS_DIR")
+    fi
 
     args+=("$@")
 

@@ -6,16 +6,18 @@
 : "${REPO_ROOT:?REPO_ROOT must be set before sourcing reduction-local.sh}"
 
 reduction_local_source_libs() {
+    local scripts_lib="${REPO_ROOT}/scripts/lib"
     # shellcheck source=scripts/lib/common.sh
-    source "${SCRIPT_DIR}/lib/common.sh"
+    source "${scripts_lib}/common.sh"
     # shellcheck source=scripts/lib/local-llvm-env.sh
-    source "${SCRIPT_DIR}/lib/local-llvm-env.sh"
+    source "${scripts_lib}/local-llvm-env.sh"
     # shellcheck source=scripts/lib/gap-artifacts.sh
-    source "${SCRIPT_DIR}/lib/gap-artifacts.sh"
+    source "${scripts_lib}/gap-artifacts.sh"
 
     gap_fill_dir=""
     new_coverage_csv=""
     candidate_tests_dir=""
+    candidate_corpus_dir=""
     output_dir=""
     reduction_n=""
     scaffold_only=0
@@ -46,6 +48,7 @@ reduction_local_usage_common_options() {
   --gap-fill-dir <path>           Gap-fill output (derives new_coverage.csv + candidate_tests/)
   --new-coverage-csv <path>       Override incremental/new_coverage.csv path
   --candidate-tests-dir <path>    Override candidate_tests/ path
+  --candidate-corpus-dir <path>     Fuzz corpus root from gap filling (resolves test.sh inputs)
   --output-dir <path>             Case output directory (default: <gap-fill-dir>/reduced/)
   -n <N>, --n <N>                 Reduce the first N gap-fill hits (required)
   --scaffold-only                 Create case dirs only; do not run llvm-reduce
@@ -89,6 +92,12 @@ reduction_cli_try_parse() {
         --candidate-tests-dir)
             [[ $# -ge 2 ]] || { echo "error: --candidate-tests-dir requires a value" >&2; exit 2; }
             candidate_tests_dir="$2"
+            REDUCTION_CLI_SHIFT=2
+            return 0
+            ;;
+        --candidate-corpus-dir)
+            [[ $# -ge 2 ]] || { echo "error: --candidate-corpus-dir requires a value" >&2; exit 2; }
+            candidate_corpus_dir="$2"
             REDUCTION_CLI_SHIFT=2
             return 0
             ;;
@@ -259,6 +268,11 @@ reduction_local_validate_required_paths() {
         fi
     fi
 
+    if [[ -n "$candidate_corpus_dir" && ! -d "$candidate_corpus_dir" ]]; then
+        echo "error: --candidate-corpus-dir is not a directory: ${candidate_corpus_dir}" >&2
+        return 1
+    fi
+
     return 0
 }
 
@@ -267,6 +281,10 @@ reduction_local_prepare_paths() {
     output_dir="$(realpath "$output_dir")"
     new_coverage_csv="$(realpath "$new_coverage_csv")"
     candidate_tests_dir="$(realpath "$candidate_tests_dir")"
+    if [[ -n "$candidate_corpus_dir" ]]; then
+        candidate_corpus_dir="$(realpath "$candidate_corpus_dir")"
+        export REDUCTION_CORPUS_DIR="$candidate_corpus_dir"
+    fi
     if [[ -n "$template_dir" ]]; then
         template_dir="$(realpath "$template_dir")"
     fi

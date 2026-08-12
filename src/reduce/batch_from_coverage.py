@@ -116,6 +116,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Process at most the first N CSV data rows (default: all rows).",
     )
+    p.add_argument(
+        "--corpus-dir",
+        type=Path,
+        default=None,
+        help="Fuzz corpus root used during gap filling (resolves .ll/.bc paths from test.sh).",
+    )
     return p
 
 
@@ -134,6 +140,7 @@ def _process_rows(
     rows: list[dict[str, str]],
     *,
     candidate_tests: Path,
+    corpus_dir: Path | None,
     out_parent: Path,
     pass_ids: list[str],
     templates: BatchTemplateContext,
@@ -157,7 +164,12 @@ def _process_rows(
             continue
         try:
             covered, hexes_sorted = resolve_covered_hexes(row["covered-points"])
-            test_info = parse_test_sh(candidate_tests / row["test_name"].strip() / "test.sh")
+            test_name = row["test_name"].strip()
+            test_info = parse_test_sh(
+                candidate_tests / test_name / "test.sh",
+                test_name=test_name,
+                corpus_dir=corpus_dir,
+            )
             row_pipeline = build_pipeline_steps(
                 pass_ids,
                 pass_under_test=pass_under_test,
@@ -169,7 +181,7 @@ def _process_rows(
             )
             amb, dest = prepare_test_case(
                 row_index=i,
-                test_name=row["test_name"].strip(),
+                test_name=test_name,
                 test_info=test_info,
                 file_col=row["file"].strip(),
                 line=line,
@@ -243,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     candidate_tests = args.candidate_tests.resolve()
+    corpus_dir = args.corpus_dir.resolve() if args.corpus_dir is not None else None
     out_parent = args.output.resolve()
     out_parent.mkdir(parents=True, exist_ok=True)
     template_dir = args.template_dir.resolve()
@@ -286,6 +299,7 @@ def main(argv: list[str] | None = None) -> int:
     return _process_rows(
         rows,
         candidate_tests=candidate_tests,
+        corpus_dir=corpus_dir,
         out_parent=out_parent,
         pass_ids=pass_ids,
         templates=templates,

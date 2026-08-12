@@ -93,6 +93,7 @@ Image build (optional; reuses existing image when omitted):
 
 Options:
   --output-dir <path>           Host output directory (default: <gap-fill-dir>/reduced/)
+  --candidate-corpus-dir <path> Host fuzz corpus from gap filling (bind-mounted at /mounted-candidate-tests)
   --bind-repo                   Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
   --scaffold-only               Create case dirs only; do not run llvm-reduce
   --template-dir <path>         interesting_ir.sh template (default: example/amd/new-test-1)
@@ -172,6 +173,9 @@ echo "Using gap-fill output:"
 echo "  gap-fill dir:    ${gap_fill_dir}"
 echo "  new coverage:    ${new_coverage_csv}"
 echo "  candidate tests: ${candidate_tests_dir}"
+if [[ -n "$candidate_corpus_dir" ]]; then
+    echo "  candidate corpus: ${candidate_corpus_dir}"
+fi
 echo "  output dir:      ${output_dir} (n=${reduction_n})"
 if [[ "$scaffold_only" -eq 1 ]]; then
     echo "  mode:            scaffold-only"
@@ -196,6 +200,10 @@ docker_gap_append_jobs_env docker_env
 extra_mounts=(
     -v "${gap_fill_dir}:/mounted-gap-fill:ro"
 )
+if [[ -n "$candidate_corpus_dir" ]]; then
+    extra_mounts+=(-v "${candidate_corpus_dir}:/mounted-candidate-tests:ro")
+    docker_env+=(-e "REDUCTION_CORPUS_DIR=/mounted-candidate-tests")
+fi
 docker_gap_append_bind_repo_mount extra_mounts
 
 docker_gap_run "$CONTAINER_SCRIPT" "$output_dir" "$image_ref" docker_env extra_mounts
