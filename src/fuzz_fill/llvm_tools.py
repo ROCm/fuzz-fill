@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -81,7 +82,7 @@ def reduce_tools_from_args(
     llvm_dis: Path | None,
 ) -> ReduceTools:
     dis: Path | None = None
-    if llvm_dis is not None:
+    if llvm_dis is not None or os.environ.get(FUZZ_FILL_LLVM_DIS):
         dis = executable_from_flag_or_env(
             llvm_dis, FUZZ_FILL_LLVM_DIS, flag_name="--llvm-dis"
         )

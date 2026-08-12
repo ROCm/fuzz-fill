@@ -88,6 +88,7 @@ Use `spirv` instead of `amdgpu` for SPIR-V backend tests.
   - [Gap finding (PR) in Docker](#gap-finding-pr-in-docker)
   - [Gap filling in Docker](#gap-filling-in-docker)
   - [Reduction in Docker](#reduction-in-docker)
+  - [End-to-end workflow in Docker](#end-to-end-workflow-in-docker)
   - [Run integration tests](#run-integration-tests)
   - [Run a container](#run-a-container)
 - [Tests](#tests)
@@ -454,7 +455,7 @@ Optional commands outside the main workflows in fuzz-fill.
 
 The Docker image bundles an official LLVM release bootstrap, a dual-build SanitizerCoverage LLVM tree (instrumented `llc`/`opt` plus Release helpers), and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
 
-**Scripts** (under [`scripts/docker/`](scripts/docker/)): [`build-image.sh`](scripts/docker/build-image.sh), [`build-image-pr.sh`](scripts/docker/build-image-pr.sh), [`ensure-image.sh`](scripts/docker/ensure-image.sh), [`gap-finding-baseline.sh`](scripts/docker/gap-finding-baseline.sh), [`gap-finding-pr.sh`](scripts/docker/gap-finding-pr.sh), [`gap-filling.sh`](scripts/docker/gap-filling.sh), [`reduction.sh`](scripts/docker/reduction.sh), [`test-image.sh`](scripts/docker/test-image.sh), [`tmp-container.sh`](scripts/docker/tmp-container.sh)
+**Scripts** (under [`scripts/docker/`](scripts/docker/)): [`build-image.sh`](scripts/docker/build-image.sh), [`build-image-pr.sh`](scripts/docker/build-image-pr.sh), [`ensure-image.sh`](scripts/docker/ensure-image.sh), [`gap-finding-baseline.sh`](scripts/docker/gap-finding-baseline.sh), [`gap-finding-pr.sh`](scripts/docker/gap-finding-pr.sh), [`gap-filling.sh`](scripts/docker/gap-filling.sh), [`reduction.sh`](scripts/docker/reduction.sh), [`run-full-workflow.sh`](scripts/docker/run-full-workflow.sh), [`test-image.sh`](scripts/docker/test-image.sh), [`tmp-container.sh`](scripts/docker/tmp-container.sh)
 
 The image bakes a copy of fuzz-fill at `/work/fuzz-fill` when built. Pass **`--bind-repo`** on a docker runner to mount your local checkout over that path (venv stays at `/work/fuzz-fill-venv`) when you need code that is newer than the image.
 
@@ -618,7 +619,9 @@ Main output: `<output-dir>/incremental/new_coverage.csv`.
 
 ```bash
 ./scripts/docker/reduction.sh \
+  --bind-repo \
   --gap-fill-dir ./data/gap-fill-out \
+  --candidate-corpus-dir ./candidate-tests-dataset/amdgcn-amd-amdhsa \
   -n 1
 
 ./scripts/docker/reduction.sh \
@@ -626,6 +629,58 @@ Main output: `<output-dir>/incremental/new_coverage.csv`.
   -n 3 \
   --scaffold-only
 ```
+
+Pass **`--candidate-corpus-dir`** when gap filling used a bind-mounted fuzz corpus (required so reduction can resolve each test’s input `.bc`/`.ll` from `test.sh`). For **`.bc` inputs**, full reduction also needs `llvm-dis` (the image sets `FUZZ_FILL_LLVM_DIS`; with `--bind-repo`, your local checkout supplies the wiring).
+
+### End-to-end workflow in Docker
+
+[`scripts/docker/run-full-workflow.sh`](scripts/docker/run-full-workflow.sh) runs the full pipeline in one shot: **gap finding (baseline)** → **gap filling** → **reduction**. It is intended for local smoke testing of the Docker runners.
+
+**Prerequisites:** a built Docker image ([`build-image.sh`](#build)) and, for a real fuzz corpus, a local checkout of the candidate tests (for example `./candidate-tests-dataset/amdgcn-amd-amdhsa` — not baked into the image; gap filling bind-mounts it from the host).
+
+**`--bind-repo` is on by default** — every step mounts your local fuzz-fill checkout at `/work/fuzz-fill` (venv stays at `/work/fuzz-fill-venv`). Use **`--no-bind-repo`** to run the copy baked into the image instead.
+
+Quick smoke test (tiny fixture corpus, scaffold-only reduction):
+
+```bash
+./scripts/docker/run-full-workflow.sh
+```
+
+Full reduction with the AMDGPU fuzz corpus:
+
+```bash
+CORPUS=./candidate-tests-dataset/amdgcn-amd-amdhsa \
+  GAP_FILL_N=20 \
+  FULL_REDUCE=1 \
+  ./scripts/docker/run-full-workflow.sh
+```
+
+Build the image first, then run the workflow:
+
+```bash
+LLVM=/path/to/llvm-project ./scripts/docker/run-full-workflow.sh --build-image
+```
+
+| Option / env | Meaning |
+|--------------|---------|
+| `--build-image` | Build `fuzz-fill-test:latest` before running (pass `LLVM=...` if not `../llvm-project`) |
+| `--no-bind-repo` | Use fuzz-fill from the image instead of mounting the local checkout |
+| `DATA` | Output root (default: `./data/workflow-test`) |
+| `CORPUS` | Fuzz corpus for gap filling and reduction (default: `integration-tests/fixtures/coverage-new-tests`) |
+| `GAP_FILL_N` | Run the first *N* candidate tests from `CORPUS` (default: `1`) |
+| `REDUCE_N` | Reduce the first *N* rows of `new_coverage.csv` (default: `1`) |
+| `FULL_REDUCE` | If `1`, run `llvm-reduce` (default: `0` = scaffold-only) |
+| `J` | Parallel jobs (default: `nproc`) |
+
+On success, outputs land under `$DATA` (default `./data/workflow-test/`):
+
+| Path | Contents |
+|------|----------|
+| `gap-finding/baseline/` | Baseline gap list |
+| `gap-fill/incremental/new_coverage.csv` | Gap-fill hits |
+| `gap-fill/reduced/t-00001-*/` | Reduction harness (and `reduced/reduced.ll` when `FULL_REDUCE=1`) |
+
+By default, reduction processes the **first row** of `new_coverage.csv`. To target a specific test, reorder or filter that CSV before re-running [`reduction.sh`](#reduction-in-docker), or increase `REDUCE_N`.
 
 ### Run integration tests
 

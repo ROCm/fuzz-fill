@@ -2,12 +2,14 @@
 # End-to-end Docker smoke test: gap finding -> gap filling -> reduction (scaffold).
 #
 # Usage (from repo root):
-#   ./scripts/docker/test-workflow.sh
-#   LLVM=/path/to/llvm-project ./scripts/docker/test-workflow.sh --build-image
-#   FULL_REDUCE=1 ./scripts/docker/test-workflow.sh
+#   ./scripts/docker/run-full-workflow.sh
+#   LLVM=/path/to/llvm-project ./scripts/docker/run-full-workflow.sh --build-image
+#   FULL_REDUCE=1 ./scripts/docker/run-full-workflow.sh
+#   CORPUS=./candidate-tests-dataset/amdgcn-amd-amdhsa GAP_FILL_N=20 ./scripts/docker/run-full-workflow.sh
 #
 # Environment:
 #   DATA          Output root (default: ./data/workflow-test)
+#   CORPUS        Fuzz corpus for gap filling and reduction (default: integration-tests/fixtures/coverage-new-tests)
 #   LLVM          llvm-project checkout for --build-image (default: ../llvm-project)
 #   J             Parallel jobs (default: nproc)
 #   FULL_REDUCE   If 1, run reduction without --scaffold-only (slow)
@@ -25,6 +27,7 @@ J="${J:-$(nproc)}"
 FULL_REDUCE="${FULL_REDUCE:-0}"
 REDUCE_N="${REDUCE_N:-1}"
 GAP_FILL_N="${GAP_FILL_N:-1}"
+CORPUS="${CORPUS:-${REPO_ROOT}/integration-tests/fixtures/coverage-new-tests}"
 BUILD_IMAGE=0
 BIND_REPO=(--bind-repo)
 
@@ -41,14 +44,16 @@ Options:
 
 Environment:
   DATA=${DATA}
+  CORPUS=${CORPUS}
   LLVM=<llvm-project checkout>
   J=${J}
   FULL_REDUCE=${FULL_REDUCE}  (1 = run llvm-reduce, not just scaffold)
   REDUCE_N=${REDUCE_N}
   GAP_FILL_N=${GAP_FILL_N}
 
-Example:
-  ./scripts/docker/test-workflow.sh --build-image
+Examples:
+  ./scripts/docker/run-full-workflow.sh --build-image
+  CORPUS=./candidate-tests-dataset/amdgcn-amd-amdhsa GAP_FILL_N=20 FULL_REDUCE=1 ./scripts/docker/run-full-workflow.sh
 EOF
 }
 
@@ -83,9 +88,14 @@ if [[ "$BUILD_IMAGE" -eq 1 ]]; then
     "${SCRIPT_DIR}/build-image.sh" --llvm-dir "$LLVM" --allowlist amdgpu -j "$J"
 fi
 
+if [[ ! -d "$CORPUS" ]]; then
+    echo "error: CORPUS is not a directory: ${CORPUS}" >&2
+    exit 1
+fi
+CORPUS="$(realpath "$CORPUS")"
+
 GAP_FINDING_OUT="${DATA}/gap-finding"
 GAP_FILL_OUT="${DATA}/gap-fill"
-CORPUS="${REPO_ROOT}/integration-tests/fixtures/coverage-new-tests"
 UNCOVERED_CSV="${GAP_FINDING_OUT}/baseline/line_coverage_uncovered.csv"
 LLC_MAP_CSV="${GAP_FINDING_OUT}/baseline/llc_address_line_map.csv"
 NEW_COVERAGE_CSV="${GAP_FILL_OUT}/incremental/new_coverage.csv"
@@ -99,7 +109,7 @@ echo "=== gap finding (baseline) ==="
     --lit-filter CodeGen/AMDGPU/loop \
     -j "$J"
 
-echo "=== gap filling ==="
+echo "=== gap filling (corpus=${CORPUS}, n=${GAP_FILL_N}) ==="
 "${SCRIPT_DIR}/gap-filling.sh" \
     "${BIND_REPO[@]}" \
     --output-dir "$GAP_FILL_OUT" \

@@ -34,6 +34,7 @@ if [[ "${IN_CONTAINER:-}" == 1 ]]; then
     else
         export COVERAGE_LLC="${FUZZ_FILL_LLC:-/work/llvm-build-sancov/bin/llc}"
         export COVERAGE_LLVM_REDUCE="${FUZZ_FILL_LLVM_REDUCE:-/work/llvm-build-sancov/bin/llvm-reduce}"
+        export COVERAGE_LLVM_DIS="${FUZZ_FILL_LLVM_DIS:-/work/llvm-build-sancov/bin/llvm-dis}"
     fi
 
     run_batch_from_coverage \
@@ -154,6 +155,7 @@ if [[ $# -gt 0 ]]; then
     exit 2
 fi
 
+REDUCTION_SKIP_HOST_LLVM=1
 if ! reduction_local_validate_required_paths; then
     usage >&2
     exit 1
@@ -179,6 +181,8 @@ fi
 echo "  output dir:      ${output_dir} (n=${reduction_n})"
 if [[ "$scaffold_only" -eq 1 ]]; then
     echo "  mode:            scaffold-only"
+else
+    echo "  mode:            full reduction (llvm tools from image)"
 fi
 
 rm -rf "${output_dir:?}"/*

@@ -117,6 +117,10 @@ RUN case "${SANCOV_INSTRUMENTATION_MODE:-bb}" in \
  && echo "${llvm_build_secs}" > /work/.llvm-build-time \
  && echo "=== fuzz-fill: LLVM build wall time: ${llvm_build_secs}s ==="
 
+# llvm-reduce is a Release helper (not instrumented); install from the bootstrap
+# toolchain so reduction works without rebuilding the entire sancov tree.
+RUN cp /work/llvm-release/bin/llvm-reduce /work/llvm-build-sancov/bin/llvm-reduce
+
 FROM ubuntu:24.04 AS final
 
 ARG DEBIAN_FRONTEND=noninteractive

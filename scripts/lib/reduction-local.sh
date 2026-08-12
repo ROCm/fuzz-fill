@@ -261,7 +261,7 @@ reduction_local_validate_required_paths() {
         return 1
     fi
 
-    if [[ "$scaffold_only" -eq 0 ]]; then
+    if [[ "$scaffold_only" -eq 0 && "${REDUCTION_SKIP_HOST_LLVM:-0}" -eq 0 ]]; then
         if [[ -z "$llvm_repo" || -z "$llvm_bin" || -z "$instrumented_bin_dir" ]]; then
             echo "error: --llvm-repo, --llvm-bin, and --instrumented-bin-dir are required unless --scaffold-only" >&2
             return 1

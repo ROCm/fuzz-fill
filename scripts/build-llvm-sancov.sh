@@ -162,6 +162,7 @@ HELPER_RELEASE_TARGETS=(
     llvm-objcopy
     llvm-readelf
     llvm-readobj
+    llvm-reduce
     llvm-strip
     yaml2obj
 )
