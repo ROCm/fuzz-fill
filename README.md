@@ -166,6 +166,7 @@ Under `$OUTPUT_DIR/baseline/`:
 | `line_coverage_uncovered.csv` | **Main gap list** — input to `target-lines` and downstream gap filling |
 | `llc_address_line_map.csv` | LLC address-to-line map (same baseline run as the gap list) |
 | `lit_failures.json` | Failed LIT tests (`name`, `code`, `output`, `elapsed`) |
+| `COMMIT` | Revision of the LLVM source tree the baseline ran against (omitted for a non-git tree) |
 | `processed_sancov/` | Merged symcov (debugging) |
 
 ---
@@ -243,6 +244,7 @@ Under `$OUTPUT_DIR`:
 | Path | Contents |
 |------|----------|
 | `added-lines/added-lines.csv` | Added lines from the commit (`path`, `line_no`, `text`) |
+| `added-lines/COMMIT` | Resolved hash of `--commit` |
 | `baseline/line_coverage_uncovered.csv` | Baseline uncovered lines |
 | `baseline/llc_address_line_map.csv` | LLC map from the baseline run |
 | `baseline/lit_failures.json` | Failed LIT tests from baseline |
@@ -283,6 +285,17 @@ PR gap finding input to `target-lines` remains `added-lines.csv` (`path`, `line_
 Default when omitted: `AMDGPU` (see `DEFAULT_LIT_FILTER_DIRS` in [`src/coverage/constants.py`](src/coverage/constants.py)).
 
 Baseline symcov CSVs include **all** instrumented source paths from the LIT run. Use `--source-filter` on `coverage incremental` to scope gap finding (default: `(?:^|/)llvm/lib/`; see `DEFAULT_SOURCE_CODE_FILTER` in [`src/coverage/constants.py`](src/coverage/constants.py)).
+
+### `coverage target-lines` consistency checks
+
+Both artifacts fed to `target-lines` must come from the same LLVM tree; a stale baseline otherwise reports coincidental line-number matches as gaps.
+
+| Flag | Meaning |
+|------|---------|
+| `--commit-check` / `--no-commit-check` | Compare the revisions recorded in the `COMMIT` files written by `coverage baseline` and `added_lines` against `HEAD` of `--llvm-repo` (default: enabled) |
+| `--source-text-check` / `--no-source-text-check` | Compare each target line text against the source on disk at that line number (default: enabled) |
+
+`coverage baseline` writes `COMMIT` with the revision of the source tree configured in the build's `lit.site.cfg.py`; `added_lines` writes `COMMIT` with the resolved hash of `--commit`. Either file being absent (for example a baseline from a non-git source tree) skips the revision check. The source-text check is the one that catches uncommitted local changes, which share a revision. Both stop with an error when unsatisfied.
 
 ### `coverage incremental` filters
 

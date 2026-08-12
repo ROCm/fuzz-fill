@@ -64,8 +64,8 @@ def _resolve_lit_site_path(site_cfg: Path, configured_path: str) -> Path:
     return Path(os.path.realpath(site_cfg.parent / configured_path))
 
 
-def llvm_test_source_root(llvm_lit: Path) -> Path:
-    """``llvm/test`` in the LLVM source tree configured by ``lit.site.cfg.py``."""
+def llvm_source_root(llvm_lit: Path) -> Path:
+    """``llvm/`` source tree configured by the build's ``lit.site.cfg.py``."""
     site_cfg = lit_site_config_path(llvm_lit)
     if not site_cfg.is_file():
         raise FileNotFoundError(
@@ -80,8 +80,12 @@ def llvm_test_source_root(llvm_lit: Path) -> Path:
             f"Could not parse config.llvm_src_root from {site_cfg}. "
             "Expected a generated lit.site.cfg.py from an LLVM build."
         )
-    llvm_src_root = _resolve_lit_site_path(site_cfg, match.group("path"))
-    return llvm_src_root / "test"
+    return _resolve_lit_site_path(site_cfg, match.group("path"))
+
+
+def llvm_test_source_root(llvm_lit: Path) -> Path:
+    """``llvm/test`` in the LLVM source tree configured by ``lit.site.cfg.py``."""
+    return llvm_source_root(llvm_lit) / "test"
 
 
 def filter_existing_lit_priority_tests(
