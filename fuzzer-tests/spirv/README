@@ -1,7 +1,0 @@
-llc test.ll -o /dev/null
-
-llc.real.2.ll ---> https://github.com/llvm/llvm-project/blob/af15474262100ade9a8fcfd05f9e05c7ba23ff8c/llvm/lib/Target/SPIRV/SPIRVEmitIntrinsics.cpp#L763
-llc.real.51.ll ---> https://github.com/llvm/llvm-project/blob/af15474262100ade9a8fcfd05f9e05c7ba23ff8c/llvm/lib/Target/SPIRV/SPIRVEmitIntrinsics.cpp#L1138
-llc.real.4.ll ---> https://github.com/llvm/llvm-project/blob/af15474262100ade9a8fcfd05f9e05c7ba23ff8c/llvm/lib/Target/SPIRV/SPIRVEmitIntrinsics.cpp#L2662
-llc.real.37.ll ---> https://github.com/llvm/llvm-project/blob/af15474262100ade9a8fcfd05f9e05c7ba23ff8c/llvm/lib/Target/SPIRV/SPIRVInstructionSelector.cpp#L2360
-llc.real.34.ll ---> https://github.com/llvm/llvm-project/blob/af15474262100ade9a8fcfd05f9e05c7ba23ff8c/llvm/lib/Target/SPIRV/SPIRVInstructionSelector.cpp#L2362
