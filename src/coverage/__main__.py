@@ -181,7 +181,7 @@ def main():
         default=None,
         help=(
             "CSV of llc flag variants (column llc_flags). "
-            "Default: -O0..-O3 crossed with -global-isel=0/1 (8 variants per input)."
+            "Default: -O0, -O1, -O2, -O3 (4 variants per input)."
         ),
     )
 
