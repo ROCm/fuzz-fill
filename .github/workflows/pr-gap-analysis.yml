@@ -162,9 +162,9 @@ jobs:
 
       - name: Write finding README
         run: |
-          pr_head="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq -r .head.sha)"
-          pr_head_ref="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq -r .head.ref)"
-          requested_at="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq -r .created_at)"
+          pr_head="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.sha')"
+          pr_head_ref="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.ref')"
+          requested_at="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq '.created_at')"
           {
             echo "PR gap finding report"
             echo "pr_id: ${INPUT_PR_ID}"
