@@ -1,7 +1,0 @@
-{
-    "https://github.com/llvm/llvm-project/blob/af15474262100ade9a8fcfd05f9e05c7ba23ff8c/llvm/lib/Target/SPIRV/SPIRVEmitIntrinsics.cpp#L763":"      {Ty = GetElementPtrInst::getTypeAtIndex(Ty, U.get()); abort();}\n",
-    "https://github.com/llvm/llvm-project/blob/af15474262100ade9a8fcfd05f9e05c7ba23ff8c/llvm/lib/Target/SPIRV/SPIRVEmitIntrinsics.cpp#L1138":"        {IsIncomplete = true; abort();}\n",
-    "https://github.com/llvm/llvm-project/blob/af15474262100ade9a8fcfd05f9e05c7ba23ff8c/llvm/lib/Target/SPIRV/SPIRVEmitIntrinsics.cpp#L2662":"      {abort(); return Ty;}\n",
-    "https://github.com/llvm/llvm-project/blob/af15474262100ade9a8fcfd05f9e05c7ba23ff8c/llvm/lib/Target/SPIRV/SPIRVInstructionSelector.cpp#L2360":"    {abort(); return SPIRV::OpLogicalEqual;}\n",
-    "https://github.com/llvm/llvm-project/blob/af15474262100ade9a8fcfd05f9e05c7ba23ff8c/llvm/lib/Target/SPIRV/SPIRVInstructionSelector.cpp#L2362":"    {abort(); return SPIRV::OpLogicalNotEqual;}\n"
-}
