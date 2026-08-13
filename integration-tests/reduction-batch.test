@@ -16,9 +16,9 @@
 # RUN: %FileCheck %s --input-file %t/out-n3/t-00002-test-b/config.json --check-prefix=CFG2
 # RUN: %FileCheck %s --input-file %t/out-n3/t-00002-test-b/interesting_ir.sh --check-prefix=IR2
 
-# CFG1: "line": 100,
 # CFG1: "file": "llvm/lib/Target/AMDGPU/FooA.cpp",
-# CFG2: "line": 200,
+# CFG1: "line": 100,
 # CFG2: "file": "llvm/lib/Target/AMDGPU/FooB.cpp",
+# CFG2: "line": 200,
 # IR1: COVERED="0x1000"
 # IR2: COVERED="0x2000"
