@@ -3,9 +3,9 @@
 #
 # Requires a gap list from gap finding (baseline or PR), passed as explicit CSV
 # paths (same flags as ``coverage incremental``). By default the host corpus is
-# bind-mounted read-only at /mounted-candidate-tests (no copy); -n limits work
-# inside candidate-test. Pass --stage-candidate-tests to copy the first N inputs
-# into a temp dir before mounting. Nothing is baked into the image.
+# bind-mounted read-only at /mounted-candidate-tests (no copy); optional -n limits work
+# inside candidate-test. Pass --stage-candidate-tests to copy inputs to a temp dir
+# before mounting (first N when -n is set, otherwise the full corpus).
 #
 # Pass --bind-repo to run the local fuzz-fill checkout instead of the copy baked
 # into the image at build time.
@@ -19,11 +19,10 @@ if [[ "${IN_CONTAINER:-}" == 1 ]]; then
     # shellcheck source=scripts/lib/gap-filling.sh
     source "${REPO_ROOT}/scripts/lib/gap-filling.sh"
 
-    : "${CANDIDATE_N:?CANDIDATE_N is required}"
     : "${UNCOVERED_CSV:?UNCOVERED_CSV is required}"
     : "${LLC_MAP_CSV:?LLC_MAP_CSV is required}"
 
-    run_candidate_test /mounted-output/candidate_tests /mounted-candidate-tests "$CANDIDATE_N"
+    run_candidate_test /mounted-output/candidate_tests /mounted-candidate-tests "${CANDIDATE_N:-}"
 
     run_incremental \
         /mounted-output/incremental \
@@ -73,7 +72,6 @@ Required:
   --llc-address-line-map-csv <path>
                                 LLC address-to-line map CSV from the same baseline run
   --candidate-tests-dir <path>  Host corpus root (bind-mounted read-only by default)
-  -n <N>, --n <N>               Run only the first N candidate tests (.ll/.bc, sorted)
 
 Image (one of):
   --image <ref>                 Docker image ref (default: \${IMAGE_NAME:-fuzz-fill-test}:\${IMAGE_TAG:-latest})
@@ -90,12 +88,19 @@ Image build (optional; reuses existing image when omitted):
 
 Options:
   --bind-repo                   Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
-  --stage-candidate-tests       Copy the first N inputs to a temp dir before mounting
+  --stage-candidate-tests       Copy candidate inputs to a temp dir before mounting
                                 (default: bind-mount the full --candidate-tests-dir)
+  -n <N>, --n <N>               Run only the first N candidate tests (.ll/.bc, sorted;
+                                default: all files under --candidate-tests-dir)
   -j <n>, --jobs <n>            Parallel jobs for candidate-test and ninja (build)
   --help, -h                    Show this help
 
 Examples:
+  $(basename "$0") --output-dir ./data \\
+      --line-coverage-uncovered-csv line_coverage_uncovered.csv \\
+      --llc-address-line-map-csv llc_address_line_map.csv \\
+      --candidate-tests-dir /path/to/corpus -j "\$(nproc)"
+
   $(basename "$0") --output-dir ./data \\
       --line-coverage-uncovered-csv line_coverage_uncovered.csv \\
       --llc-address-line-map-csv llc_address_line_map.csv \\
@@ -109,7 +114,7 @@ EOF
 }
 
 validate_candidate_n() {
-    if [[ ! "$candidate_n" =~ ^[0-9]+$ ]] || [[ "$candidate_n" -eq 0 ]]; then
+    if [[ -n "$candidate_n" ]] && { [[ ! "$candidate_n" =~ ^[0-9]+$ ]] || [[ "$candidate_n" -eq 0 ]]; }; then
         echo "error: -n/--n must be a positive integer: ${candidate_n}" >&2
         exit 1
     fi
@@ -187,8 +192,8 @@ if [[ -z "$output_dir" ]]; then
     exit 1
 fi
 
-if [[ -z "$candidate_tests_dir" || -z "$candidate_n" ]]; then
-    echo "error: --candidate-tests-dir and -n are required" >&2
+if [[ -z "$candidate_tests_dir" ]]; then
+    echo "error: --candidate-tests-dir is required" >&2
     usage >&2
     exit 1
 fi
