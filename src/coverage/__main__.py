@@ -322,6 +322,8 @@ def main():
             logger.info("wrote baseline timings to %s", timings_path)
 
     elif args.subcmd == "candidate-test":
+        if args.n is not None and args.n < 1:
+            parser.error("--n must be a positive integer.")
         tools = candidate_test_tools_from_args(llc=args.llc)
         filepaths = get_filepaths(args, tools=tools)
         llc_flag_variants = load_llc_flag_variants(args.settings_csv)
