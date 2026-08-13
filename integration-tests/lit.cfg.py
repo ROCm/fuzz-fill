@@ -124,11 +124,6 @@ if lit_config.params.get("e2e"):
             ("%e2e-bootstrap-bin", shlex.quote(_e2e_bootstrap))
         )
 
-# Optional e2e reduction extension: pass --param e2e_reduce=1 with --param e2e=1.
-if lit_config.params.get("e2e_reduce"):
-    config.available_features.add("e2e-reduce")
-    config.environment["FUZZ_FILL_E2E_REDUCE"] = "1"
-
 # PR prepare uses gh api; tests that clone by PR id require GH_TOKEN (e.g. CI:
 # GH_TOKEN: ${{ github.token }}).
 _gh_token = os.environ.get("GH_TOKEN")

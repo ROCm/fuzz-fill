@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# Optional e2e extension: run batch reduction on gap-fill output and verify shrinkage.
-#
-# Skips unless FUZZ_FILL_E2E_REDUCE=1 (set by lit --param e2e_reduce=1).
+# Run batch reduction on gap-fill output and verify shrinkage.
 #
 # Usage:
-#   FUZZ_FILL_E2E_REDUCE=1 scripts/e2e/run-reduction-if-enabled.sh \
+#   scripts/e2e/run-reduction.sh \
 #     --gap-fill-dir /path/to/gap-fill \
 #     --candidate-corpus-dir /path/to/corpus \
 #     --llvm-repo /path/llvm-project \
@@ -26,17 +24,16 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") --gap-fill-dir <path> [options]
 
-Run reduction on the first gap-fill hit when FUZZ_FILL_E2E_REDUCE=1.
-Otherwise exit 0 immediately.
+Run reduction on the first gap-fill hit and assert reduced.ll is smaller than input.
 
 Required:
   --gap-fill-dir <path>           Gap-fill output (incremental/new_coverage.csv)
-
-Options:
-  --candidate-corpus-dir <path>   Fuzz corpus from gap filling (resolves test.sh inputs)
   --llvm-repo <path>              llvm-project checkout
   --llvm-bin <path>               LLVM bin dir (llvm-reduce, llvm-dis)
   --instrumented-bin-dir <path>   SanitizerCoverage bin dir (llc)
+
+Options:
+  --candidate-corpus-dir <path>   Fuzz corpus from gap filling (resolves test.sh inputs)
   --help, -h                      Show this help
 EOF
 }
@@ -75,15 +72,10 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ "${FUZZ_FILL_E2E_REDUCE:-0}" != 1 ]]; then
-    echo "skip e2e reduction (pass --param e2e_reduce=1 to enable)"
-    exit 0
-fi
-
 missing=0
 for var_name in gap_fill_dir llvm_repo llvm_bin instrumented_bin_dir; do
     if [[ -z "${!var_name}" ]]; then
-        echo "error: --${var_name//_/-} is required when FUZZ_FILL_E2E_REDUCE=1" >&2
+        echo "error: --${var_name//_/-} is required" >&2
         missing=1
     fi
 done

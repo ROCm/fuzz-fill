@@ -798,22 +798,7 @@ export GH_TOKEN="$(gh auth token)"   # or ${{ github.token }} in CI
   -v integration-tests/e2e/gap-finding-pr/
 ```
 
-E2E tests use [`scripts/prepare-pr-llvm.sh`](scripts/prepare-pr-llvm.sh) with `--plain-clone` (same squash + self-contained export as the Docker PR path), then build SanitizerCoverage and run gap finding. The first run can take several hours (LLVM build + amdgpu LIT slice).
-
-To also run **llvm-reduce** on the pinned gap-fill fixture at the end of the PR e2e test, pass `--param e2e_reduce=1` (requires `--param e2e=1`):
-
-```bash
-./integration-tests/test.sh \
-  --venv ./venv/ \
-  --llvm-build llvm-project/build-sancov/bin/ \
-  --llvm-sancov-build llvm-project/build-sancov/bin/ \
-  --llvm-src llvm-project/ \
-  --param e2e=1 \
-  --param e2e_reduce=1 \
-  -v integration-tests/e2e/gap-finding-pr/pr-214457.test
-```
-
-This extension checks that `reduced/reduced.ll` exists and is smaller than the disassembled input (not a byte-for-byte golden match).
+E2E tests use [`scripts/prepare-pr-llvm.sh`](scripts/prepare-pr-llvm.sh) with `--plain-clone` (same squash + self-contained export as the Docker PR path), then build SanitizerCoverage and run gap finding, gap filling, and **llvm-reduce** on the pinned gap-fill fixture. The first run can take several hours (LLVM build + amdgpu LIT slice). The reduction step checks that `reduced/reduced.ll` exists and is smaller than the disassembled input (not a byte-for-byte golden match).
 
 ---
 
