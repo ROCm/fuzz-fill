@@ -8,16 +8,11 @@ from pathlib import Path
 LLC_FLAGS_COLUMN = "llc_flags"
 
 _DEFAULT_OPT_LEVELS = ("-O0", "-O1", "-O2", "-O3")
-_DEFAULT_GLOBAL_ISEL = ("-global-isel=0", "-global-isel=1")
 
 
 def default_llc_flag_variants() -> tuple[str, ...]:
-    """Built-in cross product: four opt levels × two global-isel settings."""
-    return tuple(
-        f"{opt} {isel}"
-        for opt in _DEFAULT_OPT_LEVELS
-        for isel in _DEFAULT_GLOBAL_ISEL
-    )
+    """Built-in default: four optimization levels."""
+    return _DEFAULT_OPT_LEVELS
 
 
 DEFAULT_LLC_FLAG_VARIANTS = default_llc_flag_variants()

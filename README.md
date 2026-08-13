@@ -296,11 +296,13 @@ Each row in `--settings-csv` is one `llc` invocation (flags passed before the in
 
 ```csv
 llc_flags
--O0 -global-isel=0
--O0 -global-isel=1
+-O0
+-O1
+-O2
+-O3
 ```
 
-When `--settings-csv` is omitted, fuzz-fill uses the built-in default: all combinations of `-O0`, `-O1`, `-O2`, `-O3` with `-global-isel=0` and `-global-isel=1` (**8 runs per input file**). Total jobs = `(number of .ll/.bc files) × (rows in settings)`.
+When `--settings-csv` is omitted, fuzz-fill uses the built-in default: `-O0`, `-O1`, `-O2`, `-O3` (**4 runs per input file**). Total jobs = `(number of .ll/.bc files) × (rows in settings)`.
 
 ### Environment variables
 
