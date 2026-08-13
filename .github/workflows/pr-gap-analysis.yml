@@ -60,7 +60,6 @@ env:
   LLVM_RELEASE_VERSION: "22.1.8"
   LLVM_RELEASE_DIR: /work/llvm-release
   LLVM_RELEASE_BIN: /work/llvm-release/bin
-  LLVM_PROJECT_DIR: /work/llvm-project
   PR_LLVM_DIR: /work/pr-llvm
   PR_BUILD_DIR: /work/build-sancov
   PR_BUILD_BIN: /work/build-sancov/bin
@@ -108,20 +107,6 @@ jobs:
           curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_RELEASE_VERSION}/LLVM-${LLVM_RELEASE_VERSION}-Linux-X64.tar.xz" \
             | tar -xJ --strip-components=1 -C "${LLVM_RELEASE_DIR}"
 
-      - name: Restore LLVM source
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache-llvm-source
-        with:
-          path: ${{ env.LLVM_PROJECT_DIR }}
-          key: fuzz-fill-llvm-source-${{ env.LLVM_RELEASE_VERSION }}
-
-      - name: Download llvm-project source
-        if: steps.cache-llvm-source.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p "${LLVM_PROJECT_DIR}"
-          curl -fsSL "https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-${LLVM_RELEASE_VERSION}.tar.gz" \
-            | tar -xz --strip-components=1 -C "${LLVM_PROJECT_DIR}"
-
       - name: Install gh
         run: |
           if ! command -v gh >/dev/null 2>&1; then
@@ -143,7 +128,7 @@ jobs:
             --pr-id "${INPUT_PR_ID}" \
             --dest "${PR_LLVM_DIR}" \
             --github-repo "${INPUT_GITHUB_REPO}" \
-            --reference "${LLVM_PROJECT_DIR}" \
+            --plain-clone \
             --squash-commit-file "${SQUASH_COMMIT_FILE}"
 
       - name: Build instrumented LLVM for PR
