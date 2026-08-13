@@ -20,8 +20,11 @@ run_candidate_test() {
         python -m coverage candidate-test
         --output-dir "$output_dir"
         --candidate-tests-dir "$candidate_tests_dir"
-        --n "$n"
     )
+
+    if [[ -n "$n" ]]; then
+        args+=(--n "$n")
+    fi
 
     if [[ -n "${COVERAGE_LLC:-}" ]]; then
         args+=(--llc "$COVERAGE_LLC")
@@ -33,7 +36,7 @@ run_candidate_test() {
         args+=(-j "$JOBS")
     fi
 
-    echo "=== coverage candidate-test (n=${n}) ==="
+    echo "=== coverage candidate-test (n=${n:-all}) ==="
     "${args[@]}"
 }
 
