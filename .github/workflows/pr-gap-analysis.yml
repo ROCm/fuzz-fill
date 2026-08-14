@@ -30,11 +30,6 @@ on:
         options:
           - amdgpu
           - spirv
-      candidate_n:
-        description: First N candidate tests from the corpus for gap filling
-        required: false
-        type: number
-        default: 2000
       run_gap_filling:
         description: Run gap filling after gap finding
         required: false
@@ -83,7 +78,6 @@ jobs:
       INPUT_PR_ID: ${{ inputs.pr_id }}
       INPUT_GITHUB_REPO: ${{ inputs.github_repo }}
       INPUT_BACKEND_TESTS: ${{ inputs.backend_tests }}
-      INPUT_CANDIDATE_N: ${{ inputs.candidate_n }}
     steps:
       - name: Checkout fuzz-fill
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -234,7 +228,6 @@ jobs:
             --line-coverage-uncovered-csv "${OUT_DIR}/commit_lines_report/target_lines_uncovered.csv"
             --llc-address-line-map-csv "${OUT_DIR}/baseline/llc_address_line_map.csv"
             --candidate-tests-dir "${CORPUS_DIR}"
-            -n "${INPUT_CANDIDATE_N}"
             --llvm-repo "${PR_LLVM_DIR}"
             --llvm-bin "${PR_BUILD_BIN}"
             --instrumented-bin-dir "${PR_BUILD_BIN}"
@@ -256,7 +249,6 @@ jobs:
             echo "pr_id: ${INPUT_PR_ID}"
             echo "github_repo: ${INPUT_GITHUB_REPO}"
             echo "backend_tests: ${INPUT_BACKEND_TESTS}"
-            echo "candidate_n: ${INPUT_CANDIDATE_N}"
             echo "corpus_dir: ${CORPUS_DIR}"
             echo "settings_csv: ${SETTINGS_CSV:-default (-O0..-O3)}"
             echo "workflow_run: ${GITHUB_RUN_ID}"
