@@ -271,7 +271,6 @@ prepare_pr_llvm_worktree() {
 
     prepare_pr_require_command git || return 1
 
-    PREPARE_PR_TITLE=""
     if [[ -z "$base_sha" ]]; then
         if ! prepare_pr_resolve_metadata "$github_repo" "$pr_id"; then
             echo "error: could not resolve PR base for ${github_repo}#${pr_id} (need gh or --base-sha)" >&2
