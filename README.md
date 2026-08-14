@@ -304,6 +304,8 @@ llc_flags
 
 When `--settings-csv` is omitted, fuzz-fill uses the built-in default: `-O0`, `-O1`, `-O2`, `-O3` (**4 runs per input file**). Total jobs = `(number of .ll/.bc files) × (rows in settings)`.
 
+By default, every `.ll`/`.bc` file under `--candidate-tests-dir` is processed (sorted path order). Pass `--n N` to run only the first N inputs.
+
 ### Environment variables
 
 Several commands accept LLVM tool paths via environment variables when the matching CLI flag is omitted. A flag on the command line always wins.

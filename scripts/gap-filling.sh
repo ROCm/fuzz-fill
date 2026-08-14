@@ -23,7 +23,7 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") --output-dir <path> \\
     --line-coverage-uncovered-csv <path> --llc-address-line-map-csv <path> \\
-    --candidate-tests-dir <path> -n <N> \\
+    --candidate-tests-dir <path> \\
     --llvm-repo <path> --llvm-bin <path> --instrumented-bin-dir <path> [options]
 
 Run candidate-test and incremental locally (no Docker).
@@ -34,7 +34,6 @@ Required:
   --line-coverage-uncovered-csv <path>  Uncovered-lines CSV (\`file\`, \`line\` columns)
   --llc-address-line-map-csv <path>     LLC address-to-line map from the same baseline run
   --candidate-tests-dir <path>          Fuzz corpus root
-  -n <N>, --n <N>                       Run only the first N candidate tests (.ll/.bc, sorted)
 $(gap_filling_local_usage_llvm_options)
 
 Options:
@@ -46,7 +45,6 @@ Examples:
       --line-coverage-uncovered-csv ./line_coverage_uncovered.csv \\
       --llc-address-line-map-csv ./llc_address_line_map.csv \\
       --candidate-tests-dir ./corpus \\
-      -n 100 \\
       --llvm-repo ./llvm-project \\
       --llvm-bin ./llvm-project/build/bin \\
       --instrumented-bin-dir ./llvm-project/build-sancov/bin \\
@@ -88,7 +86,7 @@ incremental_output_dir="${output_dir}/incremental"
 echo "Using coverage profile:"
 echo "  uncovered lines: ${line_coverage_uncovered_csv}"
 echo "  address map:     ${llc_address_line_map_csv}"
-echo "  candidate dir:   ${candidate_tests_dir} (n=${candidate_n})"
+echo "  candidate dir:   ${candidate_tests_dir} (n=${candidate_n:-all})"
 if [[ -n "$settings_csv" ]]; then
     echo "  settings csv:    ${settings_csv}"
 fi

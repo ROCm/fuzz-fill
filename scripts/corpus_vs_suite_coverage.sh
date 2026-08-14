@@ -10,7 +10,7 @@
 #
 # Usage:
 #   ./scripts/corpus_vs_suite_coverage.sh
-#   CORPUS_N=100 ./scripts/corpus_vs_suite_coverage.sh          # smoke: first 100 .bc files
+#   CORPUS_N=100 ./scripts/corpus_vs_suite_coverage.sh          # smoke: first 100 files
 #   FILTER='CodeGen/AMDGPU/loop' ./scripts/corpus_vs_suite_coverage.sh
 #   FILTER='AMDGPU' ./scripts/corpus_vs_suite_coverage.sh
 #   REFRESH=all ./scripts/corpus_vs_suite_coverage.sh           # wipe prior outputs under OUTPUT_DIR
@@ -35,11 +35,6 @@ TEST_SUITE_OUTPUT_DIR="$OUTPUT_DIR/test_suite"
 NEW_TESTS_OUTPUT_DIR="$OUTPUT_DIR/new_tests"
 DIFF_OUTPUT_DIR="$OUTPUT_DIR/diff"
 NEW_COVERAGE_CSV="$DIFF_OUTPUT_DIR/new_coverage.csv"
-
-# How many corpus .bc files to run (sorted path order). Default: all under CORPUS.
-if [[ -z "${CORPUS_N:-}" ]]; then
-  CORPUS_N="$(find "$CORPUS" -type f \( -name '*.bc' -o -name '*.ll' \) | wc -l | tr -d ' ')"
-fi
 
 require_bin() {
   local dir="$1" tool="$2"
@@ -110,7 +105,7 @@ echo "fuzz-fill:      $FUZZ_FILL"
 echo "llvm-bin:       $LLVM_BIN"
 echo "instrumented:   $INSTRUMENTED_BIN"
 echo "corpus:         $CORPUS"
-echo "corpus tests:   $CORPUS_N"
+echo "corpus tests:   ${CORPUS_N:-all}"
 echo "lit filter:     $FILTER"
 echo "output:         $OUTPUT_DIR"
 echo
@@ -139,11 +134,16 @@ fi
 if [[ -z "${SKIP_NEW_TESTS:-}" ]]; then
   echo ">>> Step 2/3: corpus candidate-test"
   step_start=$SECONDS
-  python -m coverage candidate-test \
-    --output-dir "$NEW_TESTS_OUTPUT_DIR" \
-    --llc "$INSTRUMENTED_BIN/llc" \
-    --candidate-tests-dir "$CORPUS" \
-    --n "$CORPUS_N"
+  candidate_test_args=(
+    python -m coverage candidate-test
+    --output-dir "$NEW_TESTS_OUTPUT_DIR"
+    --llc "$INSTRUMENTED_BIN/llc"
+    --candidate-tests-dir "$CORPUS"
+  )
+  if [[ -n "${CORPUS_N:-}" ]]; then
+    candidate_test_args+=(--n "$CORPUS_N")
+  fi
+  "${candidate_test_args[@]}"
   STEP2_ELAPSED="$(format_duration $((SECONDS - step_start)))"
   echo "    finished in $STEP2_ELAPSED"
 else
