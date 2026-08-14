@@ -188,8 +188,26 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-      - name: Resolve corpus directory
+      - name: Check uncovered PR lines
         if: inputs.run_gap_filling
+        id: uncovered
+        run: |
+          report="${OUT_DIR}/commit_lines_report/target_lines_uncovered.csv"
+          if [[ ! -f "${report}" ]]; then
+            echo "error: gap finding report not found: ${report}" >&2
+            exit 1
+          fi
+          count="$(tail -n +2 "${report}" | grep -c . || true)"
+          if [[ "${count}" -gt 0 ]]; then
+            echo "has_uncovered_lines=true" >> "${GITHUB_OUTPUT}"
+            echo "Found ${count} uncovered PR target line(s); gap filling will run."
+          else
+            echo "has_uncovered_lines=false" >> "${GITHUB_OUTPUT}"
+            echo "No uncovered PR target lines; skipping gap filling."
+          fi
+
+      - name: Resolve corpus directory
+        if: inputs.run_gap_filling && steps.uncovered.outputs.has_uncovered_lines == 'true'
         id: corpus
         run: |
           case "${INPUT_BACKEND_TESTS}" in
@@ -199,7 +217,7 @@ jobs:
           echo "dir=${CORPUS_ROOT}/${subdir}" >> "${GITHUB_OUTPUT}"
 
       - name: Resolve candidate-test settings
-        if: inputs.run_gap_filling
+        if: inputs.run_gap_filling && steps.uncovered.outputs.has_uncovered_lines == 'true'
         id: settings
         run: |
           case "${INPUT_BACKEND_TESTS}" in
@@ -213,7 +231,7 @@ jobs:
           esac
 
       - name: Run gap filling
-        if: inputs.run_gap_filling
+        if: inputs.run_gap_filling && steps.uncovered.outputs.has_uncovered_lines == 'true'
         env:
           CORPUS_DIR: ${{ steps.corpus.outputs.dir }}
           SETTINGS_CSV: ${{ steps.settings.outputs.csv }}
@@ -239,7 +257,7 @@ jobs:
           ./scripts/gap-filling.sh "${gap_fill_args[@]}"
 
       - name: Write filling README
-        if: inputs.run_gap_filling
+        if: inputs.run_gap_filling && steps.uncovered.outputs.has_uncovered_lines == 'true'
         env:
           CORPUS_DIR: ${{ steps.corpus.outputs.dir }}
           SETTINGS_CSV: ${{ steps.settings.outputs.csv }}
@@ -255,7 +273,7 @@ jobs:
           } > /work/README-filling.txt
 
       - name: Stage filling artifact
-        if: inputs.run_gap_filling
+        if: inputs.run_gap_filling && steps.uncovered.outputs.has_uncovered_lines == 'true'
         run: |
           chmod +x .github/scripts/pr-gap-artifact.sh
           manifest="${GAP_FILL_DIR}/candidate_tests/candidate_test_manifest.csv"
@@ -272,7 +290,7 @@ jobs:
           .github/scripts/pr-gap-artifact.sh finalize
 
       - name: Upload gap filling artifact
-        if: inputs.run_gap_filling
+        if: inputs.run_gap_filling && steps.uncovered.outputs.has_uncovered_lines == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: gap-filling-pr${{ inputs.pr_id }}-${{ github.run_id }}
