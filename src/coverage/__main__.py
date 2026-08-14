@@ -289,7 +289,8 @@ def main():
         help=(
             "Fail when the COMMIT files written by `coverage baseline` and "
             "`added_lines` disagree with each other or with HEAD of "
-            "--llvm-repo (default: enabled)."
+            "--llvm-repo. Skipped when --llvm-repo is not a git checkout "
+            "(default: enabled)."
         ),
     )
     p_target_lines.add_argument(

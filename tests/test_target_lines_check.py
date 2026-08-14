@@ -59,13 +59,24 @@ class RunTargetLinesCheckTest(unittest.TestCase):
             baseline = root / "baseline"
             baseline.mkdir()
 
+            source_file = root / REL
+            source_file.parent.mkdir(parents=True)
+            source_file.write_text(
+                "\n".join(f"line {i}" for i in range(1, 30))
+                + "\nuncovered line\n"
+                + "\n".join(f"line {i}" for i in range(31, 40))
+                + "\nuncovered line 2\n",
+                encoding="utf-8",
+            )
+            abs_path = str(source_file)
+
             uncovered_csv = baseline / DEFAULT_LINE_COVERAGE_UNCOVERED_FILE
             _write_csv(
                 uncovered_csv,
                 [
                     ["file", "line"],
-                    [ABS, 30],
-                    [ABS, 40],
+                    [abs_path, 30],
+                    [abs_path, 40],
                 ],
             )
 
@@ -95,7 +106,7 @@ class RunTargetLinesCheckTest(unittest.TestCase):
                 rows = list(csv.DictReader(f))
 
             reported = {(row["file"], int(row["line"])) for row in rows}
-            self.assertEqual(reported, {(ABS, 30), (ABS, 40)})
+            self.assertEqual(reported, {(abs_path, 30), (abs_path, 40)})
             self.assertEqual({row["text"] for row in rows}, {"uncovered line", "uncovered line 2"})
 
     def test_missing_uncovered_csv_raises_systemexit(self) -> None:
@@ -143,11 +154,21 @@ class RunTargetLinesCheckTest(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["line"], "2")
 
-    def test_blank_target_text_skips_source_mismatch_check(self) -> None:
+    def test_blank_target_text_against_nonblank_source_is_an_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit) as ctx:
+                _run_source_mismatch_check(
+                    Path(tmp),
+                    source_text="line one\nreal second line\nline three\n",
+                    target_text="",
+                )
+            self.assertIn("do not match the source on disk", str(ctx.exception))
+
+    def test_blank_target_text_against_blank_source_is_reported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rows = _run_source_mismatch_check(
                 Path(tmp),
-                source_text="line one\nreal second line\nline three\n",
+                source_text="line one\n\nline three\n",
                 target_text="",
             )
             self.assertEqual(len(rows), 1)
