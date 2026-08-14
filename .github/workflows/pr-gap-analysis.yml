@@ -204,31 +204,52 @@ jobs:
           esac
           echo "dir=${CORPUS_ROOT}/${subdir}" >> "${GITHUB_OUTPUT}"
 
+      - name: Resolve candidate-test settings
+        if: inputs.run_gap_filling
+        id: settings
+        run: |
+          case "${INPUT_BACKEND_TESTS}" in
+            amdgpu)
+              echo "csv=${GITHUB_WORKSPACE}/scripts/candidate-test-settings-amdgpu-o-global-isel.csv" \
+                >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "csv=" >> "${GITHUB_OUTPUT}"
+              ;;
+          esac
+
       - name: Run gap filling
         if: inputs.run_gap_filling
         env:
           CORPUS_DIR: ${{ steps.corpus.outputs.dir }}
+          SETTINGS_CSV: ${{ steps.settings.outputs.csv }}
         run: |
           source "${VENV_DIR}/bin/activate"
           if [[ ! -d "${CORPUS_DIR}" ]]; then
             echo "error: corpus directory not found: ${CORPUS_DIR}" >&2
             exit 1
           fi
-          ./scripts/gap-filling.sh \
-            --output-dir "${GAP_FILL_DIR}" \
-            --line-coverage-uncovered-csv "${OUT_DIR}/commit_lines_report/target_lines_uncovered.csv" \
-            --llc-address-line-map-csv "${OUT_DIR}/baseline/llc_address_line_map.csv" \
-            --candidate-tests-dir "${CORPUS_DIR}" \
-            -n "${INPUT_CANDIDATE_N}" \
-            --llvm-repo "${PR_LLVM_DIR}" \
-            --llvm-bin "${PR_BUILD_BIN}" \
-            --instrumented-bin-dir "${PR_BUILD_BIN}" \
+          gap_fill_args=(
+            --output-dir "${GAP_FILL_DIR}"
+            --line-coverage-uncovered-csv "${OUT_DIR}/commit_lines_report/target_lines_uncovered.csv"
+            --llc-address-line-map-csv "${OUT_DIR}/baseline/llc_address_line_map.csv"
+            --candidate-tests-dir "${CORPUS_DIR}"
+            -n "${INPUT_CANDIDATE_N}"
+            --llvm-repo "${PR_LLVM_DIR}"
+            --llvm-bin "${PR_BUILD_BIN}"
+            --instrumented-bin-dir "${PR_BUILD_BIN}"
             -j "$(nproc)"
+          )
+          if [[ -n "${SETTINGS_CSV}" ]]; then
+            gap_fill_args+=(--settings-csv "${SETTINGS_CSV}")
+          fi
+          ./scripts/gap-filling.sh "${gap_fill_args[@]}"
 
       - name: Write filling README
         if: inputs.run_gap_filling
         env:
           CORPUS_DIR: ${{ steps.corpus.outputs.dir }}
+          SETTINGS_CSV: ${{ steps.settings.outputs.csv }}
         run: |
           {
             echo "PR gap filling report"
@@ -237,6 +258,7 @@ jobs:
             echo "backend_tests: ${INPUT_BACKEND_TESTS}"
             echo "candidate_n: ${INPUT_CANDIDATE_N}"
             echo "corpus_dir: ${CORPUS_DIR}"
+            echo "settings_csv: ${SETTINGS_CSV:-default (-O0..-O3)}"
             echo "workflow_run: ${GITHUB_RUN_ID}"
           } > /work/README-filling.txt
 
