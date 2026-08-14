@@ -7,7 +7,7 @@
 name: PR gap analysis
 run-name: >-
   ${{ github.event_name == 'workflow_dispatch'
-      && format('PR gap analysis - llvm#{0} ({1})', inputs.pr_id, inputs.backend_tests)
+      && format('PR gap analysis - llvm#{0} ({1}) by {2}', inputs.pr_id, inputs.backend_tests, github.actor)
       || 'PR gap analysis' }}
 
 on:
