@@ -5,6 +5,10 @@
 # Produces two downloadable artifacts: gap-finding CSVs and gap-filling results.
 
 name: PR gap analysis
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+      && format('PR gap analysis - llvm#{0} ({1})', inputs.pr_id, inputs.backend_tests)
+      || 'PR gap analysis' }}
 
 on:
   # Temporary: registers the workflow with GitHub before merge to main.
