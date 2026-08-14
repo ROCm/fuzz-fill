@@ -4,10 +4,8 @@
 # COM: baseline slice, and checks that the PR's added line in SIFoldOperands.cpp
 # COM: is reported as uncovered.
 
-# COM: PR #214457 is still open, so its base moves on every run, drifting the
-# COM: pinned GAP_FILL_* lines below. Pin base-sha to the last known-good main tip.
 # RUN: rm -rf %t && mkdir -p %t
-# RUN: %repo-root/scripts/prepare-pr-llvm.sh --pr-id 214457 --dest %t/llvm-project --plain-clone --base-sha 8ef2e8735f8a782fc7f0e82ce399045fb6bccc68 --squash-commit-file %t/squash-commit
+# RUN: %repo-root/scripts/prepare-pr-llvm.sh --pr-id 214457 --dest %t/llvm-project --plain-clone --squash-commit-file %t/squash-commit
 # RUN: test -x %t/build-sancov/bin/llvm-lit || %repo-root/scripts/build-llvm-sancov.sh %repo-root/scripts/allowlist-amdgpu.txt %t/llvm-project %t/build-sancov --bootstrap-bin %e2e-bootstrap-bin --ignorelist %repo-root/scripts/ignorelist-amdgpu.txt
 # RUN: %repo-root/scripts/gap-finding-pr.sh --output-dir %t/out --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --commit $(cat %t/squash-commit) --backend-tests amdgpu
 # RUN: %repo-root/scripts/gap-finding-baseline.sh --output-dir %t/out-direct --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --backend-tests amdgpu

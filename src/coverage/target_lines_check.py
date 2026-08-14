@@ -28,28 +28,18 @@ def _match_symcov_file(rel_path: str, summary_files: set[str]) -> str | None:
 
 
 @lru_cache(maxsize=None)
-def _read_source_lines(path: str) -> tuple[str, ...] | None:
-    """Return the on-disk lines of ``path``, or ``None`` if unreadable."""
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            return tuple(f.readlines())
-    except (OSError, ValueError):
-        return None
+def _read_source_lines(path: str) -> tuple[str, ...]:
+    """Return the on-disk lines of ``path``."""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return tuple(f.readlines())
 
 
 def _source_text_mismatches(sym_file: str, line_no: int, text: str) -> bool:
-    """True if the on-disk line ``line_no`` in ``sym_file`` differs from ``text``.
-
-    An empty or whitespace-only ``text`` carries no signal (a row without diff
-    text is indistinguishable from one whose diff text failed to load), so it
-    is treated as no mismatch rather than a false one.
-    """
-    if not text.strip():
-        return False
+    """True if the on-disk line ``line_no`` in ``sym_file`` differs from ``text``."""
     lines = _read_source_lines(sym_file)
-    if lines is None or not 1 <= line_no <= len(lines):
-        return False
-    return lines[line_no - 1].rstrip("\r\n") != text
+    if not 1 <= line_no <= len(lines):
+        return True
+    return lines[line_no - 1].strip() != text.strip()
 
 
 def run_target_lines_check(
@@ -118,7 +108,7 @@ def run_target_lines_check(
                 raise SystemExit(
                     f"Invalid line_no {row['line_no']!r} for path {rel!r}"
                 ) from e
-            text = row.get("text") or ""
+            text = row.get("text", "")
 
             sym_file = _match_symcov_file(rel, summary_files)
             if sym_file is None:
