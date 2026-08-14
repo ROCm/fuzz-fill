@@ -61,7 +61,9 @@
 
 # COM: Reduction: full llvm-reduce on the first baseline gap-fill hit; assert reduced.ll
 # COM: exists and is smaller than disassembled input.
-# RUN: %repo-root/scripts/e2e/run-reduction.sh --gap-fill-dir %t/gap-fill-baseline --candidate-corpus-dir %S/../fixtures/candidate-tests --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin
+# RUN: %repo-root/scripts/reduction.sh --gap-fill-dir %t/gap-fill-baseline --candidate-corpus-dir %S/../fixtures/candidate-tests --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin -n 1 --pipeline llvm_reduce_ir
+# RUN: test -f %t/gap-fill-baseline/reduced/t-00001-test_0_0/reduced/reduced.ll
+# RUN: bash -c 'd=%t/gap-fill-baseline/reduced/t-00001-test_0_0; bl=$(mktemp); %t/build-sancov/bin/llvm-dis -o "$bl" "$d/test_0_0000a5c12a4ab6566d1f8bf7495ff7fa30d9c93f326071d7e75cea0a1172a0c5.bc"; test $(stat -c%s "$d/reduced/reduced.ll") -lt $(stat -c%s "$bl"); rm -f "$bl"'
 
 # COM: Drop the llvm-project clone and sancov build after coverage runs to save disk space.
 # COM: Delete at the end so it is deleted only on success.
