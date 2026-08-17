@@ -292,7 +292,10 @@ jobs:
           if [[ ${#llc_commands[@]} -gt 0 ]]; then
             {
               echo "llc_flags"
-              printf '%s\n' "${llc_commands[@]}"
+              for cmd in "${llc_commands[@]}"; do
+                escaped="${cmd//\"/\"\"}"
+                printf '"%s"\n' "$escaped"
+              done
             } > "${CUSTOM_LLC_COMMANDS_CSV}"
             echo "csv=${CUSTOM_LLC_COMMANDS_CSV}" >> "${GITHUB_OUTPUT}"
             echo "Using ${#llc_commands[@]} custom llc flag variant(s) from workflow inputs."
