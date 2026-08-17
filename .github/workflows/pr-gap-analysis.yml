@@ -39,6 +39,48 @@ on:
         required: false
         type: boolean
         default: true
+      llc_command_1:
+        description: >-
+          Optional llc flag variant 1 for gap filling (flags only, not the llc
+          binary or input file), e.g. "-O2 -global-isel=1"
+        required: false
+        type: string
+      llc_command_2:
+        description: Optional llc flag variant 2 for gap filling
+        required: false
+        type: string
+      llc_command_3:
+        description: Optional llc flag variant 3 for gap filling
+        required: false
+        type: string
+      llc_command_4:
+        description: Optional llc flag variant 4 for gap filling
+        required: false
+        type: string
+      llc_command_5:
+        description: Optional llc flag variant 5 for gap filling
+        required: false
+        type: string
+      llc_command_6:
+        description: Optional llc flag variant 6 for gap filling
+        required: false
+        type: string
+      llc_command_7:
+        description: Optional llc flag variant 7 for gap filling
+        required: false
+        type: string
+      llc_command_8:
+        description: Optional llc flag variant 8 for gap filling
+        required: false
+        type: string
+      llc_command_9:
+        description: Optional llc flag variant 9 for gap filling
+        required: false
+        type: string
+      llc_command_10:
+        description: Optional llc flag variant 10 for gap filling
+        required: false
+        type: string
 
 defaults:
   run:
@@ -65,6 +107,7 @@ env:
   OUT_DIR: /work/out
   GAP_FILL_DIR: /work/gap-fill-pr
   SQUASH_COMMIT_FILE: /work/squash-commit
+  CUSTOM_LLC_COMMANDS_CSV: /work/custom-llc-commands.csv
   VENV_DIR: /work/fuzz-fill-venv
   CORPUS_ROOT: ${{ github.workspace }}/candidate-tests-dataset
   GH_TOKEN: ${{ github.token }}
@@ -223,16 +266,47 @@ jobs:
       - name: Resolve candidate-test settings
         if: inputs.run_gap_filling && steps.uncovered.outputs.has_uncovered_lines == 'true'
         id: settings
+        env:
+          LLC_COMMAND_1: ${{ inputs.llc_command_1 }}
+          LLC_COMMAND_2: ${{ inputs.llc_command_2 }}
+          LLC_COMMAND_3: ${{ inputs.llc_command_3 }}
+          LLC_COMMAND_4: ${{ inputs.llc_command_4 }}
+          LLC_COMMAND_5: ${{ inputs.llc_command_5 }}
+          LLC_COMMAND_6: ${{ inputs.llc_command_6 }}
+          LLC_COMMAND_7: ${{ inputs.llc_command_7 }}
+          LLC_COMMAND_8: ${{ inputs.llc_command_8 }}
+          LLC_COMMAND_9: ${{ inputs.llc_command_9 }}
+          LLC_COMMAND_10: ${{ inputs.llc_command_10 }}
         run: |
-          case "${INPUT_BACKEND_TESTS}" in
-            amdgpu)
-              echo "csv=${GITHUB_WORKSPACE}/scripts/candidate-test-settings-amdgpu-o-global-isel.csv" \
-                >> "${GITHUB_OUTPUT}"
-              ;;
-            *)
-              echo "csv=" >> "${GITHUB_OUTPUT}"
-              ;;
-          esac
+          llc_commands=()
+          for i in $(seq 1 10); do
+            var="LLC_COMMAND_${i}"
+            val="${!var:-}"
+            val="${val#"${val%%[![:space:]]*}"}"
+            val="${val%"${val##*[![:space:]]}"}"
+            if [[ -n "$val" ]]; then
+              llc_commands+=("$val")
+            fi
+          done
+
+          if [[ ${#llc_commands[@]} -gt 0 ]]; then
+            {
+              echo "llc_flags"
+              printf '%s\n' "${llc_commands[@]}"
+            } > "${CUSTOM_LLC_COMMANDS_CSV}"
+            echo "csv=${CUSTOM_LLC_COMMANDS_CSV}" >> "${GITHUB_OUTPUT}"
+            echo "Using ${#llc_commands[@]} custom llc flag variant(s) from workflow inputs."
+          else
+            case "${INPUT_BACKEND_TESTS}" in
+              amdgpu)
+                echo "csv=${GITHUB_WORKSPACE}/scripts/candidate-test-settings-amdgpu-o-global-isel.csv" \
+                  >> "${GITHUB_OUTPUT}"
+                ;;
+              *)
+                echo "csv=" >> "${GITHUB_OUTPUT}"
+                ;;
+            esac
+          fi
 
       - name: Run gap filling
         if: inputs.run_gap_filling && steps.uncovered.outputs.has_uncovered_lines == 'true'
