@@ -107,6 +107,9 @@ env:
   VENV_DIR: /work/fuzz-fill-venv
   CORPUS_ROOT: ${{ github.workspace }}/candidate-tests-dataset
   GH_TOKEN: ${{ github.token }}
+  CCACHE_DIR: /work/ccache
+  CCACHE_MAXSIZE: 3G
+  CCACHE_COMPRESS: "true"
 
 jobs:
   pr-gap-analysis:
@@ -168,6 +171,18 @@ jobs:
             --plain-clone \
             --squash-commit-file "${SQUASH_COMMIT_FILE}"
 
+      - name: Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache-ccache
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: fuzz-fill-pr-gap-ccache-${{ env.LLVM_RELEASE_VERSION }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-fill-pr-gap-ccache-${{ env.LLVM_RELEASE_VERSION }}-
+
+      - name: Reset ccache stats for this run
+        run: ccache --zero-stats
+
       - name: Build instrumented LLVM for PR
         env:
           ALLOWLIST_PATH: ${{ steps.allowlist.outputs.path }}
@@ -178,7 +193,19 @@ jobs:
             "${PR_BUILD_DIR}" \
             --bootstrap-bin "${LLVM_RELEASE_BIN}" \
             --ignorelist scripts/ignorelist-amdgpu.txt \
+            --enable-ccache \
             "$(nproc)"
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache --show-stats -v
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.cache-ccache.outputs.cache-primary-key }}
 
       - name: Install fuzz-fill venv
         run: |

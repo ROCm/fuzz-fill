@@ -193,24 +193,16 @@ if [[ "$ENABLE_CCACHE" -eq 1 ]]; then
     export CCACHE_SLOPPINESS="${CCACHE_SLOPPINESS:-pch_defines,time_macros}"
 
     # The allowlist/ignorelist are passed to clang as plain file paths, not #include'd
-    # and not recorded in -MD dependency output, so ccache only hashes the path string,
-    # never the file's content. Reusing the same path across builds with different
-    # allowlist/ignorelist content would make ccache serve a stale object compiled against 
-    # the old content. Rename via a content hash so the path itself changes whenever 
-    # the content does, forcing a correct cache miss.
-    REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-    CCACHE_CONTENT_DIR="$REPO_ROOT/.ccache-content"
-    mkdir -p "$CCACHE_CONTENT_DIR"
-    hash_named_link() {
-        local src="$1" content_hash dest
-        content_hash="$(sha256sum "$src" | cut -c1-16)"
-        dest="$CCACHE_CONTENT_DIR/$(basename "$src").${content_hash}"
-        ln -sf "$src" "$dest"
-        echo "$dest"
-    }
-    ALLOWLIST="$(hash_named_link "$ALLOWLIST")"
+    # and not recorded in -MD dependency output, so ccache only hashes the path string
+    # unless we list them in extra_files_to_hash (CCACHE_EXTRAFILES). See ccache(1).
+    _ccache_extra_files="${ALLOWLIST}"
     if [[ -n "$IGNORELIST" ]]; then
-        IGNORELIST="$(hash_named_link "$IGNORELIST")"
+        _ccache_extra_files+=":${IGNORELIST}"
+    fi
+    if [[ -n "${CCACHE_EXTRAFILES:-}" ]]; then
+        export CCACHE_EXTRAFILES="${CCACHE_EXTRAFILES}:${_ccache_extra_files}"
+    else
+        export CCACHE_EXTRAFILES="${_ccache_extra_files}"
     fi
 
     CCACHE_LAUNCHER_ARGS=(

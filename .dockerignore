@@ -29,5 +29,3 @@ candidate-tests-dataset/
 *.lit_test_times.txt
 *.sancov
 *.pcy
-
-.ccache-content/
