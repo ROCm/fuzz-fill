@@ -86,10 +86,6 @@ defaults:
   run:
     shell: bash
 
-concurrency:
-  group: pr-gap-analysis-${{ inputs.pr_id }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
   actions: write
