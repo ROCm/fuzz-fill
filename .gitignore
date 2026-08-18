@@ -14,3 +14,4 @@ integration-tests/**/Output/
 *.sancov
 *.egg-info/
 *.pcy
+.ccache-content/
