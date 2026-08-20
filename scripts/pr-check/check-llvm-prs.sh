@@ -2,7 +2,7 @@
 # Periodic orchestrator for LLVM AMDGPU/SPIR-V PR coverage-gap detection.
 #
 # Discovers open target PRs, plans work against state.json, and runs
-# pr-cov-gaps-detection.sh for PR/backend pairs whose head SHA changed.
+# gap-finding-pr.sh for PR/backend pairs whose head SHA changed.
 
 set -euo pipefail
 
@@ -209,10 +209,9 @@ run_one_work_item() {
         return "$build_status"
     fi
 
-    "${REPO_ROOT}/scripts/docker/pr-cov-gaps-detection.sh" \
+    "${REPO_ROOT}/scripts/docker/gap-finding-pr.sh" \
         --image "$image_ref" \
         --output-dir "$output_dir" \
-        --keep-image \
         -j "$PR_CHECK_JOBS"
     detect_status=$?
     set -e

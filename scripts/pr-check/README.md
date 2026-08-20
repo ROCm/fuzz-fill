@@ -1,6 +1,6 @@
 # Periodic LLVM PR coverage gap checking
 
-Automatically discover open AMDGPU and SPIR-V PRs on `llvm/llvm-project`, run [Workflow 2](../docker/pr-cov-gaps-detection.sh) coverage-gap detection when a PR's head SHA changes, and write local reports under `data/pr-check/reports/`.
+Automatically discover open AMDGPU and SPIR-V PRs on `llvm/llvm-project`, run [Workflow 2](../docker/gap-finding-pr.sh) coverage-gap detection when a PR's head SHA changes, and write local reports under `data/pr-check/reports/`.
 
 ## Prerequisites
 
@@ -62,7 +62,7 @@ Daily cron entry point (AMDGPU only, drains the full queue):
 2. **Plan** — compare against `state.json`; queue entries that are new or have a changed head SHA
 3. **Check** — for each planned `(PR, backend)` pair (up to `PR_CHECK_MAX_PER_RUN`):
    - Build Docker image `fuzz-fill-test:llvm-pr-<n>-<backend>` via [`build-image-pr.sh`](../docker/build-image-pr.sh)
-   - Run [`pr-cov-gaps-detection.sh`](../docker/pr-cov-gaps-detection.sh)
+   - Run [`gap-finding-pr.sh`](../docker/gap-finding-pr.sh)
    - Record `gaps`, `clean`, or `failed` in state
 4. **Report** — write `data/pr-check/reports/latest.json`, `latest.md`, and `new-prs.md`
 
