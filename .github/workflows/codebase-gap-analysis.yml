@@ -173,9 +173,9 @@ jobs:
         id: cache-ccache
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: fuzz-fill-codebase-gap-ccache-${{ env.LLVM_RELEASE_VERSION }}-${{ github.run_id }}
+          key: fuzz-fill-llvm-sancov-ccache-${{ env.LLVM_RELEASE_VERSION }}-${{ github.run_id }}
           restore-keys: |
-            fuzz-fill-codebase-gap-ccache-${{ env.LLVM_RELEASE_VERSION }}-
+            fuzz-fill-llvm-sancov-ccache-${{ env.LLVM_RELEASE_VERSION }}-
 
       - name: Reset ccache stats for this run
         run: ccache --zero-stats
