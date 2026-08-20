@@ -135,6 +135,32 @@ class PlanWorkTest(unittest.TestCase):
         self.assertEqual(reasons[(1, "spirv")], "new")
         self.assertNotIn((2, "amdgpu"), reasons)
 
+    def test_orders_work_most_recent_first(self) -> None:
+        discovered = [
+            DiscoveredPr(
+                pr_number=100,
+                title="Older PR",
+                head_sha="sha-old",
+                updated_at="2026-01-01T00:00:00Z",
+                backends=["amdgpu"],
+            ),
+            DiscoveredPr(
+                pr_number=200,
+                title="Newer PR",
+                head_sha="sha-new",
+                updated_at="2026-02-01T00:00:00Z",
+                backends=["amdgpu", "spirv"],
+            ),
+        ]
+        state = {"version": STATE_VERSION, "entries": {}}
+
+        work = plan_work(discovered, state)
+
+        self.assertEqual(
+            [(item.pr_number, item.backend) for item in work],
+            [(200, "amdgpu"), (200, "spirv"), (100, "amdgpu")],
+        )
+
 
 class AggregateSearchResultsTest(unittest.TestCase):
     def test_merges_backends_for_same_pr(self) -> None:

@@ -70,6 +70,7 @@ class WorkItem:
     title: str
     head_sha: str
     reason: str
+    updated_at: str = ""
 
 
 @dataclass
@@ -537,6 +538,7 @@ def plan_work(discovered: list[DiscoveredPr], state: dict[str, Any]) -> list[Wor
                         title=pr.title,
                         head_sha=pr.head_sha,
                         reason="new",
+                        updated_at=pr.updated_at,
                     )
                 )
                 log.debug("Queued #%d (%s): new", pr.pr_number, backend)
@@ -552,6 +554,7 @@ def plan_work(discovered: list[DiscoveredPr], state: dict[str, Any]) -> list[Wor
                         title=pr.title,
                         head_sha=pr.head_sha,
                         reason="head_changed",
+                        updated_at=pr.updated_at,
                     )
                 )
                 log.debug(
@@ -570,7 +573,9 @@ def plan_work(discovered: list[DiscoveredPr], state: dict[str, Any]) -> list[Wor
                     pr.head_sha[:12],
                 )
 
-    work.sort(key=lambda item: (item.pr_number, item.backend))
+    work.sort(key=lambda item: item.backend)
+    work.sort(key=lambda item: item.pr_number, reverse=True)
+    work.sort(key=lambda item: item.updated_at or "", reverse=True)
     log.info(
         "Plan summary: %d PR/backend pair(s) scanned, %d queued (%d new, %d head_changed), %d up-to-date",
         pair_count,
