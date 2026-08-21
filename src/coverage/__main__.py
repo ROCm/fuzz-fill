@@ -184,6 +184,14 @@ def main():
             "Default: -O0, -O1, -O2, -O3 (4 variants per input)."
         ),
     )
+    p_candidate_test.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Append new candidate-test runs to an existing output directory; "
+            "skip (source_file, llc_flags) pairs that already have sancov."
+        ),
+    )
 
     p_incremental.add_argument(
         "--sancov",
@@ -223,6 +231,14 @@ def main():
             "Only consider baseline gaps whose source file path matches this "
             f"regex (default: {DEFAULT_SOURCE_CODE_FILTER!r}). "
             "Pass an empty string to disable filtering."
+        ),
+    )
+    p_incremental.add_argument(
+        "--keep-uninteresting-sancov",
+        action="store_true",
+        help=(
+            "Keep candidate-test sancov files that do not hit any baseline gap "
+            "instrumentation points (default: delete them during incremental)."
         ),
     )
 
@@ -336,6 +352,7 @@ def main():
                 llc_flag_variants=llc_flag_variants,
                 jobs=args.jobs,
                 timeout=args.timeout,
+                resume=args.resume,
             )
             test_runner.run()
 
@@ -354,6 +371,7 @@ def main():
                 filepaths,
                 mode="full",
                 source_filter=args.source_filter,
+                prune_uninteresting_sancov=not args.keep_uninteresting_sancov,
             )
 
             coverage_analyzer.get_incremental_coverage()
