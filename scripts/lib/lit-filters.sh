@@ -16,7 +16,9 @@ default_lit_filters_for_allowlist() {
             printf '%s\n' "${AMDGPU_LIT_FILTERS[@]}"
             ;;
         spirv)
-            printf '%s\n' "CodeGen/SPIRV"
+            # shellcheck source=scripts/lit-filters-spirv.sh
+            source "${SCRIPTS_DIR}/lit-filters-spirv.sh"
+            printf '%s\n' "${SPIRV_LIT_FILTERS[@]}"
             ;;
         *)
             echo "error: unsupported image allowlist: ${1} (expected amdgpu or spirv)" >&2

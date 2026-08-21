@@ -60,7 +60,7 @@ Required:
 
 Options:
 $(docker_gap_finding_usage_image_build_options)
-  --lit-filter <dir>       LIT regex prefix; repeat for multiple (default values available in: scripts/lit-filters-amdgpu.sh for amdgpu, CodeGen/SPIRV for spirv)
+  --lit-filter <dir>       LIT regex prefix; repeat for multiple (default values available in: scripts/lit-filters-amdgpu.sh for amdgpu, scripts/lit-filters-spirv.sh for spirv)
   --commit <rev>           Revision for added_lines (default: HEAD in image llvm-project)
   --bind-repo              Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
   -j <n>, --jobs <n>       Parallel jobs for llvm-lit; with --build-image, also for ninja
