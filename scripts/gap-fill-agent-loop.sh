@@ -10,8 +10,23 @@ MAX_ROUNDS="${MAX_ROUNDS:-30}"
 MAX_BUDGET_USD="${MAX_BUDGET_USD:-1.50}"
 MAX_ATTEMPTS_PER_GAP="${MAX_ATTEMPTS_PER_GAP:-5}"
 SLEEP_SEC="${SLEEP_SEC:-0}"
-# Override retired defaults, e.g. claude-sonnet-4-6 or sonnet (latest alias).
-CLAUDE_MODEL="${CLAUDE_MODEL:-${ANTHROPIC_MODEL:-claude-sonnet-4-6}}"
+
+# Claude CLI expects Anthropic-style model ids (e.g. claude-sonnet-4-6, sonnet).
+# AMD proxy env names like Claude-Sonnet-4.6 map to retired "Sonnet 4" and warn.
+normalize_claude_model() {
+    local raw="${1:-}"
+    case "${raw,,}" in
+        "" | sonnet | claude-sonnet-4-6) printf '%s\n' "claude-sonnet-4-6" ;;
+        claude-sonnet-4.6) printf '%s\n' "claude-sonnet-4-6" ;;
+        opus | claude-opus-4-6) printf '%s\n' "claude-opus-4-6" ;;
+        claude-opus-4.8) printf '%s\n' "claude-opus-4-6" ;;
+        haiku | claude-haiku-4-5) printf '%s\n' "claude-haiku-4-5" ;;
+        claude-haiku-4.5) printf '%s\n' "claude-haiku-4-5" ;;
+        *) printf '%s\n' "$raw" ;;
+    esac
+}
+
+CLAUDE_MODEL="$(normalize_claude_model "${CLAUDE_MODEL:-${ANTHROPIC_MODEL:-claude-sonnet-4-6}}")"
 
 AGENT_DIR="${REPO_ROOT}/data/gap-fill/agent"
 QUEUE_CSV="${AGENT_DIR}/gap-queue.csv"

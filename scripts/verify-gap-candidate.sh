@@ -22,7 +22,10 @@ Usage: $(basename "$0") \\
   --llc-map-csv <path> --test <path> --llc-flags "<flags>" \\
   [--local --llc <path> --sancov <path>] [--bind-repo]
 
-Exit codes: 0=HIT, 1=MISS, 2=error
+Exit codes: 0=HIT, 1=MISS/invalid llc run, 2=error
+
+llc must exit 0 (no crash, parse error, or timeout) before coverage is
+checked. A gap hit from a crashing llc is not accepted.
 
 Default mode runs llc inside fuzz-fill-test:llvm-pr-<n> Docker image.
 EOF
@@ -108,14 +111,34 @@ cleanup() {
 }
 trap cleanup EXIT
 
+LLC_TIMEOUT_SEC="${LLC_TIMEOUT_SEC:-30}"
+
+report_llc_failure() {
+    local status="$1"
+    if [[ "$status" -eq 124 ]]; then
+        echo "INVALID: llc timed out after ${LLC_TIMEOUT_SEC}s" >&2
+    elif [[ "$status" -ge 128 ]]; then
+        echo "INVALID: llc crashed (signal $((status - 128)), exit ${status})" >&2
+    else
+        echo "INVALID: llc exited ${status} (IR rejected or compile error)" >&2
+    fi
+}
+
 run_local() {
     if [[ -z "$llc_bin" || -z "$sancov_bin" ]]; then
         echo "error: --local requires --llc and --sancov" >&2
         exit 2
     fi
     export UBSAN_OPTIONS="coverage=1:coverage_dir=${work_dir}"
+    set +e
     # shellcheck disable=SC2086
-    timeout 30 "$llc_bin" $llc_flags "$test_path" -o /dev/null || true
+    timeout "$LLC_TIMEOUT_SEC" "$llc_bin" $llc_flags "$test_path" -o /dev/null
+    llc_status=$?
+    set -e
+    if [[ "$llc_status" -ne 0 ]]; then
+        report_llc_failure "$llc_status"
+        exit 1
+    fi
     shopt -s nullglob
     sancov_files=("$work_dir"/*.sancov)
     if [[ ${#sancov_files[@]} -eq 0 ]]; then
@@ -151,7 +174,21 @@ set -euo pipefail
 OUT=/mounted/out
 export UBSAN_OPTIONS=\"coverage=1:coverage_dir=\${OUT}\"
 export LLC_FLAGS=$(printf '%q' "$llc_flags")
-/work/llvm-build-sancov/bin/llc \${LLC_FLAGS} /mounted/test/input.ll -o /dev/null || true
+export LLC_TIMEOUT_SEC=${LLC_TIMEOUT_SEC}
+set +e
+timeout \"\${LLC_TIMEOUT_SEC}\" /work/llvm-build-sancov/bin/llc \${LLC_FLAGS} /mounted/test/input.ll -o /dev/null
+llc_status=\$?
+set -e
+if [[ \"\${llc_status}\" -ne 0 ]]; then
+  if [[ \"\${llc_status}\" -eq 124 ]]; then
+    echo \"INVALID: llc timed out after \${LLC_TIMEOUT_SEC}s\" >&2
+  elif [[ \"\${llc_status}\" -ge 128 ]]; then
+    echo \"INVALID: llc crashed (signal \$((llc_status - 128)), exit \${llc_status})\" >&2
+  else
+    echo \"INVALID: llc exited \${llc_status} (IR rejected or compile error)\" >&2
+  fi
+  exit 1
+fi
 SANCOV=\$(find /mounted/out -name '*.sancov' | head -1 || true)
 if [[ -z \"\${SANCOV}\" ]]; then
   echo 'MISS: llc produced no sancov files' >&2
