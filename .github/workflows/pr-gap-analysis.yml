@@ -255,7 +255,7 @@ jobs:
         with:
           name: gap-finding-pr${{ inputs.pr_id }}-${{ github.run_id }}
           path: ${{ env.ARTIFACT_DIR }}
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
 
       - name: Check uncovered PR lines
@@ -399,5 +399,5 @@ jobs:
         with:
           name: gap-filling-pr${{ inputs.pr_id }}-${{ github.run_id }}
           path: ${{ env.ARTIFACT_DIR }}
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error

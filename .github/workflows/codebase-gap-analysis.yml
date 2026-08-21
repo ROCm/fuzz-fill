@@ -254,7 +254,7 @@ jobs:
         with:
           name: gap-finding-codebase-${{ inputs.llvm_ref }}-${{ github.run_id }}
           path: ${{ env.ARTIFACT_DIR }}
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
 
       - name: Check uncovered baseline lines
@@ -403,5 +403,5 @@ jobs:
         with:
           name: gap-filling-codebase-${{ inputs.llvm_ref }}-${{ github.run_id }}
           path: ${{ env.ARTIFACT_DIR }}
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
