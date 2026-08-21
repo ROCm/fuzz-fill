@@ -93,6 +93,7 @@ generate_report() {
     run_pr_check report \
         --github-repo "$GITHUB_REPO" \
         --state-file "$PR_CHECK_STATE_FILE" \
+        --output-root "$PR_CHECK_OUTPUT_ROOT" \
         --report-dir "$PR_CHECK_REPORT_DIR"
 }
 
@@ -164,6 +165,7 @@ record_failed_run() {
 
     run_pr_check record \
         --state-file "$PR_CHECK_STATE_FILE" \
+        --output-root "$PR_CHECK_OUTPUT_ROOT" \
         --pr-number "$pr_number" \
         --backend "$backend" \
         --title "$title" \
@@ -230,6 +232,7 @@ run_one_work_item() {
 
     run_pr_check record \
         --state-file "$PR_CHECK_STATE_FILE" \
+        --output-root "$PR_CHECK_OUTPUT_ROOT" \
         --pr-number "$pr_number" \
         --backend "$backend" \
         --title "$title" \
@@ -249,6 +252,7 @@ plan_work_json() {
     local plan_args=(
         "${common_args[@]}"
         --state-file "$PR_CHECK_STATE_FILE"
+        --output-root "$PR_CHECK_OUTPUT_ROOT"
         --limit "$PR_CHECK_SEARCH_LIMIT"
     )
     if [[ -n "$max_items" ]]; then
@@ -421,6 +425,7 @@ if [[ "$plan_only" -eq 1 ]]; then
     run_pr_check plan \
         "${common_args[@]}" \
         --state-file "$PR_CHECK_STATE_FILE" \
+        --output-root "$PR_CHECK_OUTPUT_ROOT" \
         --limit "$PR_CHECK_SEARCH_LIMIT" \
         --max-items "$PR_CHECK_MAX_PER_RUN"
     exit 0

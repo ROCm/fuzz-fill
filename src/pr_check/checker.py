@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
@@ -465,16 +466,7 @@ def discover_prs(
     return discovered
 
 
-def load_state(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        log.info("State file not found, starting fresh: %s", path)
-        return {"version": STATE_VERSION, "entries": {}}
-
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise PrCheckerError(f"invalid state file {path}: {exc.msg}") from exc
-
+def _parse_state_payload(payload: Any, path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise PrCheckerError(f"invalid state file {path}: expected object at top level")
     if payload.get("version") != STATE_VERSION:
@@ -483,14 +475,113 @@ def load_state(path: Path) -> dict[str, Any]:
         )
     if not isinstance(payload.get("entries"), dict):
         raise PrCheckerError(f"invalid state file {path}: missing entries object")
-
-    log.info("Loaded state from %s (%d entries)", path, len(payload["entries"]))
     return payload
 
 
-def save_state(path: Path, state: dict[str, Any]) -> None:
+def _read_state_file(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        raise PrCheckerError(f"invalid state file {path}: file not found")
+    if path.stat().st_size == 0:
+        raise PrCheckerError(f"invalid state file {path}: empty file")
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise PrCheckerError(f"invalid state file {path}: {exc.msg}") from exc
+
+    return _parse_state_payload(payload, path)
+
+
+def _state_backup_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".bak")
+
+
+def _maybe_backup_state_file(path: Path) -> None:
+    if not path.is_file() or path.stat().st_size == 0:
+        return
+    try:
+        _read_state_file(path)
+    except PrCheckerError:
+        log.warning("Skipping backup of invalid state file %s", path)
+        return
+
+    backup_path = _state_backup_path(path)
+    backup_path.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    log.info("Backed up existing state to %s", backup_path)
+
+
+def load_state(
+    path: Path,
+    *,
+    recover: bool = False,
+    output_root: Path | None = None,
+    report_dir: Path | None = None,
+    github_repo: str = DEFAULT_GITHUB_REPO,
+    fetch_missing_pr_metadata: bool = True,
+) -> dict[str, Any]:
+    if not path.exists():
+        log.info("State file not found, starting fresh: %s", path)
+        return {"version": STATE_VERSION, "entries": {}}
+
+    try:
+        state = _read_state_file(path)
+    except PrCheckerError as exc:
+        if not recover:
+            raise
+        log.warning("%s; attempting recovery", exc)
+        state = None
+    else:
+        log.info("Loaded state from %s (%d entries)", path, len(state["entries"]))
+        return state
+
+    backup_path = _state_backup_path(path)
+    if backup_path.is_file() and backup_path.stat().st_size > 0:
+        try:
+            state = _read_state_file(backup_path)
+        except PrCheckerError as backup_exc:
+            log.warning("Could not recover state from backup %s: %s", backup_path, backup_exc)
+        else:
+            log.warning(
+                "Recovered state from backup %s (%d entries)",
+                backup_path,
+                len(state["entries"]),
+            )
+            save_state(path, state, backup=False)
+            return state
+
+    root = output_root or (path.parent / "runs")
+    reports = report_dir or (path.parent / "reports")
+    if root.is_dir():
+        state, stats = rebuild_state_from_runs(
+            output_root=root,
+            github_repo=github_repo,
+            report_dir=reports if reports.is_dir() else None,
+            existing_state=None,
+            fetch_missing_pr_metadata=fetch_missing_pr_metadata,
+        )
+        if state["entries"]:
+            log.warning(
+                "Recovered state by rebuilding from run artifacts "
+                "(%d entries from %d evaluated run(s))",
+                len(state["entries"]),
+                stats["runs_evaluated"],
+            )
+            save_state(path, state, backup=False)
+            return state
+        log.warning("Rebuild from %s found no completed runs to recover", root)
+
+    raise PrCheckerError(f"invalid state file {path} and recovery failed")
+
+
+def save_state(path: Path, state: dict[str, Any], *, backup: bool = True) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if backup:
+        _maybe_backup_state_file(path)
+
+    content = json.dumps(state, indent=2, sort_keys=True) + "\n"
+    tmp_path = path.with_name(path.name + ".tmp")
+    tmp_path.write_text(content, encoding="utf-8")
+    os.replace(tmp_path, path)
     log.info("Saved state to %s (%d entries)", path, len(state.get("entries", {})))
 
 
@@ -1323,6 +1414,22 @@ def cmd_discover(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_state_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    report_dir = getattr(args, "report_dir", None)
+    if report_dir is None:
+        report_dir = args.state_file.parent / "reports"
+    output_root = args.output_root
+    if output_root is None:
+        output_root = args.state_file.parent / "runs"
+    return load_state(
+        args.state_file,
+        recover=args.recover_state,
+        output_root=output_root,
+        report_dir=report_dir,
+        github_repo=getattr(args, "github_repo", DEFAULT_GITHUB_REPO),
+    )
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     discovered = discover_prs(
         github_repo=args.github_repo,
@@ -1330,7 +1437,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
         max_age_days=args.max_age_days,
         backends=_parse_backends_arg(args.backends),
     )
-    state = load_state(args.state_file)
+    state = _load_state_from_args(args)
     work = plan_work(discovered, state)
     if args.max_items is not None:
         if len(work) > args.max_items:
@@ -1346,7 +1453,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
 
 def cmd_record(args: argparse.Namespace) -> int:
-    state = load_state(args.state_file)
+    state = _load_state_from_args(args)
     record_result(
         state,
         pr_number=args.pr_number,
@@ -1397,9 +1504,7 @@ def cmd_rebuild_state(args: argparse.Namespace) -> int:
         return 0
 
     if args.state_file.is_file() and args.backup:
-        backup_path = args.state_file.with_suffix(args.state_file.suffix + ".bak")
-        backup_path.write_text(args.state_file.read_text(encoding="utf-8"), encoding="utf-8")
-        log.info("Backed up existing state to %s", backup_path)
+        _maybe_backup_state_file(args.state_file)
 
     save_state(args.state_file, state)
     print(
@@ -1430,7 +1535,7 @@ def cmd_evaluate_output(args: argparse.Namespace) -> int:
 
 def cmd_report(args: argparse.Namespace) -> int:
     log.info("Generating coverage gap report")
-    state = load_state(args.state_file)
+    state = _load_state_from_args(args)
     payload = build_report_payload(
         state,
         github_repo=args.github_repo,
@@ -1510,6 +1615,23 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    state_recovery_parent = argparse.ArgumentParser(add_help=False)
+    state_recovery_parent.add_argument(
+        "--output-root",
+        type=Path,
+        default=None,
+        help="Run artifact root for state recovery (default: <state-file-parent>/runs)",
+    )
+    state_recovery_parent.add_argument(
+        "--recover-state",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Recover from state.json.bak or run artifacts when state.json is invalid "
+            "(default: enabled)"
+        ),
+    )
+
     discover_parser = subparsers.add_parser(
         "discover",
         help="List open target PRs",
@@ -1520,7 +1642,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_parser = subparsers.add_parser(
         "plan",
         help="List PR/backend pairs needing a run",
-        parents=[logging_parent, github_repo_parent, search_parent],
+        parents=[logging_parent, github_repo_parent, search_parent, state_recovery_parent],
     )
     plan_parser.add_argument(
         "--state-file",
@@ -1539,7 +1661,7 @@ def build_parser() -> argparse.ArgumentParser:
     record_parser = subparsers.add_parser(
         "record",
         help="Persist one check result",
-        parents=[logging_parent],
+        parents=[logging_parent, state_recovery_parent],
     )
     record_parser.add_argument("--state-file", type=Path, required=True)
     record_parser.add_argument("--pr-number", type=int, required=True)
@@ -1622,7 +1744,7 @@ def build_parser() -> argparse.ArgumentParser:
     report_parser = subparsers.add_parser(
         "report",
         help="Write latest.json and latest.md from state",
-        parents=[logging_parent, github_repo_parent],
+        parents=[logging_parent, github_repo_parent, state_recovery_parent],
     )
     report_parser.add_argument("--state-file", type=Path, required=True)
     report_parser.add_argument(

@@ -101,7 +101,7 @@ Use this when `latest.md` looks stale (e.g. fewer entries than `state.json`, or 
 
 ### Rebuilding `state.json` from run artifacts
 
-If `state.json` is missing or corrupted (for example after a disk-full write), rebuild it from completed directories under `data/pr-check/runs/` without re-running coverage checks:
+If `state.json` is missing or corrupted (for example after a disk-full write or interrupted save), rebuild it from completed directories under `data/pr-check/runs/` without re-running coverage checks:
 
 ```bash
 # Preview what would be written
@@ -111,6 +111,8 @@ If `state.json` is missing or corrupted (for example after a disk-full write), r
 ./scripts/pr-check/rebuild-state.sh
 ./scripts/pr-check/get-latest.sh
 ```
+
+`plan`, `record`, and `report` also attempt automatic recovery when `state.json` is invalid: they try `state.json.bak`, then rebuild from completed run artifacts under `data/pr-check/runs/`. State writes are atomic and rotate a backup only when the existing file is valid JSON, so a interrupted save should not clobber a good backup.
 
 The rebuild:
 

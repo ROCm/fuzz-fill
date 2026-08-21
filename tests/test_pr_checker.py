@@ -79,6 +79,101 @@ class StateFileTest(unittest.TestCase):
             with self.assertRaises(PrCheckerError):
                 load_state(path)
 
+    def test_corrupt_state_recovers_from_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "state.json"
+            backup = root / "state.json.bak"
+            good_state = {
+                "version": STATE_VERSION,
+                "entries": {
+                    "1:amdgpu": {
+                        "pr_number": 1,
+                        "backend": "amdgpu",
+                        "title": "A",
+                        "head_sha": "sha",
+                        "status": "clean",
+                        "gap_count": 0,
+                        "lit_failure_count": 0,
+                        "checked_at": "2026-01-01T00:00:00+00:00",
+                        "output_dir": "/tmp/1-amdgpu",
+                        "error": None,
+                    }
+                },
+            }
+            backup.write_text(json.dumps(good_state), encoding="utf-8")
+            path.write_text("", encoding="utf-8")
+
+            recovered = load_state(path, recover=True)
+
+            self.assertIn("1:amdgpu", recovered["entries"])
+            self.assertEqual(load_state(path)["entries"]["1:amdgpu"]["status"], "clean")
+
+    def test_corrupt_state_recovers_from_run_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "state.json"
+            runs = root / "runs"
+            reports = root / "reports"
+            run_dir = runs / "7-spirv"
+            _write_gap_csv(
+                run_dir / "commit_lines_report" / "target_lines_uncovered.csv",
+                [["file", "line_no", "text"]],
+            )
+            lit_json = run_dir / "baseline" / "lit_failures.json"
+            lit_json.parent.mkdir(parents=True, exist_ok=True)
+            lit_json.write_text(json.dumps({"tests": []}), encoding="utf-8")
+            reports.mkdir()
+            (reports / "latest.json").write_text(
+                json.dumps(
+                    {
+                        "all_entries": [
+                            {
+                                "key": "7:spirv",
+                                "pr_number": 7,
+                                "backend": "spirv",
+                                "title": "SPIR-V",
+                                "head_sha": "deadbeef",
+                                "status": "clean",
+                                "gap_count": 0,
+                                "lit_failure_count": 0,
+                                "checked_at": "2026-01-01T00:00:00+00:00",
+                                "output_dir": str(run_dir),
+                                "error": None,
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            path.write_text("{not-json", encoding="utf-8")
+
+            recovered = load_state(
+                path,
+                recover=True,
+                output_root=runs,
+                report_dir=reports,
+                fetch_missing_pr_metadata=False,
+            )
+
+            self.assertIn("7:spirv", recovered["entries"])
+            self.assertEqual(recovered["entries"]["7:spirv"]["head_sha"], "deadbeef")
+
+    def test_save_state_keeps_valid_backup_when_primary_corrupt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "state.json"
+            backup = root / "state.json.bak"
+            good_state = {"version": STATE_VERSION, "entries": {}}
+            backup.write_text(json.dumps(good_state), encoding="utf-8")
+            path.write_text("", encoding="utf-8")
+
+            save_state(path, good_state)
+
+            self.assertGreater(path.stat().st_size, 0)
+            self.assertGreater(backup.stat().st_size, 0)
+            self.assertEqual(json.loads(backup.read_text())["version"], STATE_VERSION)
+
 
 class PlanWorkTest(unittest.TestCase):
     def test_queues_new_and_head_changed_items_only(self) -> None:
