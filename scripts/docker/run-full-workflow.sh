@@ -134,7 +134,7 @@ echo "gap-fill hits: ${row_count} row(s) in ${NEW_COVERAGE_CSV}"
 reduce_args=(
     "${BIND_REPO[@]}"
     --gap-fill-dir "$GAP_FILL_OUT"
-    --candidate-corpus-dir "$CORPUS"
+    --corpus-dir "$CORPUS"
     -n "$REDUCE_N"
 )
 if [[ "$FULL_REDUCE" -eq 0 ]]; then

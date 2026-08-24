@@ -289,9 +289,9 @@ Docker: [`scripts/docker/gap-filling.sh`](scripts/docker/gap-filling.sh) — sam
 
 ## Reduction
 
-[`scripts/reduction.sh`](scripts/reduction.sh) scaffolds (and optionally runs) reduction for the **first N rows** of `incremental/new_coverage.csv` from a [gap-fill](#gap-filling) output directory. Each row becomes a case directory `t-00001-<short>/` with `config.json`, `interesting_ir.sh`, and a copied `.bc` (mirroring [`example/amd/new-test-1/`](example/amd/new-test-1/)).
+[`scripts/reduction.sh`](scripts/reduction.sh) is a thin wrapper around `python -m reduce batch-from-coverage`. It scaffolds (and optionally runs) reduction for the **first N rows** of `incremental/new_coverage.csv` from a [gap-fill](#gap-filling) output directory. Each row becomes a case directory `t-00001-<short>/` with `config.json`, `interesting_ir.sh`, and a copied `.bc` (mirroring [`example/amd/new-test-1/`](example/amd/new-test-1/)).
 
-**Default output:** `<gap-fill-dir>/reduced/` (override with `--output-dir`).
+**Default output:** `<gap-fill-dir>/reduced/` (override with `--output`).
 
 ```bash
 # Scaffold one hit (inspect harness before running llvm-reduce):
@@ -304,7 +304,6 @@ Docker: [`scripts/docker/gap-filling.sh`](scripts/docker/gap-filling.sh) — sam
 ./scripts/reduction.sh \
   --gap-fill-dir ./data/gap-fill-out \
   -n 3 \
-  --llvm-repo /path/llvm-project \
   --llvm-bin /path/llvm-project/build/bin \
   --instrumented-bin-dir /path/llvm-project/build-sancov/bin \
   --pipeline llvm_reduce_ir
@@ -321,20 +320,18 @@ python -m reduce \
   --llvm-reduce /path/llvm-project/build/bin/llvm-reduce
 ```
 
-**CLI directly:**
+**CLI** (`python -m reduce batch-from-coverage --help`):
 
 ```bash
 python -m reduce batch-from-coverage \
-  --csv ./data/gap-fill-out/incremental/new_coverage.csv \
-  --candidate-tests ./data/gap-fill-out/candidate_tests \
-  --output ./data/reduced-out \
-  --n 3 \
+  --gap-fill-dir ./data/gap-fill-out \
+  -n 3 \
   --scaffold-only
 ```
 
-See `python -m reduce batch-from-coverage --help` for pipeline options (`--pipeline`, `--pass-under-test`, `--mtriple`, `--with-creduce`, …).
+See `--help` for pipeline options (`--pipeline`, `--pass-under-test`, `--mtriple`, `--with-creduce`, …). LLVM tools can be passed explicitly (`--llc`, `--llvm-reduce`), via `--llvm-bin` / `--instrumented-bin-dir`, or through `FUZZ_FILL_LLC` / `FUZZ_FILL_LLVM_REDUCE` environment variables.
 
-Integration test: [`integration-tests/reduction-batch.test`](integration-tests/reduction-batch.test) (scaffold-only, `n=1` and `n=3`).
+Integration test: [`integration-tests/coverage-pipeline.test`](integration-tests/coverage-pipeline.test) (real gap-fill pipeline plus `llvm-reduce` on the first hit).
 
 ---
 
@@ -615,13 +612,13 @@ Main output: `<output-dir>/incremental/new_coverage.csv`.
 
 ### Reduction in Docker
 
-[`scripts/docker/reduction.sh`](scripts/docker/reduction.sh) runs `batch-from-coverage` in a container. Gap-fill output is mounted read-only at `/mounted-gap-fill/`; case directories are written under `--output-dir` (default: `<gap-fill-dir>/reduced/`).
+[`scripts/docker/reduction.sh`](scripts/docker/reduction.sh) runs `batch-from-coverage` in a container. Gap-fill output is mounted read-only at `/mounted-gap-fill/`; case directories are written under `--output` (default: `<gap-fill-dir>/reduced/`).
 
 ```bash
 ./scripts/docker/reduction.sh \
   --bind-repo \
   --gap-fill-dir ./data/gap-fill-out \
-  --candidate-corpus-dir ./candidate-tests-dataset/amdgcn-amd-amdhsa \
+  --corpus-dir ./candidate-tests-dataset/amdgcn-amd-amdhsa \
   -n 1
 
 ./scripts/docker/reduction.sh \
@@ -630,7 +627,7 @@ Main output: `<output-dir>/incremental/new_coverage.csv`.
   --scaffold-only
 ```
 
-Pass **`--candidate-corpus-dir`** when gap filling used a bind-mounted fuzz corpus (required so reduction can resolve each test’s input `.bc`/`.ll` from `test.sh`). For **`.bc` inputs**, full reduction also needs `llvm-dis` (the image sets `FUZZ_FILL_LLVM_DIS`; with `--bind-repo`, your local checkout supplies the wiring).
+Pass **`--corpus-dir`** when gap filling used a bind-mounted fuzz corpus (required so reduction can resolve each test’s input `.bc`/`.ll` from `test.sh`). For **`.bc` inputs**, full reduction also needs `llvm-dis` (the image sets `FUZZ_FILL_LLVM_DIS`; with `--bind-repo`, your local checkout supplies the wiring).
 
 ### End-to-end workflow in Docker
 

@@ -11,6 +11,7 @@ from reduce.batch.coverage import (
     parse_covered_points_field,
     resolve_covered_hexes,
 )
+from reduce.batch.gap_fill import resolve_batch_inputs
 from reduce.batch.pipeline import build_pipeline_steps, parse_pipeline_arg
 
 
@@ -113,6 +114,37 @@ class BuildPipelineStepsTest(unittest.TestCase):
             steps[0]["parameters"]["interesting"],
             "interesting_ir.sh",
         )
+
+
+class ResolveBatchInputsTest(unittest.TestCase):
+    def test_resolves_default_output_and_validates_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gap_fill = root / "gap-fill"
+            gap_fill.mkdir()
+            (gap_fill / "incremental").mkdir()
+            (gap_fill / "candidate_tests").mkdir()
+            csv = gap_fill / "incremental" / "new_coverage.csv"
+            csv.write_text(
+                "test_name,file,line,covered-points\n",
+                encoding="utf-8",
+            )
+
+            csv_path, candidate_tests, out = resolve_batch_inputs(
+                gap_fill_dir=gap_fill,
+                output=None,
+            )
+            self.assertEqual(csv_path, csv)
+            self.assertEqual(candidate_tests, gap_fill / "candidate_tests")
+            self.assertEqual(out, gap_fill / "reduced")
+
+    def test_missing_csv_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            gap_fill = Path(tmp) / "gap-fill"
+            gap_fill.mkdir()
+            (gap_fill / "candidate_tests").mkdir()
+            with self.assertRaisesRegex(ValueError, "gap-fill CSV not found"):
+                resolve_batch_inputs(gap_fill_dir=gap_fill, output=None)
 
 
 if __name__ == "__main__":

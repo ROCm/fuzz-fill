@@ -14,6 +14,7 @@ from pathlib import Path
 from fuzz_fill.llvm_tools import ReduceTools, reduce_tools_from_args
 from reduce.batch.candidate_test import parse_test_sh
 from reduce.batch.coverage import load_new_coverage_rows, resolve_covered_hexes
+from reduce.batch.gap_fill import clear_output_dir, resolve_batch_inputs
 from reduce.batch.pipeline import (
     build_pipeline_steps,
     parse_pipeline_arg,
@@ -64,18 +65,36 @@ def _load_template_context_for_pipeline(
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--csv", type=Path, required=True, help="new_coverage.csv path.")
     p.add_argument(
-        "--candidate-tests",
+        "--gap-fill-dir",
         type=Path,
         required=True,
-        help="candidate_tests directory from gap filling.",
+        help="Gap-fill output directory (incremental/new_coverage.csv, candidate_tests/).",
     )
     p.add_argument(
         "--output",
         type=Path,
+        default=None,
+        help="Case output directory (default: <gap-fill-dir>/reduced/).",
+    )
+    p.add_argument(
+        "-n",
+        "--n",
+        type=int,
         required=True,
-        help="Directory to create t-00001-xxxx subdirectories under.",
+        metavar="N",
+        help="Process the first N CSV data rows.",
+    )
+    p.add_argument(
+        "--scaffold-only",
+        action="store_true",
+        help="Create case directories only; do not run llvm-reduce.",
+    )
+    p.add_argument(
+        "--corpus-dir",
+        type=Path,
+        default=None,
+        help="Fuzz corpus root from gap filling (resolves .ll/.bc paths from test.sh).",
     )
     p.add_argument(
         "--template-dir",
@@ -106,34 +125,90 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--mir-codegen-only", action="store_true")
     p.add_argument("--extract-mir-output", default=None, metavar="BASENAME")
     p.add_argument("--extract-ir-output", default=None, metavar="BASENAME")
-    p.add_argument("--llc", type=Path, default=None)
-    p.add_argument("--llvm-reduce", type=Path, default=None)
-    p.add_argument("--llvm-dis", type=Path, default=None)
     p.add_argument(
-        "--n",
-        type=int,
-        default=None,
-        metavar="N",
-        help="Process at most the first N CSV data rows (default: all rows).",
-    )
-    p.add_argument(
-        "--corpus-dir",
+        "--llvm-bin",
         type=Path,
         default=None,
-        help="Fuzz corpus root used during gap filling (resolves .ll/.bc paths from test.sh).",
+        help="LLVM bin directory with llvm-reduce and llvm-dis (non-sancov build).",
+    )
+    p.add_argument(
+        "--instrumented-bin-dir",
+        type=Path,
+        default=None,
+        help="SanitizerCoverage LLVM bin directory with llc.",
+    )
+    p.add_argument("--llc", type=Path, default=None, help="Path to llc (overrides --instrumented-bin-dir).")
+    p.add_argument(
+        "--llvm-reduce",
+        type=Path,
+        default=None,
+        help="Path to llvm-reduce (overrides --llvm-bin).",
+    )
+    p.add_argument(
+        "--llvm-dis",
+        type=Path,
+        default=None,
+        help="Path to llvm-dis (overrides --llvm-bin).",
     )
     return p
 
 
-def _resolve_tools(args: argparse.Namespace) -> ReduceTools | None:
-    llc = args.llc.resolve() if args.llc is not None else None
-    llvm_reduce = args.llvm_reduce.resolve() if args.llvm_reduce is not None else None
-    llvm_dis = args.llvm_dis.resolve() if args.llvm_dis is not None else None
+def _resolve_tool_paths(args: argparse.Namespace) -> tuple[Path | None, Path | None, Path | None]:
+    llc = args.llc.expanduser().resolve() if args.llc is not None else None
+    llvm_reduce = args.llvm_reduce.expanduser().resolve() if args.llvm_reduce is not None else None
+    llvm_dis = args.llvm_dis.expanduser().resolve() if args.llvm_dis is not None else None
+    llvm_bin = args.llvm_bin.expanduser().resolve() if args.llvm_bin is not None else None
+    instrumented_bin_dir = (
+        args.instrumented_bin_dir.expanduser().resolve()
+        if args.instrumented_bin_dir is not None
+        else None
+    )
+
+    has_explicit_tools = llc is not None or llvm_reduce is not None or llvm_dis is not None
+    has_bin_dirs = llvm_bin is not None or instrumented_bin_dir is not None
+
+    if has_explicit_tools and has_bin_dirs:
+        raise ValueError(
+            "Pass either --llvm-bin/--instrumented-bin-dir or --llc/--llvm-reduce/--llvm-dis, "
+            "not both."
+        )
+    if (llvm_bin is None) ^ (instrumented_bin_dir is None):
+        if has_bin_dirs:
+            raise ValueError("Pass both --llvm-bin and --instrumented-bin-dir.")
+
+    if llvm_bin is not None and instrumented_bin_dir is not None:
+        llc = instrumented_bin_dir / "llc"
+        llvm_reduce = llvm_bin / "llvm-reduce"
+        if llvm_dis is None:
+            llvm_dis = llvm_bin / "llvm-dis"
+
     if (llc is None) ^ (llvm_reduce is None):
-        raise ValueError("Pass both --llc and --llvm-reduce to run reduce, or omit both.")
-    if llc is None:
+        raise ValueError(
+            "Pass both --llc and --llvm-reduce, or both --llvm-bin and --instrumented-bin-dir."
+        )
+
+    return llc, llvm_reduce, llvm_dis
+
+
+def _resolve_tools(args: argparse.Namespace) -> ReduceTools | None:
+    if args.scaffold_only:
+        if (
+            args.llc is not None
+            or args.llvm_reduce is not None
+            or args.llvm_dis is not None
+            or args.llvm_bin is not None
+            or args.instrumented_bin_dir is not None
+        ):
+            raise ValueError(
+                "--scaffold-only cannot be combined with LLVM tool path options."
+            )
         return None
-    return reduce_tools_from_args(llc=llc, llvm_reduce=llvm_reduce, llvm_dis=llvm_dis)
+
+    llc, llvm_reduce, llvm_dis = _resolve_tool_paths(args)
+    try:
+        return reduce_tools_from_args(llc=llc, llvm_reduce=llvm_reduce, llvm_dis=llvm_dis)
+    except SystemExit as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def _process_rows(
@@ -241,7 +316,7 @@ def _print_summary(ok: int, total: int, ambiguous_rows: int) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = _build_arg_parser().parse_args(argv)
 
-    if args.n is not None and args.n < 1:
+    if args.n < 1:
         print("--n must be a positive integer.", file=sys.stderr)
         return 2
     if args.creduce_n is not None and args.creduce_n < 1:
@@ -249,16 +324,32 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        tools = _resolve_tools(args)
+        csv_path, candidate_tests, out_parent = resolve_batch_inputs(
+            gap_fill_dir=args.gap_fill_dir,
+            output=args.output,
+        )
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
 
-    candidate_tests = args.candidate_tests.resolve()
-    corpus_dir = args.corpus_dir.resolve() if args.corpus_dir is not None else None
-    out_parent = args.output.resolve()
-    out_parent.mkdir(parents=True, exist_ok=True)
-    template_dir = args.template_dir.resolve()
+    corpus_dir = args.corpus_dir.expanduser().resolve() if args.corpus_dir is not None else None
+    if corpus_dir is not None and not corpus_dir.is_dir():
+        print(f"--corpus-dir is not a directory: {corpus_dir}", file=sys.stderr)
+        return 2
+
+    template_dir = args.template_dir.expanduser().resolve()
+    if not (template_dir / "interesting_ir.sh").is_file():
+        print(
+            f"--template-dir must contain interesting_ir.sh: {template_dir}",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        tools = _resolve_tools(args)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
 
     try:
         pass_ids = parse_pipeline_arg(args.pipeline)
@@ -288,13 +379,17 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     try:
-        rows = load_new_coverage_rows(args.csv, limit=args.n)
+        rows = load_new_coverage_rows(csv_path, limit=args.n)
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
 
-    llc = args.llc.resolve() if args.llc is not None else None
-    llvm_reduce = args.llvm_reduce.resolve() if args.llvm_reduce is not None else None
+    clear_output_dir(out_parent)
+
+    llc_path, llvm_reduce_path, _ = _resolve_tool_paths(args)
+    if tools is not None:
+        llc_path = tools.llc
+        llvm_reduce_path = tools.llvm_reduce
 
     return _process_rows(
         rows,
@@ -304,8 +399,8 @@ def main(argv: list[str] | None = None) -> int:
         pass_ids=pass_ids,
         templates=templates,
         tools=tools,
-        llc=llc,
-        llvm_reduce=llvm_reduce,
+        llc=llc_path,
+        llvm_reduce=llvm_reduce_path,
         pass_under_test=args.pass_under_test,
         mtriple=args.mtriple,
         mir_codegen_only=args.mir_codegen_only,

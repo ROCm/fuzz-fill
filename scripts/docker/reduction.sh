@@ -2,7 +2,7 @@
 # Reduction: batch-from-coverage inside a one-shot Docker container.
 #
 # Bind-mounts a gap-fill output directory at /mounted-gap-fill (read-only) and
-# writes case directories under --output-dir (mounted at /mounted-output/).
+# writes case directories under --output (mounted at /mounted-output/).
 #
 # Pass --bind-repo to run the local fuzz-fill checkout instead of the copy baked
 # into the image at build time.
@@ -13,37 +13,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 if [[ "${IN_CONTAINER:-}" == 1 ]]; then
-    # shellcheck source=scripts/lib/gap-artifacts.sh
-    source "${REPO_ROOT}/scripts/lib/gap-artifacts.sh"
-    # shellcheck source=scripts/lib/reduction.sh
-    source "${REPO_ROOT}/scripts/lib/reduction.sh"
+    # shellcheck source=scripts/lib/common.sh
+    source "${REPO_ROOT}/scripts/lib/common.sh"
 
-    : "${REDUCTION_N:?REDUCTION_N is required}"
-    : "${GAP_FILL_DIR:?GAP_FILL_DIR is required}"
-    : "${OUTPUT_DIR:?OUTPUT_DIR is required}"
-
-    new_coverage_csv="$(gap_fill_coverage_csv "$GAP_FILL_DIR")"
-    candidate_tests_dir="$(gap_fill_candidate_tests_dir "$GAP_FILL_DIR")"
-    validate_batch_reduction_inputs "$new_coverage_csv" "$candidate_tests_dir"
-
-    # shellcheck disable=SC2206
-    extra_args=(${REDUCTION_BATCH_EXTRA_ARGS:-})
-
-    if [[ "${SCAFFOLD_ONLY:-0}" -eq 1 ]]; then
-        :
-    else
-        export COVERAGE_LLC="${FUZZ_FILL_LLC:-/work/llvm-build-sancov/bin/llc}"
-        export COVERAGE_LLVM_REDUCE="${FUZZ_FILL_LLVM_REDUCE:-/work/llvm-build-sancov/bin/llvm-reduce}"
-        export COVERAGE_LLVM_DIS="${FUZZ_FILL_LLVM_DIS:-/work/llvm-build-sancov/bin/llvm-dis}"
-    fi
-
-    run_batch_from_coverage \
-        "$new_coverage_csv" \
-        "$candidate_tests_dir" \
-        "$OUTPUT_DIR" \
-        "$REDUCTION_N" \
-        "${extra_args[@]}"
-    exit 0
+    cd "$REPO_ROOT"
+    activate_venv_if_present "$REPO_ROOT"
+    exec python -m reduce batch-from-coverage "$@"
 fi
 
 # shellcheck source=scripts/docker/ensure-image.sh
@@ -54,11 +29,6 @@ source "${SCRIPT_DIR}/docker-image-cli.sh"
 source "${SCRIPT_DIR}/docker-run.sh"
 # shellcheck source=scripts/lib/common.sh
 source "${REPO_ROOT}/scripts/lib/common.sh"
-# shellcheck source=scripts/lib/gap-artifacts.sh
-source "${REPO_ROOT}/scripts/lib/gap-artifacts.sh"
-# shellcheck source=scripts/lib/reduction-local.sh
-source "${REPO_ROOT}/scripts/lib/reduction-local.sh"
-reduction_local_source_libs
 
 CONTAINER_WORKDIR="${DOCKER_GAP_CONTAINER_WORKDIR}"
 CONTAINER_SCRIPT="$(docker_gap_container_script "$0")"
@@ -66,6 +36,10 @@ CONTAINER_SCRIPT="$(docker_gap_container_script "$0")"
 docker_image_cli_init_vars
 bind_repo=0
 jobs=""
+gap_fill_dir=""
+output_dir=""
+corpus_dir=""
+declare -a passthrough_args=()
 
 usage() {
     cat <<EOF
@@ -73,7 +47,7 @@ Usage: $(basename "$0") --gap-fill-dir <path> -n <N> [options]
 
 Run batch-from-coverage in a temporary container.
 Gap-fill output is mounted read-only at /mounted-gap-fill/.
-Case directories are written under --output-dir (default: <gap-fill-dir>/reduced/).
+Case directories are written under --output (default: <gap-fill-dir>/reduced/).
 
 Required:
   --gap-fill-dir <path>         Host gap-fill output directory
@@ -92,9 +66,9 @@ Image build (optional; reuses existing image when omitted):
   --github-repo <owner/repo>    GitHub repo hosting the PR (default: llvm/llvm-project)
   --image-name <name>           Image name when using --pr-id (default: fuzz-fill-test)
 
-Options:
-  --output-dir <path>           Host output directory (default: <gap-fill-dir>/reduced/)
-  --candidate-corpus-dir <path> Host fuzz corpus from gap filling (bind-mounted at /mounted-candidate-tests)
+Options (passed to batch-from-coverage):
+  --output <path>               Host output directory (default: <gap-fill-dir>/reduced/)
+  --corpus-dir <path>           Host fuzz corpus from gap filling (bind-mounted read-only)
   --bind-repo                   Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
   --scaffold-only               Create case dirs only; do not run llvm-reduce
   --template-dir <path>         interesting_ir.sh template (default: example/amd/new-test-1)
@@ -113,7 +87,7 @@ Examples:
   $(basename "$0") --gap-fill-dir ./data/gap-fill-out -n 1
 
   $(basename "$0") --gap-fill-dir ./data/gap-fill-out -n 3 \\
-      --output-dir ./data/reduced-out --scaffold-only
+      --output ./data/reduced-out --scaffold-only
 
   $(basename "$0") --pr-id 203468 --gap-fill-dir ./data/gap-fill-out -n 2 -j "\$(nproc)"
 EOF
@@ -133,32 +107,56 @@ while [[ $# -gt 0 ]]; do
             usage
             exit 0
             ;;
+        --gap-fill-dir)
+            [[ $# -ge 2 ]] || { echo "error: --gap-fill-dir requires a value" >&2; exit 2; }
+            gap_fill_dir="$2"
+            shift 2
+            ;;
+        --output)
+            [[ $# -ge 2 ]] || { echo "error: --output requires a value" >&2; exit 2; }
+            output_dir="$2"
+            shift 2
+            ;;
+        --corpus-dir)
+            [[ $# -ge 2 ]] || { echo "error: --corpus-dir requires a value" >&2; exit 2; }
+            corpus_dir="$2"
+            shift 2
+            ;;
         --)
             shift
+            passthrough_args+=("$@")
             break
             ;;
         *)
-            if reduction_cli_try_parse "$1" "${2:-}"; then
-                shift "${REDUCTION_CLI_SHIFT}"
-                continue
-            fi
-            echo "error: unknown option: $1" >&2
-            usage >&2
-            exit 2
+            passthrough_args+=("$1")
+            shift
             ;;
     esac
 done
 
-if [[ $# -gt 0 ]]; then
-    echo "error: unexpected argument: $1" >&2
+if [[ -z "$gap_fill_dir" ]]; then
+    echo "error: --gap-fill-dir is required" >&2
     usage >&2
     exit 2
 fi
 
-REDUCTION_SKIP_HOST_LLVM=1
-if ! reduction_local_validate_required_paths; then
-    usage >&2
+if [[ ! -d "$gap_fill_dir" ]]; then
+    echo "error: --gap-fill-dir is not a directory: ${gap_fill_dir}" >&2
     exit 1
+fi
+
+gap_fill_dir="$(realpath "$gap_fill_dir")"
+if [[ -z "$output_dir" ]]; then
+    output_dir="${gap_fill_dir}/reduced"
+fi
+mkdir -p "$output_dir"
+output_dir="$(realpath "$output_dir")"
+if [[ -n "$corpus_dir" ]]; then
+    if [[ ! -d "$corpus_dir" ]]; then
+        echo "error: --corpus-dir is not a directory: ${corpus_dir}" >&2
+        exit 1
+    fi
+    corpus_dir="$(realpath "$corpus_dir")"
 fi
 
 validate_jobs "$jobs"
@@ -166,51 +164,35 @@ validate_jobs "$jobs"
 DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --backend-tests"
 docker_image_cli_prepare
 
-reduction_local_prepare_paths
-mkdir -p "$output_dir"
-output_dir="$(realpath "$output_dir")"
-gap_fill_dir="$(realpath "$gap_fill_dir")"
-
 echo "Using gap-fill output:"
-echo "  gap-fill dir:    ${gap_fill_dir}"
-echo "  new coverage:    ${new_coverage_csv}"
-echo "  candidate tests: ${candidate_tests_dir}"
-if [[ -n "$candidate_corpus_dir" ]]; then
-    echo "  candidate corpus: ${candidate_corpus_dir}"
+echo "  gap-fill dir: ${gap_fill_dir}"
+echo "  output dir:   ${output_dir}"
+if [[ -n "$corpus_dir" ]]; then
+    echo "  corpus dir:   ${corpus_dir}"
 fi
-echo "  output dir:      ${output_dir} (n=${reduction_n})"
-if [[ "$scaffold_only" -eq 1 ]]; then
-    echo "  mode:            scaffold-only"
-else
-    echo "  mode:            full reduction (llvm tools from image)"
-fi
+echo
 
-rm -rf "${output_dir:?}"/*
-mkdir -p "$output_dir"
-
-reduction_local_batch_extra_args
-extra_args_flat="${REDUCTION_BATCH_EXTRA_ARGS[*]-}"
-
-docker_env=(
-    -e "IN_CONTAINER=1"
-    -e "REDUCTION_N=${reduction_n}"
-    -e "GAP_FILL_DIR=/mounted-gap-fill"
-    -e "OUTPUT_DIR=/mounted-output"
-    -e "SCAFFOLD_ONLY=${scaffold_only}"
-    -e "REDUCTION_BATCH_EXTRA_ARGS=${extra_args_flat}"
+container_args=(
+    --gap-fill-dir /mounted-gap-fill
+    --output /mounted-output
 )
+if [[ -n "$corpus_dir" ]]; then
+    container_args+=(--corpus-dir /mounted-candidate-tests)
+fi
+container_args+=("${passthrough_args[@]}")
+
+docker_env=(-e "IN_CONTAINER=1")
 docker_gap_append_jobs_env docker_env
 
 extra_mounts=(
     -v "${gap_fill_dir}:/mounted-gap-fill:ro"
 )
-if [[ -n "$candidate_corpus_dir" ]]; then
-    extra_mounts+=(-v "${candidate_corpus_dir}:/mounted-candidate-tests:ro")
-    docker_env+=(-e "REDUCTION_CORPUS_DIR=/mounted-candidate-tests")
+if [[ -n "$corpus_dir" ]]; then
+    extra_mounts+=(-v "${corpus_dir}:/mounted-candidate-tests:ro")
 fi
 docker_gap_append_bind_repo_mount extra_mounts
 
-docker_gap_run "$CONTAINER_SCRIPT" "$output_dir" "$image_ref" docker_env extra_mounts
+docker_gap_run "$CONTAINER_SCRIPT" "$output_dir" "$image_ref" docker_env extra_mounts container_args
 
 echo "Image: ${image_ref}"
 echo "Reduction output: ${output_dir}"
