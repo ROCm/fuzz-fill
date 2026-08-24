@@ -9,6 +9,7 @@ from pathlib import Path
 from added_lines.added_lines import AddedLine, collect_added_lines
 from added_lines.constants import ADDED_LINES_FILENAME, DEFAULT_OUTPUT_DIR
 from fuzz_fill.env import FUZZ_FILL_LLVM_REPO, path_from_flag_or_env
+from fuzz_fill.git_revision import write_commit_file
 from fuzz_fill.log import (
     add_log_level_argument,
     add_log_to_file_argument,
@@ -77,11 +78,13 @@ def main() -> None:
     )
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    rows = collect_added_lines(repo, args.commit)
+    revision, rows = collect_added_lines(repo, args.commit)
     csv_text = format_added_lines_csv(rows)
 
     out_file = out_dir / ADDED_LINES_FILENAME
     out_file.write_text(csv_text, encoding="utf-8")
+
+    write_commit_file(out_dir, revision)
 
     if args.debug:
         logger.debug("wrote %d added lines to %s", len(rows), out_file)

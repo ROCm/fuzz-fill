@@ -181,7 +181,7 @@ def main():
         default=None,
         help=(
             "CSV of llc flag variants (column llc_flags). "
-            "Default: -O0..-O3 crossed with -global-isel=0/1 (8 variants per input)."
+            "Default: -O0, -O1, -O2, -O3 (4 variants per input)."
         ),
     )
 
@@ -282,6 +282,26 @@ def main():
         required=True,
         help="CSV of source lines to check (columns path, line_no, text).",
     )
+    p_target_lines.add_argument(
+        "--commit-check",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Fail when the COMMIT files written by `coverage baseline` and "
+            "`added_lines` disagree with each other or with HEAD of "
+            "--llvm-repo. Skipped when --llvm-repo is not a git checkout "
+            "(default: enabled)."
+        ),
+    )
+    p_target_lines.add_argument(
+        "--source-text-check",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Fail when a target line differs from the source on disk at that "
+            "line number (default: enabled)."
+        ),
+    )
 
     args = parser.parse_args()
     configure_logging(
@@ -322,6 +342,8 @@ def main():
             logger.info("wrote baseline timings to %s", timings_path)
 
     elif args.subcmd == "candidate-test":
+        if args.n is not None and args.n < 1:
+            parser.error("--n must be a positive integer.")
         tools = candidate_test_tools_from_args(llc=args.llc)
         filepaths = get_filepaths(args, tools=tools)
         llc_flag_variants = load_llc_flag_variants(args.settings_csv)
@@ -388,6 +410,8 @@ def main():
                 llvm_repo=args.llvm_repo,
                 target_lines_csv=args.target_lines_csv,
                 report_path=report_path,
+                commit_check=args.commit_check,
+                source_text_check=args.source_text_check,
             )
 
     else:

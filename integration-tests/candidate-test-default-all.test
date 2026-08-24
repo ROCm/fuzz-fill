@@ -1,0 +1,17 @@
+# COM: Omitting --n runs every .ll/.bc under --candidate-tests-dir (sorted).
+# COM: new-tests-parallel has 3 inputs; default settings => 3 x 4 = 12 jobs.
+
+# RUN: rm -rf %t && mkdir -p %t/candidate_tests_all
+
+# RUN: %coverage candidate-test --output-dir %t/candidate_tests_all --llc %sancov-llc --candidate-tests-dir %S/fixtures/new-tests-parallel 2>&1 | tee %t/candidate_tests_all.log
+
+# RUN: %FileCheck %s --input-file=%t/candidate_tests_all.log --check-prefix=EXEC_ALL
+# EXEC_ALL: complete=12  skipped=0  remaining=0
+
+# RUN: find %t/candidate_tests_all -name '*.sancov' | wc -l | %FileCheck %s --check-prefix=SANCOV_ALL
+# SANCOV_ALL: 12
+
+# RUN: test -f %t/candidate_tests_all/candidate_test_settings.csv
+# RUN: test -f %t/candidate_tests_all/candidate_test_manifest.csv
+# RUN: wc -l %t/candidate_tests_all/candidate_test_manifest.csv | %FileCheck %s --check-prefix=MANIFEST_ALL
+# MANIFEST_ALL: 13

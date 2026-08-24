@@ -35,6 +35,8 @@ EOF
 
 gap_filling_local_usage_common_options() {
     cat <<EOF
+  -n <N>, --n <N>                Run only the first N candidate tests (.ll/.bc, sorted;
+                                  default: all files under --candidate-tests-dir)
   --settings-csv <path>           Optional llc flag variants CSV for candidate-test
   -j <n>, --jobs <n>              Parallel jobs for candidate-test
   --help, -h                      Show this help
@@ -153,10 +155,6 @@ gap_filling_local_validate_required_paths() {
         echo "error: --candidate-tests-dir is required" >&2
         missing=1
     fi
-    if [[ -z "$candidate_n" ]]; then
-        echo "error: -n/--n is required" >&2
-        missing=1
-    fi
     if [[ -z "$llvm_repo" ]]; then
         echo "error: --llvm-repo is required" >&2
         missing=1
@@ -174,7 +172,9 @@ gap_filling_local_validate_required_paths() {
         return 1
     fi
 
-    gap_filling_local_validate_candidate_n
+    if [[ -n "$candidate_n" ]]; then
+        gap_filling_local_validate_candidate_n
+    fi
     if [[ ! -d "$candidate_tests_dir" ]]; then
         echo "error: --candidate-tests-dir is not a directory: ${candidate_tests_dir}" >&2
         return 1

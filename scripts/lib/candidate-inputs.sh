@@ -8,7 +8,8 @@ collect_candidate_inputs() {
     find "$src" -type f \( -name '*.ll' -o -name '*.bc' \) | LC_ALL=C sort
 }
 
-# Copy the first n candidate inputs into staging_dir, preserving relative paths.
+# Copy candidate inputs into staging_dir, preserving relative paths.
+# When n is empty, copies all .ll/.bc files; otherwise copies the first n (sorted).
 stage_candidate_tests() {
     local src="$1"
     local n="$2"
@@ -23,10 +24,14 @@ stage_candidate_tests() {
         exit 1
     fi
 
-    count="$n"
-    if [[ "${#candidate_files[@]}" -lt "$count" ]]; then
+    if [[ -z "$n" ]]; then
         count="${#candidate_files[@]}"
-        echo "note: corpus has ${#candidate_files[@]} file(s); staging all of them (requested ${n})"
+    else
+        count="$n"
+        if [[ "${#candidate_files[@]}" -lt "$count" ]]; then
+            count="${#candidate_files[@]}"
+            echo "note: corpus has ${#candidate_files[@]} file(s); staging all of them (requested ${n})"
+        fi
     fi
 
     local i

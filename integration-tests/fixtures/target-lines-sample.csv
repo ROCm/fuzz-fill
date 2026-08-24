@@ -1,7 +1,7 @@
 path,line_no,text
-llvm/lib/Target/AMDGPU/AMDGPUAliasAnalysis.cpp,103,
-llvm/lib/Target/AMDGPU/AMDGPUAsmPrinter.cpp,211,
-llvm/lib/Target/AMDGPU/AMDGPUAsmPrinter.cpp,222,
-llvm/lib/Target/AMDGPU/AMDGPUAsmPrinter.cpp,581,
-llvm/lib/Target/AMDGPU/AMDGPUHSAMetadataStreamer.cpp,590,
-llvm/lib/Target/AMDGPU/AMDGPUHSAMetadataStreamer.cpp,680,
+llvm/lib/Target/AMDGPU/AMDGPUAliasAnalysis.cpp,103,                                             bool IgnoreLocals) {
+llvm/lib/Target/AMDGPU/AMDGPUAsmPrinter.cpp,211,"    HSAMetadataStream->emitKernel(*MF, CurrentProgramInfo);"
+llvm/lib/Target/AMDGPU/AMDGPUAsmPrinter.cpp,222,  auto &Streamer = getTargetStreamer()->getStreamer();
+llvm/lib/Target/AMDGPU/AMDGPUAsmPrinter.cpp,581,    const MachineFunction &MF) const {
+llvm/lib/Target/AMDGPU/AMDGPUHSAMetadataStreamer.cpp,590,      AMDGPU::getAMDHSACodeObjectVersion(*Func.getParent());
+llvm/lib/Target/AMDGPU/AMDGPUHSAMetadataStreamer.cpp,680,"    emitKernelArg(DL, Int8PtrTy, Align(8), ""hidden_multigrid_sync_arg"", Offset,"

@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from fuzz_fill.git_revision import resolve_revision
 from fuzz_fill.log import get_logger, log_timing, run_subprocess
 
 logger = get_logger("added_lines")
@@ -34,17 +35,12 @@ def _verify_git_repo(repo: Path) -> None:
         )
 
 
-def _verify_commit(repo: Path, commit: str) -> None:
-    r = run_subprocess(
-        logger,
-        ["git", "-C", str(repo), "rev-parse", "--verify", f"{commit}^{{commit}}"],
-        capture_output=True,
-        text=True,
-    )
-    if r.returncode != 0:
-        raise SystemExit(
-            f"Invalid git revision {commit!r} in {repo}:\n{r.stderr.strip()}"
-        )
+def _resolve_commit(repo: Path, commit: str) -> str:
+    """Full hash of ``commit`` in ``repo``, or exit when it does not resolve."""
+    revision = resolve_revision(repo, commit)
+    if revision is None:
+        raise SystemExit(f"Invalid git revision {commit!r} in {repo}")
+    return revision
 
 
 def git_show_patch(repo: Path, commit: str) -> str:
@@ -142,9 +138,10 @@ def parse_added_lines(patch: str) -> list[AddedLine]:
     return out
 
 
-def collect_added_lines(repo: Path, commit: str) -> list[AddedLine]:
+def collect_added_lines(repo: Path, commit: str) -> tuple[str, list[AddedLine]]:
+    """Resolved hash of ``commit`` and the lines it adds."""
     with log_timing(logger, "collect added lines"):
         _verify_git_repo(repo)
-        _verify_commit(repo, commit)
+        revision = _resolve_commit(repo, commit)
         patch = git_show_patch(repo, commit)
-        return parse_added_lines(patch)
+        return revision, parse_added_lines(patch)

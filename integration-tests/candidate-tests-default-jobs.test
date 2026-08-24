@@ -1,32 +1,32 @@
 # COM: Run `coverage candidate-test` WITHOUT -j so the default job count
 # COM: (os.cpu_count()) drives parallel execution.
-# COM: 1) With --settings-csv (4 -Ox variants): 3 files x 4 = 12 jobs.
-# COM: 2) Without --settings-csv (default 8 variants): 3 files x 8 = 24 jobs.
+# COM: Default 4 -Ox variants: 3 files x 4 = 12 jobs.
 
-# RUN: rm -rf %t && mkdir -p %t/candidate_tests_csv %t/candidate_tests_default
-
-# RUN: %coverage candidate-test --output-dir %t/candidate_tests_csv --llc %sancov-llc --candidate-tests-dir %S/fixtures/new-tests-parallel --settings-csv %S/fixtures/candidate-test-settings-o-only.csv --n 3 2>&1 | tee %t/candidate_tests_csv.log
-
-# RUN: %FileCheck %s --input-file=%t/candidate_tests_csv.log --check-prefix=EXEC_CSV
-# EXEC_CSV: complete=12  skipped=0  remaining=0
-
-# RUN: find %t/candidate_tests_csv -name '*.sancov' | wc -l | %FileCheck %s --check-prefix=SANCOV_CSV
-# SANCOV_CSV: 12
-
-# RUN: test -f %t/candidate_tests_csv/candidate_test_settings.csv
-# RUN: test -f %t/candidate_tests_csv/candidate_test_manifest.csv
-# RUN: wc -l %t/candidate_tests_csv/candidate_test_manifest.csv | %FileCheck %s --check-prefix=MANIFEST_CSV
-# MANIFEST_CSV: 13
+# RUN: rm -rf %t && mkdir -p %t/candidate_tests_default %t/candidate_tests_csv
 
 # RUN: %coverage candidate-test --output-dir %t/candidate_tests_default --llc %sancov-llc --candidate-tests-dir %S/fixtures/new-tests-parallel --n 3 2>&1 | tee %t/candidate_tests_default.log
 
 # RUN: %FileCheck %s --input-file=%t/candidate_tests_default.log --check-prefix=EXEC_DEFAULT
-# EXEC_DEFAULT: complete=24  skipped=0  remaining=0
+# EXEC_DEFAULT: complete=12  skipped=0  remaining=0
 
 # RUN: find %t/candidate_tests_default -name '*.sancov' | wc -l | %FileCheck %s --check-prefix=SANCOV_DEFAULT
-# SANCOV_DEFAULT: 24
+# SANCOV_DEFAULT: 12
 
 # RUN: test -f %t/candidate_tests_default/candidate_test_settings.csv
 # RUN: test -f %t/candidate_tests_default/candidate_test_manifest.csv
 # RUN: wc -l %t/candidate_tests_default/candidate_test_manifest.csv | %FileCheck %s --check-prefix=MANIFEST_DEFAULT
-# MANIFEST_DEFAULT: 25
+# MANIFEST_DEFAULT: 13
+
+# COM: --settings-csv with a single -O0 row: 3 files x 1 = 3 jobs.
+# RUN: %coverage candidate-test --output-dir %t/candidate_tests_csv --llc %sancov-llc --candidate-tests-dir %S/fixtures/new-tests-parallel --settings-csv %S/fixtures/candidate-test-settings-o0-only.csv --n 3 2>&1 | tee %t/candidate_tests_csv.log
+
+# RUN: %FileCheck %s --input-file=%t/candidate_tests_csv.log --check-prefix=EXEC_CSV
+# EXEC_CSV: complete=3  skipped=0  remaining=0
+
+# RUN: find %t/candidate_tests_csv -name '*.sancov' | wc -l | %FileCheck %s --check-prefix=SANCOV_CSV
+# SANCOV_CSV: 3
+
+# RUN: test -f %t/candidate_tests_csv/candidate_test_settings.csv
+# RUN: test -f %t/candidate_tests_csv/candidate_test_manifest.csv
+# RUN: wc -l %t/candidate_tests_csv/candidate_test_manifest.csv | %FileCheck %s --check-prefix=MANIFEST_CSV
+# MANIFEST_CSV: 4
