@@ -77,6 +77,7 @@ Use `spirv` instead of `amdgpu` for SPIR-V backend tests.
 - [Gap finding (PR)](#gap-finding-pr)
 - [Gap filling](#gap-filling)
 - [Reduction](#reduction)
+  - [Reduction passes](#reduction-passes)
 - [CLI reference](#cli-reference)
   - [Uncovered-lines CSV contract](#uncovered-lines-csv-contract)
   - [Environment variables](#environment-variables)
@@ -334,6 +335,47 @@ python -m reduce batch-from-coverage \
 See `--help` for pipeline options (`--pipeline`, `--pass-under-test`, `--mtriple`, `--with-creduce`, …). LLVM tools can be passed explicitly (`--llc`, `--llvm-reduce`), via `--llvm-bin` / `--instrumented-bin-dir`, or through `FUZZ_FILL_LLC` / `FUZZ_FILL_LLVM_REDUCE` environment variables.
 
 Integration test: [`integration-tests/coverage-pipeline.test`](integration-tests/coverage-pipeline.test) (real gap-fill pipeline plus `llvm-reduce` on the first hit).
+
+### Reduction passes
+
+Reduction runs an ordered **pipeline** of passes (see `config.json` or `--pipeline`). Each pass reads the current test artifact and writes the next intermediate under `reduced/tmp/`; the final artifact is copied to `reduced/reduced.ll` (or `reduced.mir` for MIR pipelines).
+
+| Pass id | Description |
+|---------|-------------|
+| `snapshot` | Copy the input IR into the temp directory as a baseline checkpoint before later passes mutate it. |
+| `llvm_reduce_ir` | Run `llvm-reduce` on LLVM IR (`.ll` or `.bc`) using an **interesting-ness script** (`interesting_ir.sh`) that checks SanitizerCoverage still hits the target line. For `.bc` input, disassembles the reduced bitcode to `.ll` with `llvm-dis`. Default batch pipeline. |
+| `creduce` | Further shrink the current artifact with **C-Reduce**, using a copy of the interesting-ness script where `"$1"` is replaced by the candidate filename (C-Reduce runs tests in its own temp directory). Optional follow-on to `llvm_reduce_ir` or `llvm_reduce_mir` (`--with-creduce`). |
+| `extract_mir_before_pass` | Run `llc` with `-stop-before=<pass_under_test> -simplify-mir` to extract MIR immediately before a specific machine pass. Requires `pass_under_test`, `mtriple`, and `llc_O` on the step. Typical first step before `llvm_reduce_mir`. |
+| `llvm_reduce_mir` | Run `llvm-reduce -x=mir` on MIR using **interesting_mir.sh**, which re-runs `llc` through the pass under test and checks coverage. Requires `--pass-under-test` when scaffolding batch cases. |
+| `extract_ir_before_pass` | Like `extract_mir_before_pass`, but stops before the pass without `-simplify-mir` and normalizes `llc`'s print-before dump (strip `---` delimiters and common indentation) into valid LLVM IR for downstream IR reduction. |
+
+#### Extracting IR at the IR/MIR boundary
+
+On the default AMDGPU (SelectionDAG) codegen path, the module stays in LLVM IR until **`amdgpu-isel`** (`AMDGPUISelDAGToDAG`). That pass is the instruction selector; everything before it is IR-only. To capture that final IR snapshot, use `extract_ir_before_pass` with `pass_under_test` set to `amdgpu-isel`:
+
+```json
+{
+  "id": "extract_ir_before_pass",
+  "parameters": {
+    "pass_under_test": "amdgpu-isel",
+    "mtriple": "amdgcn-amd-amdhsa",
+    "llc_O": "-O3"
+  }
+}
+```
+
+The same stop point behaves differently depending on `-simplify-mir`:
+
+| `llc` invocation | Output |
+|------------------|--------|
+| `-stop-before=amdgpu-isel` (no `-simplify-mir`) | Pure LLVM IR — what `extract_ir_before_pass` writes as `.ll` |
+| `-stop-before=amdgpu-isel -simplify-mir` | Hybrid snapshot: IR plus empty `MachineFunction` shells — what `extract_mir_before_pass` produces; not suitable for `llvm-reduce -x=mir` until real machine instructions exist |
+
+Use `--mir-codegen-only` when the pass under test is codegen-only (like `amdgpu-isel`): `interesting_mir_codegen.sh` resumes from the extracted snapshot with normal `llc` flags instead of `-run-pass`.
+
+**Other backends:** the IR→MIR boundary depends on the selector in use. GlobalISel (e.g. `-global-isel=1` on AMDGPU) crosses at **`irtranslator`**, not `amdgpu-isel`. SPIR-V IR-only extraction often stops before target IR passes such as **`spirv-emit-intrinsics`**; the GlobalISel MIR boundary is **`instruction-select`**. Mid-pipeline target IR passes (e.g. `amdgpu-remove-incompatible-functions`) are a separate use case — they extract IR before a specific pass, not necessarily at the last IR-only point.
+
+Pass ids are comma-separated for `--pipeline` (e.g. `extract_mir_before_pass,llvm_reduce_mir,creduce`). Extraction passes and `llvm_reduce_mir` need `--pass-under-test` and `--mtriple`; see `--help` on `batch-from-coverage` for `--extract-mir-output` and `--extract-ir-output`.
 
 ---
 
