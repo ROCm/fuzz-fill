@@ -16,7 +16,8 @@ that PR so a fresh CI job is always dispatched — it also skips pr-gap-scan's
 artifact-reuse cache check (never reuses an existing artifact from a
 matching prior run, even if one exists for the same commit). Everything
 else — gap-finding-only dispatch, incremental polling/artifact
-download, filtering `llvm_unreachable`/`assert(` lines, and drafting a
+download, filtering `llvm_unreachable`/`assert(`/`reportFatalInternalError(`
+lines, and drafting a
 comment — is identical, including the drift check: since CI can take a long
 time, the draft comment re-checks the PR's live head against the commit the
 artifact was actually analyzed against, and prepends a warning if the PR has
