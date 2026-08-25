@@ -21,9 +21,12 @@ comment — is identical, including the drift check: since CI can take a long
 time, the draft comment re-checks the PR's live head against the commit the
 artifact was actually analyzed against, and prepends a warning if the PR has
 moved on. It also carries over the LIT-test-failure warning (if a backend's
-run reported LIT failures during its baseline coverage pass). See
-[pr-gap-scan/SKILL.md](../pr-gap-scan/SKILL.md#comment-template) for what
-both warnings look like.
+run reported LIT failures during its baseline coverage pass) and the
+stacked-PR warning (if the PR's base branch isn't the repo's default
+branch). See [pr-gap-scan/SKILL.md](../pr-gap-scan/SKILL.md#comment-template)
+for what all three warnings look like, and
+[pr-gap-scan/SKILL.md](../pr-gap-scan/SKILL.md#stacked-prs) for the stacked-PR
+criteria.
 
 This reuses `../pr-gap-scan/scripts/scan.py` directly (`target` subcommand
 force-adds the PR as the sole candidate; `run --pr <N>` does the full
