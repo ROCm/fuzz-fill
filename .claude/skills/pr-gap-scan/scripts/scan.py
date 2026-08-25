@@ -462,15 +462,38 @@ def render_comment(pr_head, entries):
     )
 
 
-def fetch_live_head(llvm_repo, number):
-    """One live GET of the PR head SHA, or None on failure (closed/renumbered/
-    network hiccup -- don't block the report on this)."""
+def fetch_live_pr(llvm_repo, number):
+    """One live GET of the PR; returns {"head_sha", "base_ref"}, or None on failure
+    (closed/renumbered/network hiccup -- don't block the report on this)."""
     try:
         pr = gh_api_json(f"repos/{llvm_repo}/pulls/{number}")
-        return pr["head"]["sha"]
+        return {"head_sha": pr["head"]["sha"], "base_ref": pr["base"]["ref"]}
     except Exception as e:
-        log(f"warning: could not re-check PR #{number}'s current head: {e}")
+        log(f"warning: could not re-check PR #{number}'s current state: {e}")
         return None
+
+
+def default_branch(llvm_repo, cache):
+    key = ("_default_branch", llvm_repo)
+    if key not in cache:
+        cache[key] = gh_api_json(f"repos/{llvm_repo}")["default_branch"]
+    return cache[key]
+
+
+def find_base_pr(llvm_repo, base_ref):
+    """If base_ref is itself the head branch of another currently-open PR in
+    llvm_repo, return that PR's {number, title}; else None (already merged,
+    a maintenance branch, or otherwise not a live PR)."""
+    owner = llvm_repo.split("/", 1)[0]
+    try:
+        matches = gh_api_json(
+            f"repos/{llvm_repo}/pulls?state=open&head={owner}:{base_ref}&per_page=1"
+        )
+    except Exception:
+        return None
+    if not matches:
+        return None
+    return {"number": matches[0]["number"], "title": matches[0]["title"]}
 
 
 def render_drift_warning(number, analyzed_sha, live_sha):
@@ -487,6 +510,36 @@ def render_drift_warning(number, analyzed_sha, live_sha):
         f"PR's current tip is `{live_sha[:12]}` (`{live_sha}`). The uncovered "
         "lines below may be stale -- re-run the analysis (pr-gap-check's "
         "`target` subcommand forces a fresh run) before posting.\n"
+        "<!-- end internal note -->\n\n"
+    )
+
+
+def render_stacked_pr_warning(number, base_ref, base_branch, base_pr):
+    if base_pr:
+        detail = (
+            f"which is itself still-open PR #{base_pr['number']} "
+            f"({base_pr['title']!r})"
+        )
+    else:
+        detail = (
+            "which doesn't match any currently open PR -- it may be a "
+            "maintenance branch, or the PR this was stacked on has already "
+            "merged without this PR being retargeted onto the default branch yet"
+        )
+    return (
+        "<!-- fuzz-fill internal note: do not post this block, GitHub hides "
+        "HTML comments when rendering so it won't show up if you do, but "
+        "strip it if you're posting the body some other way. -->\n"
+        "> [!WARNING]\n"
+        f"> PR #{number} looks stacked: its base branch is `{base_ref}`, not "
+        f"the repository's default branch (`{base_branch}`), {detail}. The gap "
+        "analysis only considered lines unique to this PR (diffed against its "
+        "merge-base), but that merge-base will move if the base branch gets "
+        "amended or rebased before it merges -- which can invalidate this "
+        "analysis without this PR's own head commit ever changing, so the "
+        "drift check (which only compares this PR's own head commit) "
+        "wouldn't catch it. Confirm the base PR/branch is settled before "
+        "trusting these findings.\n"
         "<!-- end internal note -->\n\n"
     )
 
@@ -544,7 +597,8 @@ def render_pr_comment(cand, state, out_dir, cache):
         return None
     text = render_comment(pr_head, surviving)
     llvm_repo = cand.get("llvm_repo", DEFAULT_LLVM_REPO)
-    live_head = fetch_live_head(llvm_repo, number)
+    live_pr = fetch_live_pr(llvm_repo, number)
+    live_head = live_pr["head_sha"] if live_pr else None
     if live_head and live_head != pr_head:
         log(f"warning: PR #{number} has drifted (analyzed {pr_head[:12]}, now at {live_head[:12]})")
         text = render_drift_warning(number, pr_head, live_head) + text
@@ -552,6 +606,14 @@ def render_pr_comment(cand, state, out_dir, cache):
         log(f"warning: PR #{number} had LIT test failures during analysis for: "
             f"{', '.join(b for b, _ in lit_warnings)}")
         text = render_lit_failures_warning(lit_warnings) + text
+    base_ref = live_pr["base_ref"] if live_pr else None
+    if base_ref:
+        base_branch = default_branch(llvm_repo, cache)
+        if base_ref != base_branch:
+            base_pr = find_base_pr(llvm_repo, base_ref)
+            log(f"warning: PR #{number} looks stacked (base branch {base_ref!r} "
+                f"!= default branch {base_branch!r})")
+            text = render_stacked_pr_warning(number, base_ref, base_branch, base_pr) + text
     title = f"# [#{number}]({cand['url']}) — {cand['title']}\n\n"
     text = title + text
     os.makedirs(out_dir, exist_ok=True)
