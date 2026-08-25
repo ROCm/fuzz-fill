@@ -41,7 +41,7 @@ PR_HEAD_ARTIFACT_RE = re.compile(r"^pr-head-pr(\d+)-(\d+)$")
 
 # Lines whose entire purpose is to be unreachable/defensive aren't meaningful
 # coverage gaps -- excluded per the review criteria this skill implements.
-TRIVIAL_LINE_RE = re.compile(r"llvm_unreachable|\bassert\s*\(")
+TRIVIAL_LINE_RE = re.compile(r"llvm_unreachable|\bassert\s*\(|\breportFatalInternalError\s*\(")
 
 # gap-finding-pr.sh builds inside the container at this path, and
 # target_lines_uncovered.csv's `file` column reflects that absolute build
