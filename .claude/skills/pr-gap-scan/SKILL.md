@@ -22,17 +22,29 @@ always safe; completed phases are skipped.
 
 ## Pipeline
 
-1. **discover** — list open PRs in `llvm/llvm-project`, most-recently-updated
-   first, and keep the first `--limit` (default 20) **per backend** whose
-   changed files touch `llvm/lib/Target/AMDGPU/` or `llvm/lib/Target/SPIRV/`
-   — i.e. up to 20 AMDGPU PRs and up to 20 SPIRV PRs, not 20 total. Pass one
-   or more `--backend {amdgpu,spirv}` to scan only that backend (default:
-   both). A PR touching both backends counts against both quotas, but only
-   lists the backend(s) that still had room when it was found (so a backend
-   past its limit doesn't get analyzed for that PR). A PR is dropped if
-   fuzz-fill already left a comment on it (body contains "fuzz-fill",
-   case-insensitive) and no commit has landed since that comment. Each kept
-   candidate records its head SHA and which backend(s) it touches.
+1. **discover** — for each requested backend, searches open PRs in
+   `llvm/llvm-project` carrying that backend's auto-applied label
+   (`backend:AMDGPU` / `backend:SPIR-V` — see `.github/new-prs-labeler.yml`
+   in that repo), most-recently-updated first, and keeps the first
+   `--limit` (default 20) **per backend** whose changed files actually touch
+   `llvm/lib/Target/AMDGPU/` or `llvm/lib/Target/SPIRV/` — i.e. up to 20
+   AMDGPU PRs and up to 20 SPIRV PRs, not 20 total. Searching by label
+   avoids paying for a `/pulls/<n>/files` call on every open PR in the
+   repo — only PRs GitHub already labeled as touching the backend get one,
+   which is what makes discovery fast; the label's glob is broader than the
+   exact path match (e.g. `backend:AMDGPU` fires on any `*amdgpu*` path
+   anywhere in the repo), so that files call still runs per labeled PR to
+   confirm and pin down the exact backend(s), which also weeds out the
+   occasional label false-positive. Pass one or more `--backend
+   {amdgpu,spirv}` to scan only that backend (default: both). A PR touching
+   both backends counts against both quotas, but only lists the backend(s)
+   that still had room when it was found (so a backend past its limit
+   doesn't get analyzed for that PR); a PR found under one backend's label
+   search is only processed once even if it also carries the other's label.
+   A PR is dropped if fuzz-fill already left a comment on it (body contains
+   "fuzz-fill", case-insensitive) and no commit has landed since that
+   comment. Each kept candidate records its head SHA and which backend(s)
+   it touches.
 2. **dispatch** — for each candidate PR x backend not forced (see
    [pr-gap-check](../pr-gap-check/SKILL.md)), first checks whether a prior
    successful run already analyzed this exact PR/commit/backend: it looks up
@@ -241,6 +253,14 @@ this PR's head commit) has no way to catch it.
   `llvm/lib/Target/AMDGPU/` and `llvm/lib/Target/SPIRV/` only (not test
   directories) — that's what determines whether the backend build is
   exercised at all.
+- Discovery relies on `llvm/llvm-project`'s auto-labeler
+  (`.github/new-prs-labeler.yml`) having already applied `backend:AMDGPU` /
+  `backend:SPIR-V` to a PR before it's scanned. The labeler's globs are
+  broader than the exact path match above (e.g. `backend:AMDGPU` also fires
+  on some non-AMDGPU changes), so the files-based path check still runs on
+  every labeled candidate to confirm a real hit — but a PR could in theory
+  be missed for one scan pass if the labeler hasn't run yet (it's typically
+  near-instant, and a later scan picks it up once the label lands).
 - The already-commented filter matches any comment (any author) whose body
   contains "fuzz-fill" case-insensitively — adjust
   `already_reviewed_without_new_commits()` in `scan.py` if fuzz-fill comments

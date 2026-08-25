@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 
 DEFAULT_LLVM_REPO = "llvm/llvm-project"
@@ -31,6 +32,16 @@ DEFAULT_REF = os.environ.get("FUZZ_FILL_WORKFLOW_REF", "users/mgcarrasco/manual-
 BACKEND_PATH_RES = {
     "amdgpu": re.compile(r"^llvm/lib/Target/AMDGPU/"),
     "spirv": re.compile(r"^llvm/lib/Target/SPIRV/"),
+}
+
+# llvm/llvm-project auto-labels PRs by changed-file globs (.github/new-prs-labeler.yml).
+# Used to narrow discover()'s candidate pool before paying for a /pulls/<n>/files call
+# per PR -- these globs are broader than BACKEND_PATH_RES (e.g. backend:AMDGPU fires on
+# any path containing "amdgpu" anywhere in the repo, not just llvm/lib/Target/AMDGPU/),
+# so a files call is still needed per labeled PR to pin down the exact backend match.
+BACKEND_LABELS = {
+    "amdgpu": "backend:AMDGPU",
+    "spirv": "backend:SPIR-V",
 }
 
 # Expected artifact naming from pr-gap-analysis.yml -- used to detect a
@@ -104,6 +115,16 @@ def gh_api_paginated(path, per_page=100, max_pages=50):
     return items
 
 
+def search_open_prs_by_label(llvm_repo, label, per_page, page):
+    """One page of open PRs carrying `label`, most-recently-updated first."""
+    q = f'repo:{llvm_repo} is:pr is:open label:"{label}"'
+    data = gh_api_json(
+        f"search/issues?q={urllib.parse.quote(q)}&sort=updated&order=desc"
+        f"&per_page={per_page}&page={page}"
+    )
+    return data.get("items", [])
+
+
 def load_state(path):
     if os.path.isfile(path):
         with open(path) as f:
@@ -147,54 +168,65 @@ def discover(llvm_repo, limit, max_scan_pages=20, per_page=50, backends=None):
     """Find up to `limit` most-recently-updated candidate PRs per backend.
 
     Each requested backend (default: both amdgpu and spirv) gets its own
-    quota of `limit` PRs. A PR touching more than one requested backend
-    counts against each of their quotas at once, but only lists the
-    backend(s) that still had room in its `backends` field, so dispatch()
-    doesn't analyze a backend past its limit.
+    quota of `limit` PRs, found by searching open PRs carrying that
+    backend's label (BACKEND_LABELS) instead of listing every open PR and
+    fetching its changed files -- only PRs GitHub already labeled as
+    touching the backend ever pay for a /pulls/<n>/files call. A PR
+    touching more than one requested backend counts against each of their
+    quotas at once, but only lists the backend(s) that still had room in
+    its `backends` field, so dispatch() doesn't analyze a backend past its
+    limit. A PR found under one backend's label search is only processed
+    once even if it also carries another requested backend's label.
     """
     requested = set(backends) if backends else set(BACKEND_PATH_RES)
     candidates = []
     counts = {backend: 0 for backend in requested}
+    seen = set()
     scanned = 0
-    page = 1
-    while any(counts[b] < limit for b in counts) and page <= max_scan_pages:
-        prs = gh_api_json(
-            f"repos/{llvm_repo}/pulls?state=open&sort=updated&direction=desc"
-            f"&per_page={per_page}&page={page}"
-        )
-        if not prs:
-            break
-        for pr in prs:
-            scanned += 1
-            number = pr["number"]
-            files = gh_api_paginated(f"repos/{llvm_repo}/pulls/{number}/files")
-            all_backends = sorted(
-                {b for f in files if (b := backend_for_path(f["filename"])) and b in requested}
-            )
-            backends_hit = [b for b in all_backends if counts[b] < limit]
-            if not backends_hit:
-                continue
-            if already_reviewed_without_new_commits(llvm_repo, number):
-                log(f"skip PR #{number}: already reviewed, no new commits since")
-                continue
-            candidates.append(
-                {
-                    "number": number,
-                    "head_sha": pr["head"]["sha"],
-                    "backends": backends_hit,
-                    "url": pr["html_url"],
-                    "title": pr["title"],
-                    "updated_at": pr["updated_at"],
-                    "llvm_repo": llvm_repo,
-                    "forced": False,
-                }
-            )
-            for b in backends_hit:
-                counts[b] += 1
-            log(f"candidate PR #{number} ({'/'.join(backends_hit)}): {pr['title']}")
-        page += 1
+    for backend in sorted(requested):
+        label = BACKEND_LABELS[backend]
+        page = 1
+        while counts[backend] < limit and page <= max_scan_pages:
+            items = search_open_prs_by_label(llvm_repo, label, per_page, page)
+            if not items:
+                break
+            for item in items:
+                number = item["number"]
+                if number in seen:
+                    continue
+                seen.add(number)
+                scanned += 1
+                pr = gh_api_json(f"repos/{llvm_repo}/pulls/{number}")
+                files = gh_api_paginated(f"repos/{llvm_repo}/pulls/{number}/files")
+                all_backends = sorted(
+                    {b for f in files if (b := backend_for_path(f["filename"])) and b in requested}
+                )
+                backends_hit = [b for b in all_backends if counts[b] < limit]
+                if not backends_hit:
+                    continue
+                if already_reviewed_without_new_commits(llvm_repo, number):
+                    log(f"skip PR #{number}: already reviewed, no new commits since")
+                    continue
+                candidates.append(
+                    {
+                        "number": number,
+                        "head_sha": pr["head"]["sha"],
+                        "backends": backends_hit,
+                        "url": pr["html_url"],
+                        "title": pr["title"],
+                        "updated_at": pr["updated_at"],
+                        "llvm_repo": llvm_repo,
+                        "forced": False,
+                    }
+                )
+                for b in backends_hit:
+                    counts[b] += 1
+                log(f"candidate PR #{number} ({'/'.join(backends_hit)}): {pr['title']}")
+            if len(items) < per_page:
+                break
+            page += 1
     counts_str = ", ".join(f"{b}={c}" for b, c in sorted(counts.items()))
-    log(f"scanned {scanned} PR(s), found {len(candidates)} candidate(s) ({counts_str})")
+    log(f"checked {scanned} labeled PR(s), found {len(candidates)} candidate(s) ({counts_str})")
     return candidates
 
 
