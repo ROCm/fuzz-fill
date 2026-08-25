@@ -491,6 +491,23 @@ def render_drift_warning(number, analyzed_sha, live_sha):
     )
 
 
+def render_lit_failures_warning(warnings):
+    # Same hidden-note treatment as render_drift_warning: visible in the raw
+    # draft for whoever reviews it, stripped by GitHub if posted verbatim.
+    lines = [
+        "<!-- fuzz-fill internal note: do not post this block, GitHub hides "
+        "HTML comments when rendering so it won't show up if you do, but "
+        "strip it if you're posting the body some other way. -->"
+    ]
+    for backend, message in warnings:
+        lines.append("> [!WARNING]")
+        lines.append(f"> **{backend}**:")
+        for line in message.splitlines():
+            lines.append(f"> {line}" if line else ">")
+    lines.append("<!-- end internal note -->\n")
+    return "\n".join(lines)
+
+
 def render_pr_comment(cand, state, out_dir, cache):
     """Build and write the draft comment for one candidate, if it has any
     surviving (non-trivial) uncovered lines. Returns the written path, or
@@ -500,6 +517,7 @@ def render_pr_comment(cand, state, out_dir, cache):
     number = cand["number"]
     entries = set()
     pr_head = None
+    lit_warnings = []
     for backend in cand["backends"]:
         run = state["runs"].get(f"{number}:{backend}")
         if not run or not run.get("downloaded"):
@@ -514,6 +532,10 @@ def render_pr_comment(cand, state, out_dir, cache):
         with open(csv_path, newline="") as f:
             for row in csv.DictReader(f):
                 entries.add((normalize_target_path(row["file"]), int(row["line"])))
+        warning_path = os.path.join(adir, "README-WARNING")
+        if os.path.isfile(warning_path):
+            with open(warning_path) as f:
+                lit_warnings.append((backend, f.read().strip()))
     if not entries or pr_head is None:
         return None
     surviving = sorted(e for e in entries if not is_trivial_line(pr_head, e[0], e[1], cache))
@@ -526,6 +548,10 @@ def render_pr_comment(cand, state, out_dir, cache):
     if live_head and live_head != pr_head:
         log(f"warning: PR #{number} has drifted (analyzed {pr_head[:12]}, now at {live_head[:12]})")
         text = render_drift_warning(number, pr_head, live_head) + text
+    if lit_warnings:
+        log(f"warning: PR #{number} had LIT test failures during analysis for: "
+            f"{', '.join(b for b, _ in lit_warnings)}")
+        text = render_lit_failures_warning(lit_warnings) + text
     title = f"# [#{number}]({cand['url']}) — {cand['title']}\n\n"
     text = title + text
     os.makedirs(out_dir, exist_ok=True)
