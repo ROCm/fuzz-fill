@@ -218,6 +218,7 @@ jobs:
             --dest "${PR_LLVM_DIR}" \
             --github-repo "${INPUT_GITHUB_REPO}" \
             --reference "${LLVM_MIRROR_DIR}" \
+            --partial-reference \
             --no-self-contained \
             --squash-commit-file "${SQUASH_COMMIT_FILE}"
 
