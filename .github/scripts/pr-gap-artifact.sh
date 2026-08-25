@@ -52,6 +52,13 @@ stage_finding() {
     if [[ -n "$readme" ]]; then
         cp "${readme}" "${ARTIFACT_DIR}/README-finding.txt"
     fi
+
+    if [[ -f "${out_dir}/README-WARNING" ]]; then
+        cp "${out_dir}/README-WARNING" "${ARTIFACT_DIR}/README-WARNING"
+    fi
+    if [[ -f "${out_dir}/baseline/lit_failures.json" ]]; then
+        cp "${out_dir}/baseline/lit_failures.json" "${ARTIFACT_DIR}/out/baseline/lit_failures.json"
+    fi
 }
 
 stage_filling() {
