@@ -27,6 +27,43 @@ CONTROL_FLOW_RE = re.compile(
     re.IGNORECASE,
 )
 RETURN_RE = re.compile(r"^\s*return\b", re.IGNORECASE)
+# class Foo { / struct Bar / enum class E / template <...> class T
+CLASS_DEF_RE = re.compile(
+    r"^\s*(?:template\s*<[^>]*>\s*)?"
+    r"(?:class|struct|union|enum(?:\s+class)?)\s+\w+",
+    re.IGNORECASE,
+)
+# Named function/method/ctor/lambda on this line (not a call like llvm::sort(...)).
+FUNC_DEF_RE = re.compile(
+    r"""
+    ^\s*
+    (?:
+        (?:static|virtual|explicit|inline|constexpr|consteval|friend)\s+
+    )*
+    (?:
+        auto\s+\w+\s*=\s*\[                  # auto Foo = [&](
+        |
+        (?:[\w:<>*&]+\s+)+\w+\s*\(            # ReturnType name(
+        |
+        ~?[A-Z]\w*\s*\(                       # Ctor/Dtor PascalCase(
+        |
+        operator\b
+    )
+    [^;]*
+    \)\s*
+    (?:const\s*)?
+    (?:override\s*)?
+    (?:final\s*)?
+    (?:noexcept(?:\s*\([^)]*\))?\s*)?
+    \{
+    """,
+    re.VERBOSE,
+)
+# Wrapped LLVM signature ending on this line: ") const {"
+FUNC_DEF_WRAP_RE = re.compile(
+    r"\)\s*(?:const|override|final)\s*\{",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -47,6 +84,10 @@ def classify_gap_text(text: str) -> GapDecision:
         return GapDecision(False, "control_flow")
     if RETURN_RE.search(stripped):
         return GapDecision(False, "return")
+    if CLASS_DEF_RE.search(stripped):
+        return GapDecision(False, "class_def")
+    if FUNC_DEF_RE.search(stripped) or FUNC_DEF_WRAP_RE.search(stripped):
+        return GapDecision(False, "function_def")
     return GapDecision(True, "")
 
 
