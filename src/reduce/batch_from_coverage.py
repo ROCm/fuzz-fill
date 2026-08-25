@@ -25,8 +25,8 @@ from reduce.batch.templates import mir_template_basename
 from reduce.run_single import run_single_reduce
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+def _default_ir_template() -> Path:
+    return Path(__file__).resolve().parent / "template_interesting_ir.sh"
 
 
 def run_case_reduce(*, case_dir: Path, tools: ReduceTools) -> None:
@@ -42,20 +42,25 @@ class BatchTemplateContext:
 
 
 def _load_template_context_for_pipeline(
-    template_dir: Path,
+    ir_template: Path,
+    mir_template_dir: Path | None,
     pass_ids: list[str],
     *,
     mir_codegen_only: bool,
 ) -> BatchTemplateContext:
-    interesting_ir = (template_dir / "interesting_ir.sh").read_text(encoding="utf-8")
+    interesting_ir = ir_template.read_text(encoding="utf-8")
     if "llvm_reduce_mir" not in pass_ids:
         return BatchTemplateContext(
             interesting_ir=interesting_ir,
             interesting_mir=None,
             mir_template_name=None,
         )
+    if mir_template_dir is None:
+        raise ValueError(
+            "--mir-template-dir is required when the pipeline includes llvm_reduce_mir."
+        )
     mir_template_name = mir_template_basename(mir_codegen_only=mir_codegen_only)
-    interesting_mir = (template_dir / mir_template_name).read_text(encoding="utf-8")
+    interesting_mir = (mir_template_dir / mir_template_name).read_text(encoding="utf-8")
     return BatchTemplateContext(
         interesting_ir=interesting_ir,
         interesting_mir=interesting_mir,
@@ -97,10 +102,16 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Fuzz corpus root from gap filling (resolves .ll/.bc paths from test.sh).",
     )
     p.add_argument(
-        "--template-dir",
+        "--ir-template",
         type=Path,
-        default=_repo_root() / "example" / "amd" / "new-test-1",
-        help="Directory containing interesting_ir.sh (coverage-based template).",
+        default=None,
+        help="IR interestingness template (default: src/reduce/template_interesting_ir.sh).",
+    )
+    p.add_argument(
+        "--mir-template-dir",
+        type=Path,
+        default=None,
+        help="Directory with interesting_mir.sh templates (required for llvm_reduce_mir).",
     )
     p.add_argument(
         "--pipeline",
@@ -337,13 +348,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"--corpus-dir is not a directory: {corpus_dir}", file=sys.stderr)
         return 2
 
-    template_dir = args.template_dir.expanduser().resolve()
-    if not (template_dir / "interesting_ir.sh").is_file():
-        print(
-            f"--template-dir must contain interesting_ir.sh: {template_dir}",
-            file=sys.stderr,
-        )
+    ir_template = (
+        args.ir_template.expanduser().resolve()
+        if args.ir_template is not None
+        else _default_ir_template()
+    )
+    if not ir_template.is_file():
+        print(f"--ir-template must be an existing file: {ir_template}", file=sys.stderr)
         return 2
+
+    mir_template_dir = (
+        args.mir_template_dir.expanduser().resolve()
+        if args.mir_template_dir is not None
+        else None
+    )
 
     try:
         tools = _resolve_tools(args)
@@ -365,7 +383,8 @@ def main(argv: list[str] | None = None) -> int:
             pass_ids,
             pass_under_test=args.pass_under_test,
             mtriple=args.mtriple,
-            template_dir=template_dir,
+            ir_template=ir_template,
+            mir_template_dir=mir_template_dir,
             mir_codegen_only=args.mir_codegen_only,
         )
     except ValueError as e:
@@ -373,7 +392,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     templates = _load_template_context_for_pipeline(
-        template_dir,
+        ir_template,
+        mir_template_dir,
         pass_ids,
         mir_codegen_only=args.mir_codegen_only,
     )

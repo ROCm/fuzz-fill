@@ -101,9 +101,12 @@ def validate_pipeline_cli(
     *,
     pass_under_test: str | None,
     mtriple: str | None,
-    template_dir: Path,
+    ir_template: Path,
+    mir_template_dir: Path | None,
     mir_codegen_only: bool,
 ) -> None:
+    if not ir_template.is_file():
+        raise ValueError(f"--ir-template must be an existing file: {ir_template}")
     needs_extract = _PASSES_NEEDING_EXTRACT_OPTS & set(pass_ids)
     if needs_extract:
         if not pass_under_test:
@@ -121,10 +124,14 @@ def validate_pipeline_cli(
             raise ValueError(
                 "--pass-under-test is required when the pipeline includes llvm_reduce_mir."
             )
+        if mir_template_dir is None:
+            raise ValueError(
+                "--mir-template-dir is required when the pipeline includes llvm_reduce_mir."
+            )
         mir_name = mir_template_basename(mir_codegen_only=mir_codegen_only)
-        mir_template = template_dir / mir_name
+        mir_template = mir_template_dir / mir_name
         if not mir_template.is_file():
             raise ValueError(
                 f"Pipeline includes llvm_reduce_mir but {mir_template} is missing. "
-                f"Use --template-dir with {mir_name} (e.g. example/amd/new-test-1)."
+                f"Use --mir-template-dir containing {mir_name}."
             )

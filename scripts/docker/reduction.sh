@@ -71,7 +71,8 @@ Options (passed to batch-from-coverage):
   --corpus-dir <path>           Host fuzz corpus from gap filling (bind-mounted read-only)
   --bind-repo                   Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
   --scaffold-only               Create case dirs only; do not run llvm-reduce
-  --template-dir <path>         interesting_ir.sh template (default: example/amd/new-test-1)
+  --ir-template <path>          IR interestingness template (default: src/reduce/template_interesting_ir.sh)
+  --mir-template-dir <path>     Directory with interesting_mir.sh (required for llvm_reduce_mir)
   --pipeline <pass-ids>         Comma-separated reduce pass ids (default: llvm_reduce_ir)
   --with-creduce                Append creduce to --pipeline when missing
   --creduce-n <N>               creduce parallelism for pipeline steps

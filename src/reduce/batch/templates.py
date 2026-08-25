@@ -1,4 +1,4 @@
-"""Render interesting_ir.sh and interesting_mir.sh from example templates."""
+"""Render per-case interesting_ir.sh and interesting_mir.sh from repo templates."""
 
 from __future__ import annotations
 

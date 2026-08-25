@@ -292,7 +292,7 @@ Docker: [`scripts/docker/gap-filling.sh`](scripts/docker/gap-filling.sh) — sam
 
 ## Reduction
 
-[`scripts/reduction.sh`](scripts/reduction.sh) is a thin wrapper around `python -m reduce batch-from-coverage`. It scaffolds (and optionally runs) reduction for the **first N rows** of `incremental/new_coverage.csv` from a [gap-fill](#gap-filling) output directory. Each row becomes a case directory `t-00001-<short>/` with `config.json`, `interesting_ir.sh`, and a copied `.bc` (mirroring [`example/amd/new-test-1/`](example/amd/new-test-1/)).
+[`scripts/reduction.sh`](scripts/reduction.sh) is a thin wrapper around `python -m reduce batch-from-coverage`. It scaffolds (and optionally runs) reduction for the **first N rows** of `incremental/new_coverage.csv` from a [gap-fill](#gap-filling) output directory. Each row becomes a case directory `t-00001-<short>/` with `config.json`, `interesting_ir.sh`, and a copied `.bc`. The IR interestingness script is rendered from [`src/reduce/template_interesting_ir.sh`](src/reduce/template_interesting_ir.sh).
 
 **Default output:** `<gap-fill-dir>/reduced/` (override with `--output`).
 
