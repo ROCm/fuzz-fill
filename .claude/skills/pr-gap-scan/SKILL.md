@@ -69,8 +69,8 @@ always safe; completed phases are skipped.
    merges lines across backends for the same PR, fetches each line's actual
    source text from
    `raw.githubusercontent.com/llvm/llvm-project/<pr_head>/<file>`, and drops
-   any line whose text contains `llvm_unreachable`, `assert(`, or
-   `reportFatalInternalError(` — those aren't meaningful gaps. If anything survives, re-checks the PR's *current*
+   any line whose text contains `llvm_unreachable`, `assert(`,
+   `reportFatalInternalError(`, or `report_fatal_error(` — those aren't meaningful gaps. If anything survives, re-checks the PR's *current*
    head against the `pr_head` the artifact was actually analyzed against
    (CI can take a long time — the PR may have gained new commits since it was
    dispatched); if they differ, prepends a drift warning to the file. It also
