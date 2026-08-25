@@ -177,9 +177,31 @@ jobs:
             *) echo "path=scripts/allowlist-amdgpu.txt" >> "${GITHUB_OUTPUT}" ;;
           esac
 
+      - name: Compute mirror cache key
+        id: mirror-cache-key
+        run: |
+          echo "week=$(date -u +%G-%V)" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore filtered llvm-project mirror
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache-mirror
+        with:
+          path: ${{ env.LLVM_MIRROR_DIR }}
+          key: fuzz-fill-llvm-mirror-${{ steps.mirror-cache-key.outputs.week }}
+          restore-keys: |
+            fuzz-fill-llvm-mirror-
+
       - name: Clone filtered llvm-project mirror
+        if: steps.cache-mirror.outputs.cache-matched-key == ''
         run: |
           git clone --filter=blob:none "https://github.com/${INPUT_GITHUB_REPO}.git" "${LLVM_MIRROR_DIR}"
+
+      - name: Save filtered llvm-project mirror
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.LLVM_MIRROR_DIR }}
+          key: ${{ steps.cache-mirror.outputs.cache-primary-key }}
 
       - name: Resolve merge-base and warm mirror
         run: |
