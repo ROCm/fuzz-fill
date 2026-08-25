@@ -3,10 +3,24 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pandas as pd
 
+from coverage.pr_llc_settings import normalize_llvm_rel_path
 from coverage.sancov import Sancov
+
+
+def match_symcov_file(rel_path: str, summary_files: set[str]) -> str | None:
+    """Map a git-relative path to an absolute path string present in *summary_files*."""
+    rel_path = normalize_llvm_rel_path(rel_path)
+    rel_parts = Path(rel_path).as_posix().split("/")
+    n = len(rel_parts)
+    for abs_file in summary_files:
+        parts = Path(abs_file).as_posix().split("/")
+        if len(parts) >= n and parts[-n:] == rel_parts:
+            return abs_file
+    return None
 
 
 def normalize_llc_address_line_map(llc_address_line_map: pd.DataFrame) -> pd.DataFrame:

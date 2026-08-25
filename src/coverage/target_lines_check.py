@@ -6,20 +6,10 @@ import csv
 from pathlib import Path
 
 from coverage.line_coverage_summary import load_uncovered_lines_csv
+from coverage.line_rules import match_symcov_file
 from fuzz_fill.log import get_logger
 
 logger = get_logger("coverage.target_lines")
-
-
-def _match_symcov_file(rel_path: str, summary_files: set[str]) -> str | None:
-    """Map git-style relative path to an absolute path string present in the summary."""
-    rel_parts = Path(rel_path).as_posix().split("/")
-    n = len(rel_parts)
-    for abs_f in summary_files:
-        parts = Path(abs_f).as_posix().split("/")
-        if len(parts) >= n and parts[-n:] == rel_parts:
-            return abs_f
-    return None
 
 
 def run_target_lines_check(
@@ -72,7 +62,7 @@ def run_target_lines_check(
                 ) from e
             text = row.get("text", "")
 
-            sym_file = _match_symcov_file(rel, summary_files)
+            sym_file = match_symcov_file(rel, summary_files)
             if sym_file is None:
                 cand = (llvm_repo / rel).resolve()
                 if str(cand) in summary_files:

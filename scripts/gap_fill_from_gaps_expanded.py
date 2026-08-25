@@ -21,6 +21,7 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from coverage.gap_line_interest import classify_gap_line_interest  # noqa: E402
+from coverage.line_rules import match_symcov_file  # noqa: E402
 from coverage.pr_llc_settings import (  # noqa: E402
     abs_path_to_llvm_rel_path,
     default_exclude_completed_o_levels,
@@ -190,17 +191,6 @@ def infer_path_prefix(summary_files: set[str]) -> str:
     if idx == -1:
         raise SystemExit(f"could not infer llvm path prefix from address map file: {sample!r}")
     return sample[: idx + len("/llvm")]
-
-
-def match_symcov_file(rel_path: str, summary_files: set[str]) -> str | None:
-    rel_path = normalize_llvm_rel_path(rel_path)
-    rel_parts = Path(rel_path).as_posix().split("/")
-    n = len(rel_parts)
-    for abs_file in summary_files:
-        parts = Path(abs_file).as_posix().split("/")
-        if len(parts) >= n and parts[-n:] == rel_parts:
-            return abs_file
-    return None
 
 
 def resolve_gap_path(

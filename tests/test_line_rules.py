@@ -10,12 +10,29 @@ from coverage.constants import DEFAULT_SOURCE_CODE_FILTER
 from coverage.line_rules import (
     filter_uncovered_lines,
     gap_address_line_map,
+    match_symcov_file,
     normalize_llc_address_line_map,
 )
 
 FILE = "/build/llvm/llvm/lib/Foo.cpp"
 OTHER_FILE = "/build/llvm/llvm/include/Bar.h"
 LIBEXTRA_FILE = "/build/llvm/llvm/libextra/Baz.cpp"
+
+
+class MatchSymcovFileTest(unittest.TestCase):
+    def test_matches_by_path_suffix(self) -> None:
+        summary_files = {"/llvm/llvm/lib/Target/AMDGPU/Foo.cpp"}
+        matched = match_symcov_file("llvm/lib/Target/AMDGPU/Foo.cpp", summary_files)
+        self.assertEqual(matched, "/llvm/llvm/lib/Target/AMDGPU/Foo.cpp")
+
+    def test_normalizes_duplicate_llvm_prefix(self) -> None:
+        summary_files = {"/work/llvm-project/llvm/lib/Foo.cpp"}
+        matched = match_symcov_file("llvm/llvm/lib/Foo.cpp", summary_files)
+        self.assertEqual(matched, "/work/llvm-project/llvm/lib/Foo.cpp")
+
+    def test_returns_none_when_not_found(self) -> None:
+        summary_files = {"/llvm/llvm/lib/Other.cpp"}
+        self.assertIsNone(match_symcov_file("llvm/lib/Foo.cpp", summary_files))
 
 
 class GapAddressLineMapTest(unittest.TestCase):
