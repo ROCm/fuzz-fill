@@ -32,11 +32,14 @@ run_candidate_test() {
     if [[ -n "$settings_csv" ]]; then
         args+=(--settings-csv "$settings_csv")
     fi
+    if [[ "${RESUME:-}" == 1 ]]; then
+        args+=(--resume)
+    fi
     if [[ -n "${JOBS:-}" ]]; then
         args+=(-j "$JOBS")
     fi
 
-    echo "=== coverage candidate-test (n=${n:-all}) ==="
+    echo "=== coverage candidate-test (n=${n:-all}, resume=${RESUME:-0}) ==="
     "${args[@]}"
 }
 

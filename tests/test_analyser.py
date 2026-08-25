@@ -207,5 +207,63 @@ class DiffPartialBaselineTest(unittest.TestCase):
             self.assertEqual(int(rows[0]["line"]), 30)
 
 
+class PruneUninterestingSancovTest(unittest.TestCase):
+    def test_removes_sancov_when_no_gap_points_are_hit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            suite = root / "test_suite"
+            new_tests = root / "new_tests"
+            diff = root / "diff"
+            suite.mkdir()
+            new_tests.mkdir()
+            test_dir = new_tests / NEW_TEST
+            test_dir.mkdir()
+            sancov_path = test_dir / "llc.1.sancov"
+            sancov_path.write_bytes(b"unused")
+
+            uncovered_csv = suite / DEFAULT_LINE_COVERAGE_UNCOVERED_FILE
+            map_csv = suite / DEFAULT_LLC_ADDRESS_LINE_MAP_FILE
+
+            _write_csv(
+                uncovered_csv,
+                [
+                    ["file", "line"],
+                    [FILE, 30],
+                ],
+            )
+            _write_csv(
+                map_csv,
+                [
+                    ["file", "line", "point"],
+                    [FILE, 30, "0x3001"],
+                ],
+            )
+
+            filepaths = Filepaths(
+                output_dir=diff,
+                output_candidate_tests_dir=new_tests,
+                sancov=Path("/unused/sancov"),
+                line_coverage_uncovered_csv=uncovered_csv,
+                llc_address_line_map_csv=map_csv,
+                new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,
+            )
+
+            with (
+                patch.object(Sancov, "get_covered_addresses", return_value={"0x9999"}),
+                patch(
+                    "coverage.analyser.get_sancov_file",
+                    return_value=sancov_path,
+                ),
+            ):
+                CoverageAnalyzer(filepaths, mode="full").get_incremental_coverage()
+
+            self.assertFalse(sancov_path.exists())
+
+            with (diff / DEFAULT_NEW_COVERAGE_CSV).open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+
+            self.assertEqual(rows, [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import csv
 import os
 import shutil
 import subprocess
@@ -11,6 +12,8 @@ from pathlib import Path
 
 from coverage.candidate_test_settings import (
     DEFAULT_LLC_FLAG_VARIANTS,
+    MANIFEST_COLUMNS,
+    load_llc_flag_variants,
     write_manifest_csv,
     write_settings_csv,
 )
@@ -74,6 +77,7 @@ class TestRunner:
         llc_flag_variants: list[str] | None = None,
         timeout: int = 5,
         debug: bool = False,
+        resume: bool = False,
     ) -> None:
         self.mode = mode
         self.filepaths = filepaths
@@ -99,6 +103,7 @@ class TestRunner:
                 if llc_flag_variants is None
                 else llc_flag_variants
             )
+            self._resume = resume
             self._jobs = jobs if jobs is not None else (os.cpu_count() or 1)
             self._jobs = max(1, self._jobs)
             self._timeout = timeout
@@ -231,22 +236,96 @@ class TestRunner:
             msg = f"{msg}  |  {label}"
         print(msg, flush=True)
 
+    def _max_existing_test_id(self, output_dir: Path) -> int:
+        max_id = -1
+        for path in output_dir.iterdir():
+            if not path.is_dir() or not path.name.startswith("test_"):
+                continue
+            parts = path.name.split("_", 2)
+            if len(parts) < 2:
+                continue
+            try:
+                max_id = max(max_id, int(parts[1]))
+            except ValueError:
+                continue
+        return max_id
+
+    def _completed_standalone_pairs(self, output_dir: Path) -> set[tuple[str, str]]:
+        manifest = output_dir / DEFAULT_CANDIDATE_TEST_MANIFEST_FILE
+        completed: set[tuple[str, str]] = set()
+        if not manifest.is_file():
+            return completed
+        with manifest.open(encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle):
+                test_dir = output_dir / row["test_dir"]
+                if any(test_dir.glob("*.sancov")):
+                    completed.add((row["source_file"], row["llc_flags"]))
+        return completed
+
+    def _load_existing_manifest_rows(self, output_dir: Path) -> list[dict[str, str]]:
+        manifest = output_dir / DEFAULT_CANDIDATE_TEST_MANIFEST_FILE
+        if not manifest.is_file():
+            return []
+        with manifest.open(encoding="utf-8", newline="") as handle:
+            return list(csv.DictReader(handle))
+
+    def _merged_llc_flag_variants(self, output_dir: Path) -> list[str]:
+        settings_path = output_dir / DEFAULT_CANDIDATE_TEST_SETTINGS_FILE
+        if self._resume and settings_path.is_file():
+            existing = load_llc_flag_variants(settings_path)
+            return list(dict.fromkeys(existing + self._llc_flag_variants))
+        return list(self._llc_flag_variants)
+
+    def _write_merged_manifest_csv(
+        self,
+        output_dir: Path,
+        *,
+        existing_rows: list[dict[str, str]],
+        work: list[tuple[Path, Path, str]],
+    ) -> None:
+        path = output_dir / DEFAULT_CANDIDATE_TEST_MANIFEST_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=MANIFEST_COLUMNS)
+            writer.writeheader()
+            for row in existing_rows:
+                writer.writerow({col: row[col] for col in MANIFEST_COLUMNS})
+            for test_dir, test_path, llc_flags in work:
+                rest = test_dir.name.removeprefix("test_")
+                test_id, _ = rest.split("_", 1)
+                writer.writerow(
+                    {
+                        "test_id": test_id,
+                        "source_file": str(test_path.resolve()),
+                        "llc_flags": llc_flags,
+                        "test_dir": test_dir.name,
+                    }
+                )
+
     def _prepare_standalone_work(self) -> list[tuple[Path, Path, str]]:
         paths = self.collect_llc_input_files()
         limit = self._candidate_tests_limit
         to_run = paths if limit is None else paths[:limit]
-        self.standalone_total_tests = len(to_run) * len(self._llc_flag_variants)
+        output_dir = self.filepaths.output_dir
+        completed = (
+            self._completed_standalone_pairs(output_dir) if self._resume else set()
+        )
+        tid = self._max_existing_test_id(output_dir) + 1 if self._resume else 0
+
+        work: list[tuple[Path, Path, str]] = []
+        for test_path in to_run:
+            source_key = str(test_path.resolve())
+            for llc_flags in self._llc_flag_variants:
+                if (source_key, llc_flags) in completed:
+                    continue
+                test_dir = output_dir / f"test_{tid}_{test_path.name}"
+                work.append((test_dir, test_path, llc_flags))
+                tid += 1
+
+        self.standalone_total_tests = len(work)
         self.standalone_test_id = 0
         self.standalone_tests_complete = 0
         self.standalone_tests_skipped = 0
-
-        work: list[tuple[Path, Path, str]] = []
-        tid = 0
-        for test_path in to_run:
-            for llc_flags in self._llc_flag_variants:
-                test_dir = self.filepaths.output_dir / f"test_{tid}_{test_path.name}"
-                work.append((test_dir, test_path, llc_flags))
-                tid += 1
         return work
 
     def _record_standalone_outcome(self, name: str, outcome: str) -> None:
@@ -260,20 +339,37 @@ class TestRunner:
         """Generate each standalone test directory and run it concurrently."""
 
         with log_timing(logger, "standalone candidate tests"):
+            output_dir = self.filepaths.output_dir
+            existing_rows = (
+                self._load_existing_manifest_rows(output_dir) if self._resume else []
+            )
             work = self._prepare_standalone_work()
             if self.standalone_total_tests == 0:
-                self._print_standalone_progress("(no standalone inputs)")
+                if self._resume and existing_rows:
+                    print(
+                        "Resume: no pending candidate-test jobs "
+                        "(all requested variants already have sancov).",
+                        flush=True,
+                    )
+                else:
+                    self._print_standalone_progress("(no standalone inputs)")
                 return
 
-            output_dir = self.filepaths.output_dir
             write_settings_csv(
-                self._llc_flag_variants,
+                self._merged_llc_flag_variants(output_dir),
                 output_dir / DEFAULT_CANDIDATE_TEST_SETTINGS_FILE,
             )
-            write_manifest_csv(
-                work,
-                output_dir / DEFAULT_CANDIDATE_TEST_MANIFEST_FILE,
-            )
+            if self._resume and existing_rows:
+                self._write_merged_manifest_csv(
+                    output_dir,
+                    existing_rows=existing_rows,
+                    work=work,
+                )
+            else:
+                write_manifest_csv(
+                    work,
+                    output_dir / DEFAULT_CANDIDATE_TEST_MANIFEST_FILE,
+                )
 
             sem = asyncio.Semaphore(self._jobs)
 

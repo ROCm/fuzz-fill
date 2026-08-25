@@ -22,7 +22,15 @@ if [[ "${IN_CONTAINER:-}" == 1 ]]; then
     : "${UNCOVERED_CSV:?UNCOVERED_CSV is required}"
     : "${LLC_MAP_CSV:?LLC_MAP_CSV is required}"
 
-    run_candidate_test /mounted-output/candidate_tests /mounted-candidate-tests "${CANDIDATE_N:-}"
+    if [[ "${INCREMENTAL_ONLY:-}" != 1 ]]; then
+        run_candidate_test \
+            /mounted-output/candidate_tests \
+            /mounted-candidate-tests \
+            "${CANDIDATE_N:-}" \
+            "${SETTINGS_CSV:-}"
+    else
+        echo "=== skipping candidate-test (incremental-only) ==="
+    fi
 
     run_incremental \
         /mounted-output/incremental \
@@ -57,6 +65,9 @@ bind_repo=0
 stage_candidate_tests=0
 candidate_tests_dir=""
 candidate_n=""
+settings_csv=""
+resume=0
+incremental_only=0
 
 usage() {
     cat <<EOF
@@ -93,6 +104,9 @@ Options:
   -n <N>, --n <N>               Run only the first N candidate tests (.ll/.bc, sorted;
                                 default: all files under --candidate-tests-dir)
   -j <n>, --jobs <n>            Parallel jobs for candidate-test and ninja (build)
+  --settings-csv <path>         llc flag variants CSV for candidate-test
+  --resume                      Keep existing candidate_tests/; append new flag runs only
+  --incremental-only            Skip candidate-test; re-run incremental on existing output
   --help, -h                    Show this help
 
 Examples:
@@ -159,6 +173,19 @@ while [[ $# -gt 0 ]]; do
             candidate_n="$2"
             shift 2
             ;;
+        --settings-csv)
+            [[ $# -ge 2 ]] || { echo "error: --settings-csv requires a value" >&2; exit 2; }
+            settings_csv="$2"
+            shift 2
+            ;;
+        --resume)
+            resume=1
+            shift
+            ;;
+        --incremental-only)
+            incremental_only=1
+            shift
+            ;;
         --help|-h)
             usage
             exit 0
@@ -204,6 +231,11 @@ if [[ ! -d "$candidate_tests_dir" ]]; then
     exit 1
 fi
 
+if [[ -n "$settings_csv" ]] && [[ ! -f "$settings_csv" ]]; then
+    echo "error: --settings-csv is not a file: ${settings_csv}" >&2
+    exit 1
+fi
+
 resolve_gap_profile_csv_paths line_coverage_uncovered_csv llc_address_line_map_csv
 validate_jobs "$jobs"
 
@@ -212,10 +244,17 @@ docker_image_cli_prepare
 
 container_uncovered_csv="/mounted-profile/line_coverage_uncovered.csv"
 container_llc_map_csv="/mounted-profile/llc_address_line_map.csv"
+container_settings_csv="/mounted-profile/candidate_test_settings.csv"
 
 echo "Using coverage profile:"
 echo "  uncovered lines: ${line_coverage_uncovered_csv}"
 echo "  address map:     ${llc_address_line_map_csv}"
+if [[ -n "$settings_csv" ]]; then
+    echo "  settings csv:    ${settings_csv}"
+fi
+if [[ "$resume" -eq 1 ]]; then
+    echo "  resume:          yes (keep existing candidate_tests/)"
+fi
 
 mkdir -p "$output_dir"
 output_dir="$(realpath "$output_dir")"
@@ -239,13 +278,20 @@ else
     echo "Bind-mounting candidate corpus (no copy): ${candidate_tests_dir}"
 fi
 
-rm -rf "${output_dir}/candidate_tests" "${output_dir}/incremental"
+if [[ "${resume}" -eq 1 ]] || [[ "${incremental_only}" -eq 1 ]]; then
+    mkdir -p "${output_dir}/candidate_tests"
+    rm -rf "${output_dir}/incremental"
+else
+    rm -rf "${output_dir}/candidate_tests" "${output_dir}/incremental"
+fi
 
 docker_env=(
     -e "IN_CONTAINER=1"
     -e "CANDIDATE_N=${candidate_n}"
     -e "UNCOVERED_CSV=${container_uncovered_csv}"
     -e "LLC_MAP_CSV=${container_llc_map_csv}"
+    -e "RESUME=${resume}"
+    -e "INCREMENTAL_ONLY=${incremental_only}"
 )
 docker_gap_append_jobs_env docker_env
 
@@ -253,6 +299,11 @@ extra_mounts=(
     -v "${line_coverage_uncovered_csv}:${container_uncovered_csv}:ro"
     -v "${llc_address_line_map_csv}:${container_llc_map_csv}:ro"
 )
+if [[ -n "$settings_csv" ]]; then
+    settings_csv="$(realpath "$settings_csv")"
+    docker_env+=(-e "SETTINGS_CSV=${container_settings_csv}")
+    extra_mounts+=(-v "${settings_csv}:${container_settings_csv}:ro")
+fi
 extra_mounts+=("${candidate_mount[@]}")
 docker_gap_append_bind_repo_mount extra_mounts
 

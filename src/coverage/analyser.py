@@ -17,16 +17,29 @@ from fuzz_fill.log import get_logger, log_timing
 
 logger = get_logger("coverage.analyser")
 
+
+def remove_candidate_sancov_files(test_dir: Path) -> list[Path]:
+    """Delete sancov/symcov artifacts under a candidate-test output directory."""
+    removed: list[Path] = []
+    for pattern in ("*.sancov", "*.symcov"):
+        for path in test_dir.rglob(pattern):
+            path.unlink(missing_ok=True)
+            removed.append(path)
+    return removed
+
+
 class CoverageAnalyzer:
     def __init__(
         self,
         filepaths: Filepaths,
         mode: Literal["partial", "full"],
         source_filter: str = DEFAULT_SOURCE_CODE_FILTER,
+        prune_uninteresting_sancov: bool = True,
     ):
         self.filepaths = filepaths
         self.mode = mode
         self.source_filter = source_filter
+        self.prune_uninteresting_sancov = prune_uninteresting_sancov
         if filepaths.llc_address_line_map_csv is None:
             raise ValueError("llc_address_line_map_csv is required for incremental coverage")
         if filepaths.line_coverage_uncovered_csv is None:
@@ -62,6 +75,7 @@ class CoverageAnalyzer:
                     total_uncovered,
                 )
             gap_map = gap_address_line_map(llc_address_line_map, baseline_uncovered)
+            gap_points = set(gap_map["point"].dropna().astype(str))
             logger.info(
                 "baseline gap address map: %d rows on %d uncovered lines "
                 "(from %d total address-map rows)",
@@ -77,6 +91,7 @@ class CoverageAnalyzer:
                 )
 
             sancov = Sancov(self.filepaths.sancov)
+            pruned_sancov_files = 0
 
             # Keep track of lines that are newly covered by candidate tests
             # so that we avoid adding them to the new coverage csv multiple times
@@ -93,17 +108,26 @@ class CoverageAnalyzer:
 
                     new_test_covered_addresses: set[str] = sancov.get_covered_addresses(sancov_file)
 
-                    matched_addresses = gap_map[
-                        gap_map["point"].isin(new_test_covered_addresses)
-                    ]
-
-                    if len(matched_addresses) == 0:
+                    if not new_test_covered_addresses.intersection(gap_points):
                         logger.info(
                             "candidate test %s has no covered addresses "
                             "in files that we are interested in",
                             test_name,
                         )
+                        if self.prune_uninteresting_sancov:
+                            removed = remove_candidate_sancov_files(candidate_test_dir)
+                            pruned_sancov_files += len(removed)
+                            if removed:
+                                logger.info(
+                                    "removed %d uninteresting coverage file(s) from %s",
+                                    len(removed),
+                                    test_name,
+                                )
                         continue
+
+                    matched_addresses = gap_map[
+                        gap_map["point"].isin(new_test_covered_addresses)
+                    ]
 
                     logger.info(
                         "candidate test %s has %d new covered addresses in target files",
@@ -153,6 +177,12 @@ class CoverageAnalyzer:
                             for _, row in unique_locations.iterrows():
                                 addrs = addr_by_line.loc[row["file"], row["line"]]
                                 writer.writerow([per_test_csv, row["file"], row["line"], addrs])
+
+            if self.prune_uninteresting_sancov and pruned_sancov_files:
+                logger.info(
+                    "pruned %d uninteresting sancov/symcov file(s) from candidate tests",
+                    pruned_sancov_files,
+                )
 
 def get_sancov_file(new_test_dir: Path) -> Path | None:
     """Get the llc sancov file for a new test. Checks that there is only one sancov file and throws an error if there are multiple."""
