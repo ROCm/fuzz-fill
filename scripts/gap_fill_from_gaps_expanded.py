@@ -29,7 +29,7 @@ from coverage.pr_llc_settings import (  # noqa: E402
     normalize_llvm_rel_path,
     write_derived_settings_csv,
 )
-from pr_check.checker import PrCheckerError, is_evaluable_run, parse_run_dir_name  # noqa: E402
+from pr_check.gap_loader import iter_uncovered_gap_lines  # noqa: E402
 
 DEFAULT_GITHUB_REPO = "llvm/llvm-project"
 
@@ -118,52 +118,33 @@ def load_gaps_from_runs(
     if not pr_check_runs_root.is_dir():
         raise SystemExit(f"pr-check runs root not found: {pr_check_runs_root}")
 
-    for run_dir in sorted(pr_check_runs_root.iterdir()):
-        if not run_dir.is_dir() or not is_evaluable_run(run_dir):
-            continue
-        try:
-            pr_number, backend = parse_run_dir_name(run_dir.name)
-        except PrCheckerError:
-            continue
-
-        pr_url = f"https://github.com/{github_repo}/pull/{pr_number}"
-        gap_csv = run_dir / "commit_lines_report" / "target_lines_uncovered.csv"
-        with gap_csv.open(encoding="utf-8", newline="") as handle:
-            reader = csv.DictReader(handle)
-            if reader.fieldnames is None:
-                continue
-            for row in reader:
-                file_path = (row.get("file") or "").strip()
-                line_text = (row.get("line") or "").strip()
-                if not file_path or not line_text:
-                    continue
-                line = int(line_text)
-                text = (row.get("text") or "").strip()
-                rel_path = abs_path_to_llvm_rel_path(file_path)
-                location = f"{rel_path}:{line}"
-                base = {
-                    "PR": pr_url,
-                    "Backend": backend,
-                    "Line": str(line),
-                    "Location": location,
-                    "Text": text,
-                }
-                decision = (
-                    classify_gap_line_interest(text) if filter_uninteresting else None
+    for gap in iter_uncovered_gap_lines(pr_check_runs_root):
+        pr_url = f"https://github.com/{github_repo}/pull/{gap.pr_number}"
+        rel_path = abs_path_to_llvm_rel_path(gap.file_path)
+        location = f"{rel_path}:{gap.line}"
+        base = {
+            "PR": pr_url,
+            "Backend": gap.backend,
+            "Line": str(gap.line),
+            "Location": location,
+            "Text": gap.text,
+        }
+        decision = (
+            classify_gap_line_interest(gap.text) if filter_uninteresting else None
+        )
+        if decision is None or decision.include:
+            included.append(
+                GapRow(
+                    pr_number=str(gap.pr_number),
+                    backend=gap.backend,
+                    line=gap.line,
+                    rel_path=rel_path,
+                    location=location,
+                    text=gap.text,
                 )
-                if decision is None or decision.include:
-                    included.append(
-                        GapRow(
-                            pr_number=str(pr_number),
-                            backend=backend,
-                            line=line,
-                            rel_path=rel_path,
-                            location=location,
-                            text=text,
-                        )
-                    )
-                else:
-                    skipped.append({**base, "SkipReason": decision.reason})
+            )
+        else:
+            skipped.append({**base, "SkipReason": decision.reason})
 
     return included, skipped
 

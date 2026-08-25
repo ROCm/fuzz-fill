@@ -18,7 +18,7 @@ if str(_SRC) not in sys.path:
 from coverage.line_rules import normalize_llc_address_line_map  # noqa: E402
 from coverage.pr_llc_settings import normalize_llvm_rel_path  # noqa: E402
 from coverage.sancov import Sancov  # noqa: E402
-from pr_check.checker import PrCheckerError, is_evaluable_run, parse_run_dir_name  # noqa: E402
+from pr_check.gap_loader import iter_uncovered_gap_lines  # noqa: E402
 
 import pandas as pd  # noqa: E402
 
@@ -72,31 +72,8 @@ def _load_manifest(root: Path) -> dict[tuple[str, str], dict[str, str]]:
 def _load_gap_text_from_runs(root: Path) -> dict[tuple[str, str, str, int], str]:
     """Map (pr, backend, absolute file path, line) -> uncovered-line text."""
     texts: dict[tuple[str, str, str, int], str] = {}
-    runs_root = root / "data/pr-check/runs"
-    if not runs_root.is_dir():
-        return texts
-
-    for run_dir in sorted(runs_root.iterdir()):
-        if not run_dir.is_dir() or not is_evaluable_run(run_dir):
-            continue
-        try:
-            pr_number, backend = parse_run_dir_name(run_dir.name)
-        except PrCheckerError:
-            continue
-
-        gap_csv = run_dir / "commit_lines_report" / "target_lines_uncovered.csv"
-        with gap_csv.open(encoding="utf-8", newline="") as handle:
-            reader = csv.DictReader(handle)
-            if reader.fieldnames is None:
-                continue
-            for row in reader:
-                file_path = (row.get("file") or "").strip()
-                line_text = (row.get("line") or "").strip()
-                if not file_path or not line_text:
-                    continue
-                texts[(str(pr_number), backend, file_path, int(line_text))] = (
-                    row.get("text") or ""
-                ).strip()
+    for gap in iter_uncovered_gap_lines(root / "data/pr-check/runs"):
+        texts[(str(gap.pr_number), gap.backend, gap.file_path, gap.line)] = gap.text
     return texts
 
 
