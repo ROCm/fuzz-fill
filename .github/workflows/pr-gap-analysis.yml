@@ -97,6 +97,7 @@ env:
   LLVM_RELEASE_VERSION: "22.1.8"
   LLVM_RELEASE_DIR: /work/llvm-release
   LLVM_RELEASE_BIN: /work/llvm-release/bin
+  LLVM_MIRROR_DIR: /work/llvm-mirror
   PR_LLVM_DIR: /work/pr-llvm
   PR_BUILD_DIR: /work/build-sancov
   PR_BUILD_BIN: /work/build-sancov/bin
@@ -154,11 +155,13 @@ jobs:
             apt-get install -y gh
           fi
 
-      - name: Resolve PR head early
+      - name: Resolve PR head and base early
         run: |
           mkdir -p /work/pr-head
           gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.sha' \
             > /work/pr-head/pr-head.txt
+          gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.base.sha' \
+            > /work/pr-head/pr-base.txt
 
       - name: Upload PR head artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -174,13 +177,26 @@ jobs:
             *) echo "path=scripts/allowlist-amdgpu.txt" >> "${GITHUB_OUTPUT}" ;;
           esac
 
+      - name: Clone filtered llvm-project mirror
+        run: |
+          git clone --filter=blob:none "https://github.com/${INPUT_GITHUB_REPO}.git" "${LLVM_MIRROR_DIR}"
+
+      - name: Resolve merge-base and warm mirror
+        run: |
+          git -C "${LLVM_MIRROR_DIR}" fetch origin "pull/${INPUT_PR_ID}/head"
+          pr_head_sha="$(git -C "${LLVM_MIRROR_DIR}" rev-parse FETCH_HEAD)"
+          base_sha="$(cat /work/pr-head/pr-base.txt)"
+          merge_base="$(git -C "${LLVM_MIRROR_DIR}" merge-base "${base_sha}" "${pr_head_sha}")"
+          git -C "${LLVM_MIRROR_DIR}" fetch --no-filter origin "${merge_base}"
+
       - name: Prepare PR llvm tree
         run: |
           ./scripts/prepare-pr-llvm.sh \
             --pr-id "${INPUT_PR_ID}" \
             --dest "${PR_LLVM_DIR}" \
             --github-repo "${INPUT_GITHUB_REPO}" \
-            --plain-clone \
+            --reference "${LLVM_MIRROR_DIR}" \
+            --no-self-contained \
             --squash-commit-file "${SQUASH_COMMIT_FILE}"
 
       - name: Restore ccache
