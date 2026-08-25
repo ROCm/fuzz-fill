@@ -64,8 +64,10 @@ always safe; completed phases are skipped.
    dispatched); if they differ, prepends a drift warning to the file. It also
    checks each backend's artifact for a `README-WARNING` file (written by the
    workflow when LIT tests failed during that backend's baseline coverage
-   run) and prepends a warning block for each affected backend if so. Then
-   writes the draft comment for that PR to `--out-dir/pr-<N>.md` using
+   run) and prepends a warning block for each affected backend if so. It also
+   re-fetches the PR's current base branch and, if it isn't the repo's
+   default branch, prepends a stacked-PR warning (see "Stacked PRs" below).
+   Then writes the draft comment for that PR to `--out-dir/pr-<N>.md` using
    the template below. PRs where everything was filtered out get no file.
    The loop keeps polling until every dispatched run is terminal.
 
@@ -120,9 +122,10 @@ harmless).
 ### After the run
 
 The comment files under `--out-dir` are **drafts only** — nothing gets
-posted automatically. Check whether the file has a drift warning or a LIT
-test failure warning at the top first (see below); if it does, re-run the
-analysis (drift) or double-check the failing tests (LIT) before trusting the
+posted automatically. Check whether the file has a drift warning, a LIT test
+failure warning, or a stacked-PR warning at the top first (see below); if it
+does, re-run the analysis (drift), double-check the failing tests (LIT), or
+confirm the base branch/PR is settled (stacked) before trusting the
 findings. Otherwise, review each `pr-<N>.md`, and if it looks right, post it
 yourself:
 
@@ -196,6 +199,39 @@ lines below could actually be covered by a test that failed for an unrelated
 reason. Treat findings alongside this warning with extra skepticism before
 posting; the artifact's `out/baseline/lit_failures.json` has the full list
 of failing tests if you want to check further.
+
+Finally, if the PR is **stacked** (see below), the file gets a third hidden
+block, placed above the other two since it's a structural fact about the PR
+rather than an analysis-run caveat:
+
+```
+<!-- fuzz-fill internal note: do not post this block, GitHub hides HTML comments when rendering so it won't show up if you do, but strip it if you're posting the body some other way. -->
+> [!WARNING]
+> PR #<N> looks stacked: its base branch is `<base_ref>`, not the repository's default branch (`<default_branch>`), which is itself still-open PR #<M> ('<title>'). The gap analysis only considered lines unique to this PR (diffed against its merge-base), but that merge-base will move if the base branch gets amended or rebased before it merges -- which can invalidate this analysis without this PR's own head commit ever changing, so the drift check (which only compares this PR's own head commit) wouldn't catch it. Confirm the base PR/branch is settled before trusting these findings.
+<!-- end internal note -->
+```
+
+### Stacked PRs
+
+A PR is considered **stacked** if its base branch (re-fetched live, at
+comment-writing time) isn't the repository's default branch (`main` for
+`llvm/llvm-project`) — i.e. it's opened against another branch rather than
+trunk, which on GitHub is the standard way to build one PR on top of another
+still-unmerged one. This is detected with two API calls per candidate at
+comment time: `GET /repos/{repo}` for the default branch (cached per repo for
+the run), and `GET /repos/{repo}/pulls?head={owner}:{base_ref}` to see if
+that base branch is itself another open PR's head (named in the warning if
+so; otherwise it's noted as unmatched — could be a maintenance branch, or
+the base PR already merged without this one being retargeted yet).
+
+The reason this matters: `gap-finding-pr.sh` computes "added lines" as a diff
+against this PR's own merge-base with its base branch, so it correctly
+isolates just this PR's unique changes even when stacked — that part isn't
+the problem. The problem is that the merge-base itself is unstable: if the
+(still open, still-being-reviewed) base branch gets amended or rebased
+before it merges, the analysis silently goes stale without this PR's own
+head SHA ever changing, so the existing drift check (which only compares
+this PR's head commit) has no way to catch it.
 
 ## Assumptions (revisit if wrong)
 
