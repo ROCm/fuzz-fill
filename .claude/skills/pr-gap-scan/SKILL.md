@@ -61,7 +61,10 @@ always safe; completed phases are skipped.
    aren't meaningful gaps. If anything survives, re-checks the PR's *current*
    head against the `pr_head` the artifact was actually analyzed against
    (CI can take a long time — the PR may have gained new commits since it was
-   dispatched); if they differ, prepends a drift warning to the file. Then
+   dispatched); if they differ, prepends a drift warning to the file. It also
+   checks each backend's artifact for a `README-WARNING` file (written by the
+   workflow when LIT tests failed during that backend's baseline coverage
+   run) and prepends a warning block for each affected backend if so. Then
    writes the draft comment for that PR to `--out-dir/pr-<N>.md` using
    the template below. PRs where everything was filtered out get no file.
    The loop keeps polling until every dispatched run is terminal.
@@ -117,8 +120,9 @@ harmless).
 ### After the run
 
 The comment files under `--out-dir` are **drafts only** — nothing gets
-posted automatically. Check whether the file has a drift warning at the top
-first (see below); if it does, re-run the analysis before trusting the
+posted automatically. Check whether the file has a drift warning or a LIT
+test failure warning at the top first (see below); if it does, re-run the
+analysis (drift) or double-check the failing tests (LIT) before trusting the
 findings. Otherwise, review each `pr-<N>.md`, and if it looks right, post it
 yourself:
 
@@ -168,6 +172,30 @@ posted verbatim, but still visible to whoever opens the raw file:
 > PR #<N> has drifted since this analysis ran. It was analyzed against commit `<short>` (`<full>`), but the PR's current tip is `<short>` (`<full>`). The uncovered lines below may be stale -- re-run the analysis (pr-gap-check's `target` subcommand forces a fresh run) before posting.
 <!-- end internal note -->
 ```
+
+Similarly, if any backend's CI run reported LIT test failures during its
+baseline coverage pass (the workflow tolerates these — `LIT_ALLOW_FAILURES`
+— rather than aborting the job, and stages the resulting `README-WARNING`
+file into the artifact if so), the file gets another hidden block, one
+`[!WARNING]` per affected backend:
+
+```
+<!-- fuzz-fill internal note: do not post this block, GitHub hides HTML comments when rendering so it won't show up if you do, but strip it if you're posting the body some other way. -->
+> [!WARNING]
+> **amdgpu**:
+> WARNING: 3 LIT test(s) failed during the baseline run (e.g., failed a check, timed out, unresolved, or unexpectedly passed).
+> Failed tests may lead to an incomplete coverage profile. As a result,
+> target_lines_uncovered.csv may report lines as uncovered even though they are
+> actually covered by a (failing) test.
+> Review baseline/lit_failures.json for the list of failing tests.
+<!-- end internal note -->
+```
+
+This means the coverage baseline may be incomplete — some of the "uncovered"
+lines below could actually be covered by a test that failed for an unrelated
+reason. Treat findings alongside this warning with extra skepticism before
+posting; the artifact's `out/baseline/lit_failures.json` has the full list
+of failing tests if you want to check further.
 
 ## Assumptions (revisit if wrong)
 

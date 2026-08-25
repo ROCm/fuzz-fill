@@ -225,6 +225,8 @@ jobs:
           "${VENV_DIR}/bin/pip" install --no-cache-dir -e "${GITHUB_WORKSPACE}"
 
       - name: Run gap finding
+        env:
+          LIT_ALLOW_FAILURES: "1"
         run: |
           source "${VENV_DIR}/bin/activate"
           ./scripts/gap-finding-pr.sh \
