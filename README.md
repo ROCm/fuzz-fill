@@ -2,13 +2,12 @@
 
 Fuzzing to fill LLVM coverage gaps with fuzz-generated tests.
 
-fuzz-fill identifies coverage gaps in LLVM:
+fuzz-fill identifies and fills coverage gaps in LLVM:
 
 1. **Gap finding** — measure baseline coverage achieved by LLVM's LIT test suite and produce a list of uncovered lines. At present `fuzz-fill` supports finding gaps in the AMDGPU and SPIR-V backends; this will be extended in the future to other backends and parts of the LLVM codebase.
    - **Baseline** — all uncovered lines in a user-specified part of the LLVM codebase.
    - **PR** — added or changed lines in a commit that baseline coverage still misses.
-
-Gap filling (running a fuzz corpus against the gap list) will follow in a separate PR.
+2. **Gap filling** — run a fuzz corpus or an interactive agent against those gap lists to generate tests that hit uncovered lines.
 
 ```
 ┌─ Gap finding ────────────────────────────────────────────────┐
@@ -16,6 +15,11 @@ Gap filling (running a fuzz corpus against the gap list) will follow in a separa
 │   Baseline ──┐                                               │
 │              ├──► Uncovered lines (CSV)                      │
 │   PR ────────┘                                               │
+└───────────────────────────────┬──────────────────────────────┘
+                                │
+                                ▼
+┌─ Gap filling ────────────────────────────────────────────────┐
+│   Batch (candidate-tests corpus)  or  Agent (Claude IR tests)│
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -68,6 +72,9 @@ Use `spirv` instead of `amdgpu` for SPIR-V backend tests.
   - [LLVM builds](#llvm-builds)
 - [Gap finding (baseline)](#gap-finding-baseline)
 - [Gap finding (PR)](#gap-finding-pr)
+- [Periodic PR checking](#periodic-pr-checking)
+- [Gap filling (batch)](#gap-filling-batch)
+- [Gap filling (agent)](#gap-filling-agent)
 - [CLI reference](#cli-reference)
   - [Uncovered-lines CSV contract](#uncovered-lines-csv-contract)
   - [Environment variables](#environment-variables)
@@ -250,6 +257,126 @@ Under `$OUTPUT_DIR`:
 
 ---
 
+## Periodic PR checking
+
+**When to use this:** you want to track coverage gaps across many open LLVM PRs automatically.
+
+**Reference:** [`scripts/pr-check/README.md`](scripts/pr-check/README.md)
+
+The pr-check orchestrator discovers open AMDGPU and SPIR-V PRs, runs [gap finding (PR) in Docker](#gap-finding-pr-in-docker) when a PR's head SHA changes, and stores artifacts under `data/pr-check/runs/<pr>-<backend>/`. Human-readable reports land in `data/pr-check/reports/`.
+
+```bash
+cp scripts/pr-check/config.example.env scripts/pr-check/config.env
+# set LLVM_REPO in config.env, then:
+./scripts/pr-check/check-llvm-prs.sh
+```
+
+Downstream [batch](#gap-filling-batch) and [agent](#gap-filling-agent) gap filling read uncovered lines directly from those run directories.
+
+---
+
+## Gap filling (batch)
+
+**When to use this:** you have completed pr-check runs and want to fuzz a candidate-test corpus against all remaining gap lines.
+
+**Reference script:** [`scripts/gap-fill-from-gaps-expanded.sh`](scripts/gap-fill-from-gaps-expanded.sh)
+
+### What it does
+
+```text
+pr-check runs  →  prepare  →  run (Docker)  →  aggregate
+                  │            │                 │
+                  │            │                 └── gaps-filled.csv
+                  │            └── candidate-test per PR/backend
+                  └── manifest.csv + gap-lines.csv per PR/backend
+```
+
+1. **prepare** — scan `data/pr-check/runs/`, skip ambiguous or low-interest uncovered lines (debug logging, bare control-flow keywords, declarations, etc.; see `coverage.gap_line_interest`), derive per-PR LLC flag variants, and write `data/gap-fill/inputs/<pr>-<backend>/gap-lines.csv` plus `manifest.csv`.
+2. **run** — for each manifest row, invoke [`scripts/docker/gap-filling.sh`](scripts/docker/gap-filling.sh) against the candidate-tests corpus.
+3. **aggregate** — summarize `new_coverage.csv` outputs into `data/gap-fill/reports/gaps-filled.csv`.
+
+### Configure and run
+
+Prerequisites: completed pr-check artifacts, `candidate-tests-dataset/` at the repo root (or `--candidate-tests-dir`), and Docker PR images (`fuzz-fill-test:llvm-pr-<n>-<backend>` or `fuzz-fill-test:llvm-pr-<n>`).
+
+```bash
+# Full pipeline
+./scripts/gap-fill-from-gaps-expanded.sh
+
+# Step by step
+./scripts/gap-fill-from-gaps-expanded.sh --prepare-only
+./scripts/gap-fill-from-gaps-expanded.sh --run-only --resume -j "$(nproc)"
+./scripts/gap-fill-from-gaps-expanded.sh --aggregate-only
+
+# Single PR
+./scripts/gap-fill-from-gaps-expanded.sh --pr 214936
+```
+
+Pass `--include-uninteresting` to `python3 scripts/gap_fill_from_gaps_expanded.py prepare` if you need every uncovered line, including debug and control-flow lines. Skipped lines are written to `data/gap-fill/inputs/gaps-skipped.csv`.
+
+### Key outputs
+
+| Path | Contents |
+|------|----------|
+| `data/gap-fill/inputs/manifest.csv` | One row per PR/backend with paths to gap lists, LLC map, settings, and output dir |
+| `data/gap-fill/inputs/<pr>-<backend>/gap-lines.csv` | Absolute `file`/`line` pairs to fill |
+| `data/gap-fill/runs/<pr>-<backend>/` | Per-PR gap-filling outputs (`candidate_tests/`, `new_coverage.csv`, …) |
+| `data/gap-fill/reports/gaps-filled.csv` | Whether each target line was filled (`filled`, `test_name`, `covered_points`) |
+
+---
+
+## Gap filling (agent)
+
+**When to use this:** batch fuzzing did not close a gap and you want Claude to ideate minimal LLVM IR tests interactively.
+
+**Reference script:** [`scripts/gap-fill-agent-loop.sh`](scripts/gap-fill-agent-loop.sh)
+
+### What it does
+
+```text
+gaps-filled.csv + manifest  →  queue  →  Claude loop  →  verify (sancov)
+                                 │           │
+                                 │           └── candidate.ll + llc_flags.txt
+                                 └── data/gap-fill/agent/gap-queue.csv
+```
+
+For each unfilled gap, the loop:
+
+1. Builds a context directory (`gap.json`, source snippets, `candidate_test_settings.csv`, `verify.sh`) via [`scripts/gap_fill_agent.py`](scripts/gap_fill_agent.py).
+2. Invokes the [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) with [`prompts/gap-fill-agent.md`](prompts/gap-fill-agent.md).
+3. Runs [`scripts/verify-gap-candidate.sh`](scripts/verify-gap-candidate.sh) to compile the candidate IR with instrumented `llc` and check sancov gap-point hits.
+4. Records wins under `data/gap-fill/agent/wins/` and updates the queue.
+
+### Configure and run
+
+Prerequisites:
+
+- [Batch gap filling](#gap-filling-batch) **prepare** and **aggregate** (needs `manifest.csv` and `gaps-filled.csv` with unfilled rows).
+- Completed pr-check runs (for source-line text and snippets).
+- Docker PR image for the target PR (`fuzz-fill-test:llvm-pr-<n>`).
+- `claude` CLI on `PATH`.
+
+```bash
+# Defaults: 2 h wall clock, 30 rounds, $1.50/round budget
+./scripts/gap-fill-agent-loop.sh
+
+# Tighter budget
+MAX_WALL_SEC=3600 MAX_ROUNDS=10 MAX_BUDGET_USD=0.50 ./scripts/gap-fill-agent-loop.sh
+```
+
+Useful helper commands (see `--help` on each):
+
+| Command | Role |
+|---------|------|
+| `python3 scripts/gap_fill_agent.py generate-queue` | Build `data/gap-fill/agent/gap-queue.csv` from unfilled gaps |
+| `python3 scripts/gap_fill_agent.py build-context --pr <n> --line <n> --out <dir>` | Write one gap's context pack |
+| `python3 scripts/gap_fill_agent.py check-hit ...` | Check whether a sancov file hits gap points |
+| `./scripts/verify-gap-candidate.sh ...` | Run one candidate through Docker `llc` + sancov check |
+
+Agent artifacts live under `data/gap-fill/agent/` (`gap-queue.csv`, `context/`, `wins/`, `journal.jsonl`).
+
+---
+
 ## CLI reference
 
 The scripts above call these modules. Use `--help` on any command for the full flag list.
@@ -370,7 +497,7 @@ Optional commands outside the main workflows in fuzz-fill.
 
 The Docker image bundles an official LLVM release bootstrap, a dual-build SanitizerCoverage LLVM tree (instrumented `llc`/`opt` plus Release helpers), and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
 
-**Scripts** (under [`scripts/docker/`](scripts/docker/)): [`build-image.sh`](scripts/docker/build-image.sh), [`build-image-pr.sh`](scripts/docker/build-image-pr.sh), [`ensure-image.sh`](scripts/docker/ensure-image.sh), [`gap-finding-baseline.sh`](scripts/docker/gap-finding-baseline.sh), [`gap-finding-pr.sh`](scripts/docker/gap-finding-pr.sh), [`test-image.sh`](scripts/docker/test-image.sh), [`tmp-container.sh`](scripts/docker/tmp-container.sh)
+**Scripts** (under [`scripts/docker/`](scripts/docker/)): [`build-image.sh`](scripts/docker/build-image.sh), [`build-image-pr.sh`](scripts/docker/build-image-pr.sh), [`ensure-image.sh`](scripts/docker/ensure-image.sh), [`gap-finding-baseline.sh`](scripts/docker/gap-finding-baseline.sh), [`gap-finding-pr.sh`](scripts/docker/gap-finding-pr.sh), [`gap-filling.sh`](scripts/docker/gap-filling.sh), [`test-image.sh`](scripts/docker/test-image.sh), [`tmp-container.sh`](scripts/docker/tmp-container.sh)
 
 The image bakes a copy of fuzz-fill at `/work/fuzz-fill` when built. Pass **`--bind-repo`** on a docker runner to mount your local checkout over that path (venv stays at `/work/fuzz-fill-venv`) when you need code that is newer than the image.
 
