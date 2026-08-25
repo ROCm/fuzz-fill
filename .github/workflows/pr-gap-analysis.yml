@@ -197,7 +197,7 @@ jobs:
           git clone --filter=blob:none "https://github.com/${INPUT_GITHUB_REPO}.git" "${LLVM_MIRROR_DIR}"
 
       - name: Save filtered llvm-project mirror
-        if: always()
+        if: steps.cache-mirror.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.LLVM_MIRROR_DIR }}
