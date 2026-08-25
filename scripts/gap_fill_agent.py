@@ -18,6 +18,7 @@ if str(_SRC) not in sys.path:
 from coverage.line_rules import normalize_llc_address_line_map  # noqa: E402
 from coverage.pr_llc_settings import normalize_llvm_rel_path  # noqa: E402
 from coverage.sancov import Sancov  # noqa: E402
+from pr_check.checker import PrCheckerError, is_evaluable_run, parse_run_dir_name  # noqa: E402
 
 import pandas as pd  # noqa: E402
 
@@ -68,17 +69,34 @@ def _load_manifest(root: Path) -> dict[tuple[str, str], dict[str, str]]:
     return out
 
 
-def _load_gap_text(root: Path) -> dict[tuple[str, str, int], str]:
-    expanded = root / "data/pr-check/reports/gaps-expanded.csv"
-    texts: dict[tuple[str, str, int], str] = {}
-    with expanded.open(encoding="utf-8", newline="") as handle:
-        for row in csv.DictReader(handle):
-            pr = row["PR"].rstrip("/").split("/")[-1]
-            backend = row["Backend"].strip().lower()
-            if backend == "spir-v":
-                backend = "spirv"
-            line = int(row["Line"])
-            texts[(pr, backend, line)] = row.get("Text", "")
+def _load_gap_text_from_runs(root: Path) -> dict[tuple[str, str, str, int], str]:
+    """Map (pr, backend, absolute file path, line) -> uncovered-line text."""
+    texts: dict[tuple[str, str, str, int], str] = {}
+    runs_root = root / "data/pr-check/runs"
+    if not runs_root.is_dir():
+        return texts
+
+    for run_dir in sorted(runs_root.iterdir()):
+        if not run_dir.is_dir() or not is_evaluable_run(run_dir):
+            continue
+        try:
+            pr_number, backend = parse_run_dir_name(run_dir.name)
+        except PrCheckerError:
+            continue
+
+        gap_csv = run_dir / "commit_lines_report" / "target_lines_uncovered.csv"
+        with gap_csv.open(encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if reader.fieldnames is None:
+                continue
+            for row in reader:
+                file_path = (row.get("file") or "").strip()
+                line_text = (row.get("line") or "").strip()
+                if not file_path or not line_text:
+                    continue
+                texts[(str(pr_number), backend, file_path, int(line_text))] = (
+                    row.get("text") or ""
+                ).strip()
     return texts
 
 
@@ -99,7 +117,7 @@ def _gap_points(llc_map_csv: Path, file: str, line: int) -> list[dict[str, str]]
 def generate_queue(root: Path, out_csv: Path) -> None:
     gaps_filled = root / "data/gap-fill/reports/gaps-filled.csv"
     manifest = _load_manifest(root)
-    texts = _load_gap_text(root)
+    texts = _load_gap_text_from_runs(root)
     rows: list[GapEntry] = []
 
     with gaps_filled.open(encoding="utf-8", newline="") as handle:
@@ -115,7 +133,7 @@ def generate_queue(root: Path, out_csv: Path) -> None:
             skip_key = (pr, backend, _basename(file_path), line)
             skip_reason = SKIP_REASONS.get(skip_key, "")
             status = "skip" if skip_reason else "open"
-            text = texts.get((pr, backend, line), "")
+            text = texts.get((pr, backend, file_path, line), "")
             rows.append(
                 GapEntry(
                     pr_number=pr,
@@ -443,6 +461,9 @@ def main() -> None:
     if args.cmd == "generate-queue":
         generate_queue(root, args.out)
     elif args.cmd == "build-context":
+        queue_csv = root / "data/gap-fill/agent/gap-queue.csv"
+        if not queue_csv.is_file():
+            generate_queue(root, queue_csv)
         build_context(
             root,
             args.pr,

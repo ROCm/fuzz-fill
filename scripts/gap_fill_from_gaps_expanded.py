@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Prepare and aggregate gap-filling runs from gaps-expanded.csv."""
+"""Prepare and aggregate gap-filling runs from completed pr-check artifacts.
+
+When reading pr-check runs directly, skips ambiguous or low-interest uncovered lines
+by default (for example debug logging or bare control-flow keywords). See
+``coverage.gap_line_interest`` for the heuristics and ``--include-uninteresting`` to
+disable filtering.
+"""
 
 from __future__ import annotations
 
@@ -14,14 +20,18 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
+from coverage.gap_line_interest import classify_gap_line_interest  # noqa: E402
 from coverage.pr_llc_settings import (  # noqa: E402
+    abs_path_to_llvm_rel_path,
     default_exclude_completed_o_levels,
     derive_llc_flag_variants,
     join_llvm_abs_path,
     normalize_llvm_rel_path,
     write_derived_settings_csv,
 )
+from pr_check.checker import PrCheckerError, is_evaluable_run, parse_run_dir_name  # noqa: E402
 
+DEFAULT_GITHUB_REPO = "llvm/llvm-project"
 
 BACKEND_CORPUS = {
     "amdgpu": "amdgcn-amd-amdhsa",
@@ -36,6 +46,7 @@ class GapRow:
     line: int
     rel_path: str
     location: str
+    text: str = ""
 
 
 def repo_root() -> Path:
@@ -88,9 +99,85 @@ def parse_gaps_expanded(path: Path) -> list[GapRow]:
                     line=line,
                     rel_path=rel_path,
                     location=location,
+                    text=(row.get("Text") or "").strip(),
                 )
             )
     return rows
+
+
+def load_gaps_from_runs(
+    pr_check_runs_root: Path,
+    *,
+    github_repo: str = DEFAULT_GITHUB_REPO,
+    filter_uninteresting: bool = True,
+) -> tuple[list[GapRow], list[dict[str, str]]]:
+    """Load gap rows from completed pr-check runs, skipping low-interest lines by default."""
+    included: list[GapRow] = []
+    skipped: list[dict[str, str]] = []
+
+    if not pr_check_runs_root.is_dir():
+        raise SystemExit(f"pr-check runs root not found: {pr_check_runs_root}")
+
+    for run_dir in sorted(pr_check_runs_root.iterdir()):
+        if not run_dir.is_dir() or not is_evaluable_run(run_dir):
+            continue
+        try:
+            pr_number, backend = parse_run_dir_name(run_dir.name)
+        except PrCheckerError:
+            continue
+
+        pr_url = f"https://github.com/{github_repo}/pull/{pr_number}"
+        gap_csv = run_dir / "commit_lines_report" / "target_lines_uncovered.csv"
+        with gap_csv.open(encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            if reader.fieldnames is None:
+                continue
+            for row in reader:
+                file_path = (row.get("file") or "").strip()
+                line_text = (row.get("line") or "").strip()
+                if not file_path or not line_text:
+                    continue
+                line = int(line_text)
+                text = (row.get("text") or "").strip()
+                rel_path = abs_path_to_llvm_rel_path(file_path)
+                location = f"{rel_path}:{line}"
+                base = {
+                    "PR": pr_url,
+                    "Backend": backend,
+                    "Line": str(line),
+                    "Location": location,
+                    "Text": text,
+                }
+                decision = (
+                    classify_gap_line_interest(text) if filter_uninteresting else None
+                )
+                if decision is None or decision.include:
+                    included.append(
+                        GapRow(
+                            pr_number=str(pr_number),
+                            backend=backend,
+                            line=line,
+                            rel_path=rel_path,
+                            location=location,
+                            text=text,
+                        )
+                    )
+                else:
+                    skipped.append({**base, "SkipReason": decision.reason})
+
+    return included, skipped
+
+
+def write_skipped_csv(path: Path, rows: list[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["PR", "Backend", "Line", "Location", "Text", "SkipReason"],
+            extrasaction="ignore",
+        )
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def load_address_map_files(llc_map_csv: Path) -> set[str]:
@@ -199,12 +286,30 @@ def write_manifest(
 
 
 def prepare_command(args: argparse.Namespace) -> int:
-    gaps_expanded_csv = args.gaps_expanded_csv.resolve()
     pr_check_runs_root = args.pr_check_runs_root.resolve()
     inputs_root = args.inputs_root.resolve()
     outputs_root = args.outputs_root.resolve()
 
-    rows = parse_gaps_expanded(gaps_expanded_csv)
+    if args.gaps_expanded_csv is not None:
+        gaps_expanded_csv = args.gaps_expanded_csv.resolve()
+        if not gaps_expanded_csv.is_file():
+            raise SystemExit(f"gaps-expanded CSV not found: {gaps_expanded_csv}")
+        rows = parse_gaps_expanded(gaps_expanded_csv)
+        skipped: list[dict[str, str]] = []
+    else:
+        rows, skipped = load_gaps_from_runs(
+            pr_check_runs_root,
+            github_repo=args.github_repo,
+            filter_uninteresting=args.filter_uninteresting,
+        )
+        if args.skipped_output is not None and skipped:
+            skipped_path = args.skipped_output.resolve()
+            write_skipped_csv(skipped_path, skipped)
+            print(
+                f"wrote {skipped_path}: {len(skipped)} skipped low-interest gap line(s)",
+                file=sys.stderr,
+            )
+
     grouped: dict[tuple[str, str], list[GapRow]] = defaultdict(list)
     for row in rows:
         grouped[run_key(row)].append(row)
@@ -271,7 +376,7 @@ def prepare_command(args: argparse.Namespace) -> int:
                 writer.writerows(warnings)
             print(
                 f"warning: PR {pr_number} ({backend}): "
-                f"{len(warnings)} gap line(s) may not be fillable -> {warnings_csv}",
+                f"{len(warnings)} gap line(s) missing from llc_address_line_map -> {warnings_csv}",
                 file=sys.stderr,
             )
 
@@ -325,6 +430,8 @@ def prepare_command(args: argparse.Namespace) -> int:
 
     manifest_path = write_manifest(manifest, inputs_root=inputs_root, outputs_root=outputs_root)
     print(f"wrote manifest: {manifest_path}", file=sys.stderr)
+    if not rows:
+        print("warning: no gap lines found", file=sys.stderr)
     return 0
 
 
@@ -446,20 +553,48 @@ def aggregate_command(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     root = repo_root()
-    default_gaps = root / "data/pr-check/reports/gaps-expanded.csv"
     default_runs = root / "data/pr-check/runs"
     default_inputs = root / "data/gap-fill/inputs"
     default_outputs = root / "data/gap-fill/runs"
     default_report = root / "data/gap-fill/reports/gaps-filled.csv"
+    default_skipped = default_inputs / "gaps-skipped.csv"
 
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
     prepare = sub.add_parser("prepare", help="write per-PR gap-lines.csv and manifest.csv")
-    prepare.add_argument("--gaps-expanded-csv", type=Path, default=default_gaps)
+    prepare.add_argument(
+        "--gaps-expanded-csv",
+        type=Path,
+        default=None,
+        help="optional legacy gaps-expanded CSV input (default: read pr-check runs directly)",
+    )
     prepare.add_argument("--pr-check-runs-root", type=Path, default=default_runs)
     prepare.add_argument("--inputs-root", type=Path, default=default_inputs)
     prepare.add_argument("--outputs-root", type=Path, default=default_outputs)
+    prepare.add_argument(
+        "--skipped-output",
+        type=Path,
+        default=default_skipped,
+        help=(
+            "audit CSV for skipped low-interest gap lines "
+            "(default: data/gap-fill/inputs/gaps-skipped.csv)"
+        ),
+    )
+    prepare.add_argument(
+        "--include-uninteresting",
+        action="store_false",
+        dest="filter_uninteresting",
+        help=(
+            "include ambiguous or low-interest uncovered lines "
+            "(debug, control flow, declarations, returns, asserts)"
+        ),
+    )
+    prepare.add_argument(
+        "--github-repo",
+        default=DEFAULT_GITHUB_REPO,
+        help=f"GitHub repo for PR URLs when reading runs (default: {DEFAULT_GITHUB_REPO})",
+    )
     prepare.add_argument(
         "--derive-llc-settings",
         action=argparse.BooleanOptionalAction,
@@ -478,7 +613,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="use this settings CSV for all PRs instead of deriving (requires --no-derive-llc-settings)",
     )
-    prepare.set_defaults(func=prepare_command)
+    prepare.set_defaults(func=prepare_command, filter_uninteresting=True)
 
     aggregate = sub.add_parser("aggregate", help="summarize incremental/new_coverage.csv outputs")
     aggregate.add_argument("--manifest", type=Path, default=default_inputs / "manifest.csv")

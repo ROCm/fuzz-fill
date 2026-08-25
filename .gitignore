@@ -1,4 +1,5 @@
 prompts/*
+!prompts/gap-fill-agent.md
 scratch/*
 venv/*
 .venv-lock/*

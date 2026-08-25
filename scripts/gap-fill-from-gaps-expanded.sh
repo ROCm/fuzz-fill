@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Gap-fill all target lines in gaps-expanded.csv using candidate-tests-dataset.
+# Batch gap-fill from completed pr-check runs using candidate-tests-dataset.
 #
 # Runs one Docker gap-filling job per PR/backend pair (matching pr-check artifacts).
-# See scripts/gap_fill_from_gaps_expanded.py for CSV prep and aggregation.
+# See scripts/gap_fill_from_gaps_expanded.py for gap prep and aggregation.
 
 set -euo pipefail
 
@@ -12,7 +12,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=scripts/lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
 
-GAPS_EXPANDED_CSV="${REPO_ROOT}/data/pr-check/reports/gaps-expanded.csv"
+GAPS_EXPANDED_CSV=""
 PR_CHECK_RUNS_ROOT="${REPO_ROOT}/data/pr-check/runs"
 INPUTS_ROOT="${REPO_ROOT}/data/gap-fill/inputs"
 OUTPUTS_ROOT="${REPO_ROOT}/data/gap-fill/runs"
@@ -33,16 +33,16 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [options]
 
-Prepare per-PR gap lists from gaps-expanded.csv, run Docker gap-filling for each
+Prepare per-PR gap lists from completed pr-check runs, run Docker gap-filling for each
 PR/backend pair, and aggregate results.
 
 Steps (all enabled by default):
-  1. prepare  - write data/gap-fill/inputs/*/gap-lines.csv and manifest.csv
+  1. prepare  - scan data/pr-check/runs/, write gap-lines.csv + manifest.csv
   2. run      - invoke scripts/docker/gap-filling.sh --bind-repo for each manifest row
   3. aggregate - write data/gap-fill/reports/gaps-filled.csv
 
 Options:
-  --gaps-expanded-csv <path>     Input gap list (default: data/pr-check/reports/gaps-expanded.csv)
+  --gaps-expanded-csv <path>     Optional legacy CSV input (default: read pr-check runs)
   --pr-check-runs-root <path>    pr-check run artifacts (default: data/pr-check/runs)
   --inputs-root <path>           Prepared gap-line CSVs (default: data/gap-fill/inputs)
   --outputs-root <path>          Gap-fill outputs (default: data/gap-fill/runs)
@@ -192,7 +192,12 @@ done
 
 validate_jobs "$JOBS"
 
-if [[ ! -f "$GAPS_EXPANDED_CSV" ]] && [[ "$DO_PREPARE" -eq 1 ]]; then
+if [[ "$DO_PREPARE" -eq 1 ]] && [[ -z "$GAPS_EXPANDED_CSV" ]] && [[ ! -d "$PR_CHECK_RUNS_ROOT" ]]; then
+    echo "error: pr-check runs root not found: ${PR_CHECK_RUNS_ROOT}" >&2
+    exit 1
+fi
+
+if [[ -n "$GAPS_EXPANDED_CSV" ]] && [[ "$DO_PREPARE" -eq 1 ]] && [[ ! -f "$GAPS_EXPANDED_CSV" ]]; then
     echo "error: gaps-expanded CSV not found: ${GAPS_EXPANDED_CSV}" >&2
     exit 1
 fi
@@ -206,11 +211,15 @@ cd "$REPO_ROOT"
 
 if [[ "$DO_PREPARE" -eq 1 ]]; then
     echo "=== prepare gap-line inputs ==="
-    python3 "${SCRIPT_DIR}/gap_fill_from_gaps_expanded.py" prepare \
-        --gaps-expanded-csv "$GAPS_EXPANDED_CSV" \
-        --pr-check-runs-root "$PR_CHECK_RUNS_ROOT" \
-        --inputs-root "$INPUTS_ROOT" \
+    prepare_args=(
+        --pr-check-runs-root "$PR_CHECK_RUNS_ROOT"
+        --inputs-root "$INPUTS_ROOT"
         --outputs-root "$OUTPUTS_ROOT"
+    )
+    if [[ -n "$GAPS_EXPANDED_CSV" ]]; then
+        prepare_args+=(--gaps-expanded-csv "$GAPS_EXPANDED_CSV")
+    fi
+    python3 "${SCRIPT_DIR}/gap_fill_from_gaps_expanded.py" prepare "${prepare_args[@]}"
 fi
 
 if [[ "$DO_RUN" -eq 1 ]]; then

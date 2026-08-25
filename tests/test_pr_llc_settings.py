@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from coverage.pr_llc_settings import (
+    abs_path_to_llvm_rel_path,
     cross_with_o_levels,
     default_exclude_completed_o_levels,
     derive_llc_flag_variants,
@@ -116,6 +117,14 @@ class NormalizePathTests(unittest.TestCase):
         self.assertEqual(
             normalize_llvm_rel_path("llvm/llvm/lib/Foo.cpp"),
             "llvm/lib/Foo.cpp",
+        )
+
+    def test_abs_path_to_llvm_rel_path(self) -> None:
+        self.assertEqual(
+            abs_path_to_llvm_rel_path(
+                "/work/llvm-project/llvm/lib/Target/AMDGPU/Foo.cpp"
+            ),
+            "llvm/lib/Target/AMDGPU/Foo.cpp",
         )
 
 

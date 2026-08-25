@@ -150,6 +150,16 @@ def normalize_llvm_rel_path(rel_path: str) -> str:
     return rel
 
 
+def abs_path_to_llvm_rel_path(file_path: str) -> str:
+    """Convert an absolute host path from pr-check artifacts to a git-relative llvm path."""
+    normalized = Path(file_path).as_posix()
+    marker = "/llvm/"
+    idx = normalized.find(marker)
+    if idx >= 0:
+        return normalize_llvm_rel_path(normalized[idx + 1 :])
+    return normalize_llvm_rel_path(normalized.lstrip("/"))
+
+
 def join_llvm_abs_path(path_prefix: str, rel_path: str) -> str:
     """Join pr-check path prefix with a gaps-expanded relative path without doubling llvm/."""
     rel = normalize_llvm_rel_path(rel_path)

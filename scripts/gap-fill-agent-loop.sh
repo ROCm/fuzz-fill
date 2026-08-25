@@ -132,7 +132,7 @@ run_loop() {
         echo "=== round ${round}/${MAX_ROUNDS} pr=${pr} line=${line} attempts=${attempts} elapsed=${elapsed}s ==="
         echo "[$(date -Iseconds)] preparing context..."
 
-        "${SCRIPT_DIR}/prepare-gap-context.sh" --pr "$pr" --line "$line" --out "$ctx"
+        python3 "${SCRIPT_DIR}/gap_fill_agent.py" build-context --pr "$pr" --line "$line" --out "$ctx"
 
         prior=""
         if [[ -f "$JOURNAL" ]]; then
