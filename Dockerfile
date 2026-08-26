@@ -143,7 +143,6 @@ COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-build-sancov /work/llv
 
 COPY --chown=${UID}:${GID} pyproject.toml LICENCE.txt README.md /work/fuzz-fill/
 COPY --chown=${UID}:${GID} src /work/fuzz-fill/src
-COPY --chown=${UID}:${GID} example /work/fuzz-fill/example
 COPY --chown=${UID}:${GID} tests /work/fuzz-fill/tests
 COPY --chown=${UID}:${GID} integration-tests /work/fuzz-fill/integration-tests
 COPY --chown=${UID}:${GID} scripts /work/fuzz-fill/scripts
