@@ -89,7 +89,7 @@ _venv_python = shlex.quote(os.path.join(_venv_dir, "bin", "python"))
 
 config.name = "fuzz-fill-integration-tests"
 config.suffixes = [".test"]
-config.test_format = lit.formats.ShTest(execute_external=True)
+config.test_format = lit.formats.ShTest()
 config.environment["VIRTUAL_ENV"] = _venv_dir
 config.environment["FUZZ_FILL_VENV_DIR"] = _venv_dir
 config.substitutions.extend(
@@ -109,7 +109,7 @@ config.substitutions.extend(
         ("%venv", _venv_cmd),
         ("%coverage", f"{_venv_python} -m coverage"),
         ("%reduce", f"{_venv_python} -m reduce"),
-        ("%added-lines", f"{_venv_cmd} && python -m added_lines"),
+        ("%added-lines", f"{_venv_python} -m added_lines"),
     ]
 )
 
