@@ -96,6 +96,9 @@ config.substitutions.extend(
     [
         ("%sancov-llc", _tool(_llvm_sancov_bin_dir, "llc")),
         ("%sancov-opt", _tool(_llvm_sancov_bin_dir, "opt")),
+        ("%llvm-reduce", _tool(_llvm_sancov_bin_dir, "llvm-reduce")),
+        ("%llvm-dis", _tool(_llvm_sancov_bin_dir, "llvm-dis")),
+        ("%llvm-sancov-bin", shlex.quote(_llvm_sancov_bin_dir)),
         ("%sancov", _tool(_llvm_bin_dir, "sancov")),
         ("%llvm-lit", _tool(_llvm_sancov_bin_dir, "llvm-lit")),
         ("%FileCheck", _tool(_llvm_bin_dir, "FileCheck")),

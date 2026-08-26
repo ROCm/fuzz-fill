@@ -3,14 +3,15 @@
 # COM:   b) candidate-test: measure coverage of an external test
 # COM:   c) incremental:    report lines the new test covers that the baseline misses
 # COM:   d) target-lines:   report which specific lines the baseline leaves uncovered
+# COM:   e) batch-from-coverage: real llvm-reduce on the first gap-fill hit
 # COM:
 # COM: Cross-check: the gaps incremental reports must match the lines target-lines flags, and a
 # COM: baseline-covered line must show up in baseline output but not in incremental/target-lines.
 
-# RUN: rm -rf %t && mkdir -p %t/baseline %t/candidate_tests %t/incremental %t/target_lines
+# RUN: rm -rf %t && mkdir -p %t/baseline %t/gap-fill/candidate_tests %t/gap-fill/incremental %t/target_lines
 # RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter CodeGen/AMDGPU/loop -j2
-# RUN: %coverage candidate-test --output-dir %t/candidate_tests --llc %sancov-llc --candidate-tests-dir %S/fixtures/coverage-new-tests --n 1
-# RUN: %coverage incremental --output-dir %t/incremental --sancov %sancov --line-coverage-uncovered-csv %t/baseline/line_coverage_uncovered.csv --llc-address-line-map-csv %t/baseline/llc_address_line_map.csv --candidate-tests-output-dir %t/candidate_tests
+# RUN: %coverage candidate-test --output-dir %t/gap-fill/candidate_tests --llc %sancov-llc --candidate-tests-dir %S/fixtures/coverage-new-tests --n 1
+# RUN: %coverage incremental --output-dir %t/gap-fill/incremental --sancov %sancov --line-coverage-uncovered-csv %t/baseline/line_coverage_uncovered.csv --llc-address-line-map-csv %t/baseline/llc_address_line_map.csv --candidate-tests-output-dir %t/gap-fill/candidate_tests
 # RUN: %coverage target-lines --output-dir %t/target_lines --line-coverage-uncovered-csv %t/baseline/line_coverage_uncovered.csv --llvm-repo %llvm-repo --target-lines-csv %S/fixtures/target-lines-sample.csv
 
 # RUN: test -f %t/baseline/line_coverage_summary.csv
@@ -20,7 +21,7 @@
 # RUN: test -f %t/baseline/llc_address_line_map.csv
 # RUN: test -f %t/baseline/llc_line_point_summary.csv
 # RUN: test -f %t/baseline/opt_line_point_summary.csv
-# RUN: test -f %t/incremental/new_coverage.csv
+# RUN: test -f %t/gap-fill/incremental/new_coverage.csv
 # RUN: test -f %t/target_lines/target_lines_uncovered.csv
 
 # COM: AMDGPUAlwaysInlinePass.cpp:160 is covered by the test suite slice itself,
@@ -50,7 +51,7 @@
 # UNCOVERED_CSV-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,680
 
 # COM: These coverage gaps, uncovered by the test suite slice but covered by the external test, have been manually confirmed with llvmorg-22.1.8 (RelWithDebInfo sancov build).
-# RUN: %FileCheck %s --input-file=%t/incremental/new_coverage.csv --check-prefix=GAP_CSV
+# RUN: %FileCheck %s --input-file=%t/gap-fill/incremental/new_coverage.csv --check-prefix=GAP_CSV
 # GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUAsmPrinter.cpp,211,
 # GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUAsmPrinter.cpp,222,
 # GAP_CSV-DAG: standalone-empty-kernel.ll,{{.*}}/AMDGPUAsmPrinter.cpp,581,
@@ -59,7 +60,7 @@
 
 # COM: AMDGPUAlwaysInlinePass.cpp:160 is already covered by the test suite slice, so
 # COM: incremental must NOT report it as a new gain.
-# RUN: %FileCheck %s --input-file=%t/incremental/new_coverage.csv --check-prefix=NO_BASELINE_GAIN
+# RUN: %FileCheck %s --input-file=%t/gap-fill/incremental/new_coverage.csv --check-prefix=NO_BASELINE_GAIN
 # NO_BASELINE_GAIN-NOT: /AMDGPUAlwaysInlinePass.cpp,160,
 
 # COM: The same coverage gaps reported by incremental (GAP_CSV) must be reported as
@@ -76,3 +77,11 @@
 # COM: present in the sample target CSV, so target-lines must filter it out of the report.
 # RUN: %FileCheck %s --input-file=%t/target_lines/target_lines_uncovered.csv --check-prefix=TARGET_CSV_NOT
 # TARGET_CSV_NOT-NOT: /AMDGPUAliasAnalysis.cpp,103,
+
+# COM: Real batch reduction on the first gap-fill row (manually confirmed with llvmorg-22.1.8 sancov build).
+# RUN: %reduce batch-from-coverage --gap-fill-dir %t/gap-fill -n 1 --corpus-dir %S/fixtures/coverage-new-tests --llvm-bin %llvm-sancov-bin --instrumented-bin-dir %llvm-sancov-bin --pipeline llvm_reduce_ir
+# RUN: bash -c 'd=$(echo %t/gap-fill/reduced/t-00001-*); test -d "$d"'
+# RUN: bash -c 'd=$(echo %t/gap-fill/reduced/t-00001-*); test -f "$d/reduced/reduced.ll"'
+# RUN: bash -c 'd=$(echo %t/gap-fill/reduced/t-00001-*); input=$(ls "$d"/*.ll "$d"/*.bc 2>/dev/null | head -1); reduced="$d/reduced/reduced.ll"; bl=$(mktemp); %llvm-dis -o "$bl" "$input"; test $(stat -c%s "$reduced") -lt $(stat -c%s "$bl"); rm -f "$bl"'
+# RUN: bash -c 'd=$(echo %t/gap-fill/reduced/t-00001-*); "$d/interesting_ir.sh" "$d/reduced/reduced.ll"' 2>&1 | %FileCheck %s --check-prefix=REDUCED_COVERAGE
+# REDUCED_COVERAGE: COVERED (0x{{[0-9a-fA-F]+}}) is present in sancov --print output

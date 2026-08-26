@@ -44,4 +44,5 @@ require_local_reduce_bins() {
 export_local_reduce_tools() {
     export COVERAGE_LLC="${INSTRUMENTED_BIN_DIR}/llc"
     export COVERAGE_LLVM_REDUCE="${LLVM_BIN}/llvm-reduce"
+    export COVERAGE_LLVM_DIS="${LLVM_BIN}/llvm-dis"
 }

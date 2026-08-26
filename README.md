@@ -7,15 +7,22 @@ fuzz-fill identifies coverage gaps in LLVM:
 1. **Gap finding** — measure baseline coverage achieved by LLVM's LIT test suite and produce a list of uncovered lines. At present `fuzz-fill` supports finding gaps in the AMDGPU and SPIR-V backends; this will be extended in the future to other backends and parts of the LLVM codebase.
    - **Baseline** — all uncovered lines in a user-specified part of the LLVM codebase.
    - **PR** — added or changed lines in a commit that baseline coverage still misses.
-
-Gap filling (running a fuzz corpus against the gap list) will follow in a separate PR.
+2. **Gap filling** — run a fuzz corpus against the gap list and report which gaps each candidate test covers.
+3. **Reduction** — scaffold and run testcase reduction for the first *N* gap-fill hits, producing minimal LIT-ready tests.
 
 ```
 ┌─ Gap finding ────────────────────────────────────────────────┐
-│                                                              │
 │   Baseline ──┐                                               │
 │              ├──► Uncovered lines (CSV)                      │
 │   PR ────────┘                                               │
+└───────────────────────────────┬──────────────────────────────┘
+                                ▼
+┌─ Gap filling ──────────────────────────────────────────────────┐
+│   candidate-test ──► incremental ──► new_coverage.csv          │
+└───────────────────────────────┬──────────────────────────────┘
+                                ▼
+┌─ Reduction ──────────────────────────────────────────────────┐
+│   batch-from-coverage (-n N) ──► t-00001-*/ … reduced.*      │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -68,6 +75,9 @@ Use `spirv` instead of `amdgpu` for SPIR-V backend tests.
   - [LLVM builds](#llvm-builds)
 - [Gap finding (baseline)](#gap-finding-baseline)
 - [Gap finding (PR)](#gap-finding-pr)
+- [Gap filling](#gap-filling)
+- [Reduction](#reduction)
+  - [Reduction passes](#reduction-passes)
 - [CLI reference](#cli-reference)
   - [Uncovered-lines CSV contract](#uncovered-lines-csv-contract)
   - [Environment variables](#environment-variables)
@@ -77,6 +87,9 @@ Use `spirv` instead of `amdgpu` for SPIR-V backend tests.
   - [PR image build and reuse](#pr-image-build-and-reuse)
   - [Gap finding (baseline) in Docker](#gap-finding-baseline-in-docker)
   - [Gap finding (PR) in Docker](#gap-finding-pr-in-docker)
+  - [Gap filling in Docker](#gap-filling-in-docker)
+  - [Reduction in Docker](#reduction-in-docker)
+  - [End-to-end workflow in Docker](#end-to-end-workflow-in-docker)
   - [Run integration tests](#run-integration-tests)
   - [Run a container](#run-a-container)
 - [Tests](#tests)
@@ -252,6 +265,120 @@ Under `$OUTPUT_DIR`:
 
 ---
 
+## Gap filling
+
+[`scripts/gap-filling.sh`](scripts/gap-filling.sh) runs `coverage candidate-test` then `coverage incremental` against a gap list from [gap finding](#gap-finding-baseline) or [PR gap finding](#gap-finding-pr).
+
+**Inputs:** `line_coverage_uncovered.csv` (or `target_lines_uncovered.csv`) plus matching `llc_address_line_map.csv` from the same baseline run, and a fuzz corpus directory.
+
+**Main output:** `<output-dir>/incremental/new_coverage.csv` with columns `test_name`, `file`, `line`, `covered-points`.
+
+```bash
+./scripts/gap-filling.sh \
+  --output-dir ./data/gap-fill-out \
+  --line-coverage-uncovered-csv ./data/baseline/line_coverage_uncovered.csv \
+  --llc-address-line-map-csv ./data/baseline/llc_address_line_map.csv \
+  --candidate-tests-dir ./candidate-tests-dataset/amdgcn-amd-amdhsa \
+  -n 100 \
+  --llvm-repo /path/llvm-project \
+  --llvm-bin /path/llvm-project/build/bin \
+  --instrumented-bin-dir /path/llvm-project/build-sancov/bin \
+  -j "$(nproc)"
+```
+
+Docker: [`scripts/docker/gap-filling.sh`](scripts/docker/gap-filling.sh) — same flags plus `--image` / `--pr-id`.
+
+---
+
+## Reduction
+
+[`scripts/reduction.sh`](scripts/reduction.sh) is a thin wrapper around `python -m reduce batch-from-coverage`. It scaffolds (and optionally runs) reduction for the **first N rows** of `incremental/new_coverage.csv` from a [gap-fill](#gap-filling) output directory. Each row becomes a case directory `t-00001-<short>/` with `config.json`, `interesting_ir.sh`, and a copied `.bc`. The IR interestingness script is rendered from [`src/reduce/template_interesting_ir.sh`](src/reduce/template_interesting_ir.sh).
+
+**Default output:** `<gap-fill-dir>/reduced/` (override with `--output`).
+
+```bash
+# Scaffold one hit (inspect harness before running llvm-reduce):
+./scripts/reduction.sh \
+  --gap-fill-dir ./data/gap-fill-out \
+  -n 1 \
+  --scaffold-only
+
+# Scaffold and reduce the first three hits:
+./scripts/reduction.sh \
+  --gap-fill-dir ./data/gap-fill-out \
+  -n 3 \
+  --llvm-bin /path/llvm-project/build/bin \
+  --instrumented-bin-dir /path/llvm-project/build-sancov/bin \
+  --pipeline llvm_reduce_ir
+```
+
+Docker: [`scripts/docker/reduction.sh`](scripts/docker/reduction.sh).
+
+**Single-case reduction** (hand-written harness under [`example/`](example/)):
+
+```bash
+python -m reduce \
+  --config example/amd/si-i1-copies/config.json \
+  --llc /path/llvm-project/build-sancov/bin/llc \
+  --llvm-reduce /path/llvm-project/build/bin/llvm-reduce
+```
+
+**CLI** (`python -m reduce batch-from-coverage --help`):
+
+```bash
+python -m reduce batch-from-coverage \
+  --gap-fill-dir ./data/gap-fill-out \
+  -n 3 \
+  --scaffold-only
+```
+
+See `--help` for pipeline options (`--pipeline`, `--pass-under-test`, `--mtriple`, `--with-creduce`, …). LLVM tools can be passed explicitly (`--llc`, `--llvm-reduce`), via `--llvm-bin` / `--instrumented-bin-dir`, or through `FUZZ_FILL_LLC` / `FUZZ_FILL_LLVM_REDUCE` environment variables.
+
+Integration test: [`integration-tests/coverage-pipeline.test`](integration-tests/coverage-pipeline.test) (real gap-fill pipeline plus `llvm-reduce` on the first hit).
+
+### Reduction passes
+
+Reduction runs an ordered **pipeline** of passes (see `config.json` or `--pipeline`). Each pass reads the current test artifact and writes the next intermediate under `reduced/tmp/`; the final artifact is copied to `reduced/reduced.ll` (or `reduced.mir` for MIR pipelines).
+
+| Pass id | Description |
+|---------|-------------|
+| `snapshot` | Copy the input IR into the temp directory as a baseline checkpoint before later passes mutate it. |
+| `llvm_reduce_ir` | Run `llvm-reduce` on LLVM IR (`.ll` or `.bc`) using an **interesting-ness script** (`interesting_ir.sh`) that checks SanitizerCoverage still hits the target line. For `.bc` input, disassembles the reduced bitcode to `.ll` with `llvm-dis`. Default batch pipeline. |
+| `creduce` | Further shrink the current artifact with **C-Reduce**, using a copy of the interesting-ness script where `"$1"` is replaced by the candidate filename (C-Reduce runs tests in its own temp directory). Optional follow-on to `llvm_reduce_ir` or `llvm_reduce_mir` (`--with-creduce`). |
+| `extract_mir_before_pass` | Run `llc` with `-stop-before=<pass_under_test> -simplify-mir` to extract MIR immediately before a specific machine pass. Requires `pass_under_test`, `mtriple`, and `llc_O` on the step. Typical first step before `llvm_reduce_mir`. |
+| `llvm_reduce_mir` | Run `llvm-reduce -x=mir` on MIR using **interesting_mir.sh**, which re-runs `llc` through the pass under test and checks coverage. Requires `--pass-under-test` when scaffolding batch cases. |
+| `extract_ir_before_pass` | Like `extract_mir_before_pass`, but stops before the pass without `-simplify-mir` and normalizes `llc`'s print-before dump (strip `---` delimiters and common indentation) into valid LLVM IR for downstream IR reduction. |
+
+#### Extracting IR at the IR/MIR boundary
+
+On the default AMDGPU (SelectionDAG) codegen path, the module stays in LLVM IR until **`amdgpu-isel`** (`AMDGPUISelDAGToDAG`). That pass is the instruction selector; everything before it is IR-only. To capture that final IR snapshot, use `extract_ir_before_pass` with `pass_under_test` set to `amdgpu-isel`:
+
+```json
+{
+  "id": "extract_ir_before_pass",
+  "parameters": {
+    "pass_under_test": "amdgpu-isel",
+    "mtriple": "amdgcn-amd-amdhsa",
+    "llc_O": "-O3"
+  }
+}
+```
+
+The same stop point behaves differently depending on `-simplify-mir`:
+
+| `llc` invocation | Output |
+|------------------|--------|
+| `-stop-before=amdgpu-isel` (no `-simplify-mir`) | Pure LLVM IR — what `extract_ir_before_pass` writes as `.ll` |
+| `-stop-before=amdgpu-isel -simplify-mir` | Hybrid snapshot: IR plus empty `MachineFunction` shells — what `extract_mir_before_pass` produces; not suitable for `llvm-reduce -x=mir` until real machine instructions exist |
+
+Use `--mir-codegen-only` when the pass under test is codegen-only (like `amdgpu-isel`): `interesting_mir_codegen.sh` resumes from the extracted snapshot with normal `llc` flags instead of `-run-pass`.
+
+**Other backends:** the IR→MIR boundary depends on the selector in use. GlobalISel (e.g. `-global-isel=1` on AMDGPU) crosses at **`irtranslator`**, not `amdgpu-isel`. SPIR-V IR-only extraction often stops before target IR passes such as **`spirv-emit-intrinsics`**; the GlobalISel MIR boundary is **`instruction-select`**. Mid-pipeline target IR passes (e.g. `amdgpu-remove-incompatible-functions`) are a separate use case — they extract IR before a specific pass, not necessarily at the last IR-only point.
+
+Pass ids are comma-separated for `--pipeline` (e.g. `extract_mir_before_pass,llvm_reduce_mir,creduce`). Extraction passes and `llvm_reduce_mir` need `--pass-under-test` and `--mtriple`; see `--help` on `batch-from-coverage` for `--extract-mir-output` and `--extract-ir-output`.
+
+---
+
 ## CLI reference
 
 The scripts above call these modules. Use `--help` on any command for the full flag list.
@@ -263,7 +390,8 @@ The scripts above call these modules. Use `--help` on any command for the full f
 | `python -m coverage incremental` | Suite gaps filled by fuzz tests (gap filling) |
 | `python -m coverage target-lines` | PR added lines vs `line_coverage_uncovered.csv` |
 | `python -m added_lines` | Lines added by a git commit |
-| `python -m reduce` | Testcase reduction |
+| `python -m reduce` | Single-case testcase reduction (`--config`) |
+| `python -m reduce batch-from-coverage` | Scaffold (and optionally run) reduction for the first N gap-fill hits |
 
 ### Uncovered-lines CSV contract
 
@@ -383,7 +511,7 @@ Optional commands outside the main workflows in fuzz-fill.
 
 The Docker image bundles an official LLVM release bootstrap, a dual-build SanitizerCoverage LLVM tree (instrumented `llc`/`opt` plus Release helpers), and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
 
-**Scripts** (under [`scripts/docker/`](scripts/docker/)): [`build-image.sh`](scripts/docker/build-image.sh), [`build-image-pr.sh`](scripts/docker/build-image-pr.sh), [`ensure-image.sh`](scripts/docker/ensure-image.sh), [`gap-finding-baseline.sh`](scripts/docker/gap-finding-baseline.sh), [`gap-finding-pr.sh`](scripts/docker/gap-finding-pr.sh), [`test-image.sh`](scripts/docker/test-image.sh), [`tmp-container.sh`](scripts/docker/tmp-container.sh)
+**Scripts** (under [`scripts/docker/`](scripts/docker/)): [`build-image.sh`](scripts/docker/build-image.sh), [`build-image-pr.sh`](scripts/docker/build-image-pr.sh), [`ensure-image.sh`](scripts/docker/ensure-image.sh), [`gap-finding-baseline.sh`](scripts/docker/gap-finding-baseline.sh), [`gap-finding-pr.sh`](scripts/docker/gap-finding-pr.sh), [`gap-filling.sh`](scripts/docker/gap-filling.sh), [`reduction.sh`](scripts/docker/reduction.sh), [`run-full-workflow.sh`](scripts/docker/run-full-workflow.sh), [`test-image.sh`](scripts/docker/test-image.sh), [`tmp-container.sh`](scripts/docker/tmp-container.sh)
 
 The image bakes a copy of fuzz-fill at `/work/fuzz-fill` when built. Pass **`--bind-repo`** on a docker runner to mount your local checkout over that path (venv stays at `/work/fuzz-fill-venv`) when you need code that is newer than the image.
 
@@ -525,6 +653,91 @@ For AMDGPU images, baseline defaults to the twelve LIT prefixes in [`scripts/lit
 
 Main output: `<output-dir>/commit_lines_report/target_lines_uncovered.csv`.
 
+### Gap filling in Docker
+
+[`scripts/docker/gap-filling.sh`](scripts/docker/gap-filling.sh) runs `candidate-test` and `incremental` in a container. Requires gap-list CSV paths and a bind-mounted corpus.
+
+```bash
+./scripts/docker/gap-filling.sh \
+  --output-dir ./data/gap-fill-out \
+  --line-coverage-uncovered-csv ./data/baseline/line_coverage_uncovered.csv \
+  --llc-address-line-map-csv ./data/baseline/llc_address_line_map.csv \
+  --candidate-tests-dir /path/to/corpus \
+  -n 100 \
+  -j "$(nproc)"
+```
+
+Main output: `<output-dir>/incremental/new_coverage.csv`.
+
+### Reduction in Docker
+
+[`scripts/docker/reduction.sh`](scripts/docker/reduction.sh) runs `batch-from-coverage` in a container. Gap-fill output is mounted read-only at `/mounted-gap-fill/`; case directories are written under `--output` (default: `<gap-fill-dir>/reduced/`).
+
+```bash
+./scripts/docker/reduction.sh \
+  --bind-repo \
+  --gap-fill-dir ./data/gap-fill-out \
+  --corpus-dir ./candidate-tests-dataset/amdgcn-amd-amdhsa \
+  -n 1
+
+./scripts/docker/reduction.sh \
+  --gap-fill-dir ./data/gap-fill-out \
+  -n 3 \
+  --scaffold-only
+```
+
+Pass **`--corpus-dir`** when gap filling used a bind-mounted fuzz corpus (required so reduction can resolve each test’s input `.bc`/`.ll` from `test.sh`). For **`.bc` inputs**, full reduction also needs `llvm-dis` (the image sets `FUZZ_FILL_LLVM_DIS`; with `--bind-repo`, your local checkout supplies the wiring).
+
+### End-to-end workflow in Docker
+
+[`scripts/docker/run-full-workflow.sh`](scripts/docker/run-full-workflow.sh) runs the full pipeline in one shot: **gap finding (baseline)** → **gap filling** → **reduction**. It is intended for local smoke testing of the Docker runners.
+
+**Prerequisites:** a built Docker image ([`build-image.sh`](#build)) and, for a real fuzz corpus, a local checkout of the candidate tests (for example `./candidate-tests-dataset/amdgcn-amd-amdhsa` — not baked into the image; gap filling bind-mounts it from the host).
+
+**`--bind-repo` is on by default** — every step mounts your local fuzz-fill checkout at `/work/fuzz-fill` (venv stays at `/work/fuzz-fill-venv`). Use **`--no-bind-repo`** to run the copy baked into the image instead.
+
+Quick smoke test (tiny fixture corpus, scaffold-only reduction):
+
+```bash
+./scripts/docker/run-full-workflow.sh
+```
+
+Full reduction with the AMDGPU fuzz corpus:
+
+```bash
+CORPUS=./candidate-tests-dataset/amdgcn-amd-amdhsa \
+  GAP_FILL_N=20 \
+  FULL_REDUCE=1 \
+  ./scripts/docker/run-full-workflow.sh
+```
+
+Build the image first, then run the workflow:
+
+```bash
+LLVM=/path/to/llvm-project ./scripts/docker/run-full-workflow.sh --build-image
+```
+
+| Option / env | Meaning |
+|--------------|---------|
+| `--build-image` | Build `fuzz-fill-test:latest` before running (pass `LLVM=...` if not `../llvm-project`) |
+| `--no-bind-repo` | Use fuzz-fill from the image instead of mounting the local checkout |
+| `DATA` | Output root (default: `./data/workflow-test`) |
+| `CORPUS` | Fuzz corpus for gap filling and reduction (default: `integration-tests/fixtures/coverage-new-tests`) |
+| `GAP_FILL_N` | Run the first *N* candidate tests from `CORPUS` (default: `1`) |
+| `REDUCE_N` | Reduce the first *N* rows of `new_coverage.csv` (default: `1`) |
+| `FULL_REDUCE` | If `1`, run `llvm-reduce` (default: `0` = scaffold-only) |
+| `J` | Parallel jobs (default: `nproc`) |
+
+On success, outputs land under `$DATA` (default `./data/workflow-test/`):
+
+| Path | Contents |
+|------|----------|
+| `gap-finding/baseline/` | Baseline gap list |
+| `gap-fill/incremental/new_coverage.csv` | Gap-fill hits |
+| `gap-fill/reduced/t-00001-*/` | Reduction harness (and `reduced/reduced.ll` when `FULL_REDUCE=1`) |
+
+By default, reduction processes the **first row** of `new_coverage.csv`. To target a specific test, reorder or filter that CSV before re-running [`reduction.sh`](#reduction-in-docker), or increase `REDUCE_N`.
+
 ### Run integration tests
 
 ```bash
@@ -641,7 +854,7 @@ export GH_TOKEN="$(gh auth token)"   # or ${{ github.token }} in CI
   -v integration-tests/e2e/gap-finding-pr/
 ```
 
-E2E tests use [`scripts/prepare-pr-llvm.sh`](scripts/prepare-pr-llvm.sh) with `--plain-clone` (same squash + self-contained export as the Docker PR path), then build SanitizerCoverage and run gap finding. The first run can take several hours (LLVM build + amdgpu LIT slice).
+E2E tests use [`scripts/prepare-pr-llvm.sh`](scripts/prepare-pr-llvm.sh) with `--plain-clone` (same squash + self-contained export as the Docker PR path), then build SanitizerCoverage and run gap finding, gap filling, and **llvm-reduce** on the pinned gap-fill fixture. The first run can take several hours (LLVM build + amdgpu LIT slice). The reduction step checks that `reduced/reduced.ll` exists and is smaller than the disassembled input (not a byte-for-byte golden match).
 
 ---
 

@@ -48,12 +48,18 @@ docker_gap_append_jobs_env() {
 }
 
 # Run the current docker gap workflow script inside a container.
+# Optional 6th argument: nameref to an array of args passed to the container script.
 docker_gap_run() {
     local container_script="$1"
     local host_output_dir="$2"
     local image="$3"
     local -n _env=$4
     local -n _mounts=$5
+    local -a script_args=()
+    if [[ $# -ge 6 ]]; then
+        local -n _script_args=$6
+        script_args=("${_script_args[@]}")
+    fi
 
     docker run --rm \
         -v "${host_output_dir}:/mounted-output" \
@@ -61,5 +67,5 @@ docker_gap_run() {
         "${_env[@]}" \
         -w "${DOCKER_GAP_CONTAINER_WORKDIR}" \
         "${image}" \
-        bash "${container_script}"
+        bash "${container_script}" "${script_args[@]}"
 }
