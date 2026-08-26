@@ -51,6 +51,9 @@ COPY scripts/image/install-apt-packages.sh /usr/local/lib/fuzz-fill-image/
 COPY scripts/image/apt/ /usr/local/lib/fuzz-fill-image/apt/
 RUN /usr/local/lib/fuzz-fill-image/install-apt-packages.sh builder
 
+COPY scripts/image/install-cmake.sh /usr/local/lib/fuzz-fill-image/
+RUN /usr/local/lib/fuzz-fill-image/install-cmake.sh
+
 WORKDIR /work
 
 COPY --from=llvm-release /opt/llvm-release /work/llvm-release

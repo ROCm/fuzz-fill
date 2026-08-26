@@ -1,6 +1,5 @@
 build-essential
 ca-certificates
-cmake
 curl
 file
 git
