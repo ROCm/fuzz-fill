@@ -1,8 +1,8 @@
 # COM: Test that the binaries are instrumented with sancov
 # RUN: rm -rf %t.llc %t.opt 
 # RUN: mkdir -p %t.llc %t.opt
-# RUN: UBSAN_OPTIONS="coverage=1:coverage_dir=%t.llc" %sancov-llc --version
-# RUN: UBSAN_OPTIONS="coverage=1:coverage_dir=%t.opt" %sancov-opt --version
+# RUN: env UBSAN_OPTIONS="coverage=1:coverage_dir=%t.llc" %sancov-llc --version
+# RUN: env UBSAN_OPTIONS="coverage=1:coverage_dir=%t.opt" %sancov-opt --version
 # RUN: %sancov -print %t.llc/llc.*.sancov | %FileCheck %s
 # RUN: %sancov -print %t.opt/opt.*.sancov | %FileCheck %s
 
