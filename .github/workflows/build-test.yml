@@ -62,6 +62,7 @@ jobs:
       FUZZ_FILL_OPT: /work/llvm-build-sancov/bin/opt
       FUZZ_FILL_LLVM_REDUCE: /work/llvm-build-sancov/bin/llvm-reduce
       FUZZ_FILL_LLVM_DIS: /work/llvm-build-sancov/bin/llvm-dis
+      LLVM_MIRROR_DIR: /work/llvm-mirror
       FUZZ_FILL_LLVM_REPO: /work/llvm-project
 
     steps:
@@ -134,10 +135,47 @@ jobs:
             --llvm-src "${LLVM_PROJECT_DIR}" \
             -v integration-tests/
 
+      - name: Compute mirror cache key
+        id: mirror-cache-key
+        run: |
+          echo "week=$(date -u +%G-%V)" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore filtered llvm-project mirror
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache-mirror
+        with:
+          path: ${{ env.LLVM_MIRROR_DIR }}
+          key: fuzz-fill-llvm-mirror-${{ steps.mirror-cache-key.outputs.week }}
+          restore-keys: |
+            fuzz-fill-llvm-mirror-
+
+      - name: Clone filtered llvm-project mirror
+        if: steps.cache-mirror.outputs.cache-matched-key == ''
+        run: |
+          git clone --filter=blob:none "https://github.com/llvm/llvm-project.git" "${LLVM_MIRROR_DIR}"
+
+      - name: Save filtered llvm-project mirror
+        if: steps.cache-mirror.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.LLVM_MIRROR_DIR }}
+          key: ${{ steps.cache-mirror.outputs.cache-primary-key }}
+
+      - name: Warm mirror for e2e PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! command -v gh >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y gh
+          fi
+          ./scripts/warm-llvm-mirror-for-pr.sh "${LLVM_MIRROR_DIR}" --pr-id 214457
+
       - name: Run e2e integration tests
         env:
           GH_TOKEN: ${{ github.token }}
           FUZZ_FILL_E2E_BOOTSTRAP_BIN: ${{ env.LLVM_RELEASE_BIN }}
+          FUZZ_FILL_E2E_LLVM_MIRROR: ${{ env.LLVM_MIRROR_DIR }}
         run: |
           source "${VENV_DIR}/bin/activate"
           if ! command -v gh >/dev/null 2>&1; then
