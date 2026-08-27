@@ -1,0 +1,12 @@
+# COM: Real target lines belonging to an assert(), report_fatal_error(),
+# COM: LLVM_DEBUG(), llvm_unreachable() or static_assert() call -- both
+# COM: multi-line and (for llvm_unreachable) single-line -- plus a multi-line
+# COM: if, else-if, while and for header.
+# COM: Every line here is part of one of those calls or control-flow headers,
+# COM: so all of them are pruned and only the CSV header row survives.
+
+# RUN: rm -rf %t && mkdir -p %t
+# RUN: sed 's#@LLVM_REPO@#%llvm-repo#g' %S/fixtures/gap-pruner-real-multiline-lines.csv.tmpl > %t/input.csv
+# RUN: %gap-pruner %t/input.csv --output %t/out.csv
+# RUN: echo file,line,text > %t/expected.csv
+# RUN: diff %t/expected.csv %t/out.csv

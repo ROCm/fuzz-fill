@@ -18,6 +18,7 @@ dependencies = [
 reduce = "reduce.__main__:main"
 llvm-test-suite-coverage = "coverage.__main__:main"
 added-lines = "added_lines.__main__:main"
+gap-pruner = "gap_pruner.__main__:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

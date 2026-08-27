@@ -1,0 +1,10 @@
+# COM: A blank line, a standalone '}' (with and without indentation), 
+# COM: plus an ordinary statement line. The blank and brace-only lines are
+# COM: pruned; the ordinary line is not.
+
+# RUN: rm -rf %t && mkdir -p %t
+# RUN: sed 's#@LLVM_REPO@#%llvm-repo#g' %S/fixtures/gap-pruner-uninteresting-lines.csv.tmpl > %t/input.csv
+# RUN: %gap-pruner %t/input.csv --output %t/out.csv
+# RUN: echo file,line,text > %t/expected.csv
+# RUN: echo '@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUCallLowering.cpp,42,"  return Handler.extendRegister(ValVReg, VA);"' | sed 's#@LLVM_REPO@#%llvm-repo#g' >> %t/expected.csv
+# RUN: diff %t/expected.csv %t/out.csv
