@@ -137,6 +137,9 @@ jobs:
       - name: Install apt packages
         run: ./scripts/image/install-apt-packages.sh all
 
+      - name: Install CMake
+        run: ./scripts/image/install-cmake.sh
+
       - name: Restore LLVM release bootstrap binaries
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-llvm-release
