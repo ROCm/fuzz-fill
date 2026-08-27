@@ -110,6 +110,7 @@ config.substitutions.extend(
         ("%coverage", f"{_venv_python} -m coverage"),
         ("%reduce", f"{_venv_python} -m reduce"),
         ("%added-lines", f"{_venv_python} -m added_lines"),
+        ("%gap-pruner", f"{_venv_python} -m gap_pruner"),
     ]
 )
 

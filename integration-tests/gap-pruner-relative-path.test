@@ -1,0 +1,10 @@
+# COM: A relative file path in input_csv is resolved against --llvm-src-dir.
+# COM: Same real llvm_unreachable() line as gap-pruner-multiline-statements.test
+# COM: (pruned), plus an ordinary line from the same file (kept).
+
+# RUN: rm -rf %t && mkdir -p %t
+# RUN: cp %S/fixtures/gap-pruner-relative-path.csv.tmpl %t/input.csv
+# RUN: %gap-pruner %t/input.csv --llvm-src-dir %llvm-repo --output %t/out.csv
+# RUN: echo file,line,text > %t/expected.csv
+# RUN: echo 'llvm/lib/Target/AMDGPU/AMDGPUCallLowering.cpp,314,"  SmallVector<ArgInfo, 8> SplitRetInfos;"' >> %t/expected.csv
+# RUN: diff %t/expected.csv %t/out.csv

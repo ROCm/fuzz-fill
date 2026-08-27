@@ -1,0 +1,20 @@
+file,line,text
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUCallLowering.cpp,311,  assert(VRegs.size() == SplitEVTs.size() &&
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUCallLowering.cpp,312,"         ""For each split Type there should be exactly one VReg."");"
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/SIFrameLowering.cpp,689,      report_fatal_error(
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/SIFrameLowering.cpp,690,"          ""could not find temporary scratch offset register in prolog"");"
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUAttributor.cpp,399,"      LLVM_DEBUG(dbgs() << ""[AAUniformWorkGroupSize] Call "" << Caller->getName()"
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUAttributor.cpp,400,"                        << ""->"" << getAssociatedFunction()->getName() << ""\n"");"
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUAttributor.cpp,448,  llvm_unreachable(
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUAttributor.cpp,449,"      ""AAUniformWorkGroupSize is only valid for function position"");"
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/SIModeRegisterDefaults.cpp,126,static_assert(decodeIndexFltRoundConversionTable(getModeRegisterRoundMode(
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/SIModeRegisterDefaults.cpp,127,"                  HWTowardZero, HWTowardZero)) == AMDGPUFltRounds::TowardZero);"
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUCallLowering.cpp,55,"    llvm_unreachable(""not implemented"");"
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUAliasAnalysis.cpp,67,  if (asA == AMDGPUAS::FLAT_ADDRESS &&
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUAliasAnalysis.cpp,68,      (asB == AMDGPUAS::LOCAL_ADDRESS || asB == AMDGPUAS::PRIVATE_ADDRESS)) {
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/SIInstrInfo.cpp,1077,    else if (RI.hasVGPRs(SrcRC) ||
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/SIInstrInfo.cpp,1078,             (ST.hasGFX90AInsts() && RI.isSGPRClass(SrcRC)))
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUIGroupLP.cpp,364,    while (static_cast<size_t>(BeginSyncGroupIdx) < PipelineInstrs.size() &&
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUIGroupLP.cpp,365,           PipelineInstrs[BeginSyncGroupIdx].size() == 0)
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUISelDAGToDAG.cpp,1112,"  for (SDNode::user_iterator UI = N->user_begin(), E = N->user_end(); UI != E;"
+@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUISelDAGToDAG.cpp,1113,       ++UI)
