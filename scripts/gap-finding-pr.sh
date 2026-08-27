@@ -150,5 +150,7 @@ activate_venv_if_present "$REPO_ROOT"
 run_gap_finding_pr "$output_dir" "$commit_rev" "$LLVM_REPO" "${lit_filters[@]}"
 
 report="${output_dir}/commit_lines_report/target_lines_uncovered.csv"
+pruned_report="${output_dir}/commit_lines_report/target_lines_uncovered_pruned.csv"
 echo "Uncovered PR target lines: ${report}"
+echo "Uncovered PR target lines (pruned): ${pruned_report}"
 emit_lit_failures_warning "$output_dir" "target_lines_uncovered.csv"

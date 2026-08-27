@@ -11,8 +11,11 @@
 # RUN: %repo-root/scripts/gap-finding-baseline.sh --output-dir %t/out-direct --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --backend-tests amdgpu
 
 # RUN: test -f %t/out/baseline/line_coverage_uncovered.csv
+# RUN: test -f %t/out/baseline/line_coverage_uncovered_pruned.csv
 # RUN: test -f %t/out/added-lines/added-lines.csv
 # RUN: test -f %t/out/commit_lines_report/target_lines_uncovered.csv
+# RUN: test -f %t/out/commit_lines_report/target_lines_uncovered_pruned.csv
+# RUN: test -f %t/out-direct/baseline/line_coverage_uncovered_pruned.csv
 
 # COM: PR and standalone baseline must produce identical line-level coverage.
 # COM: We diff only line_coverage_*.csv, not address_line_map / line_point_summary
@@ -42,17 +45,22 @@
 # TARGET: file,line,text
 # TARGET: {{.*}}SIFoldOperands.cpp,1712,
 
+# COM: The changed line must still be present after gap-pruner (it's a real, non-trivial gap).
+# RUN: %FileCheck %s --input-file=%t/out/commit_lines_report/target_lines_uncovered_pruned.csv --check-prefix=TARGET_PRUNED
+# TARGET_PRUNED: file,line,text
+# TARGET_PRUNED: {{.*}}SIFoldOperands.cpp,1712,
+
 # COM: Gap filling (baseline gaps): pinned candidate from integration-tests/e2e/fixtures/.
 # COM: Recalibrate GAP_FILL_* FileCheck lines if the fixture .bc or amdgpu baseline changes:
 # COM: run gap-filling.sh against this test's gap-finding artifacts and update the prefixes below.
-# RUN: %repo-root/scripts/gap-filling.sh --output-dir %t/gap-fill-baseline --line-coverage-uncovered-csv %t/out/baseline/line_coverage_uncovered.csv --llc-address-line-map-csv %t/out/baseline/llc_address_line_map.csv --candidate-tests-dir %S/../fixtures/candidate-tests --settings-csv %S/../fixtures/candidate-test-settings-e2e.csv -n 1 --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin -j 2
+# RUN: %repo-root/scripts/gap-filling.sh --output-dir %t/gap-fill-baseline --line-coverage-uncovered-csv %t/out/baseline/line_coverage_uncovered_pruned.csv --llc-address-line-map-csv %t/out/baseline/llc_address_line_map.csv --candidate-tests-dir %S/../fixtures/candidate-tests --settings-csv %S/../fixtures/candidate-test-settings-e2e.csv -n 1 --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin -j 2
 # RUN: test -f %t/gap-fill-baseline/candidate_tests/candidate_test_manifest.csv
 # RUN: test -f %t/gap-fill-baseline/incremental/new_coverage.csv
 # RUN: %FileCheck %s --input-file=%t/gap-fill-baseline/incremental/new_coverage.csv --check-prefix=GAP_FILL_BASELINE
 # GAP_FILL_BASELINE: test_0_0000a5c12a4ab6566d1f8bf7495ff7fa30d9c93f326071d7e75cea0a1172a0c5.bc,{{.*}}/SIInstrInfo.cpp,1984,
 
 # COM: Gap filling (PR gaps): PR-added uncovered lines; fuzz input must not fill SIFoldOperands.cpp:1712.
-# RUN: %repo-root/scripts/gap-filling.sh --output-dir %t/gap-fill-pr --line-coverage-uncovered-csv %t/out/commit_lines_report/target_lines_uncovered.csv --llc-address-line-map-csv %t/out/baseline/llc_address_line_map.csv --candidate-tests-dir %S/../fixtures/candidate-tests --settings-csv %S/../fixtures/candidate-test-settings-e2e.csv -n 1 --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin -j 2
+# RUN: %repo-root/scripts/gap-filling.sh --output-dir %t/gap-fill-pr --line-coverage-uncovered-csv %t/out/commit_lines_report/target_lines_uncovered_pruned.csv --llc-address-line-map-csv %t/out/baseline/llc_address_line_map.csv --candidate-tests-dir %S/../fixtures/candidate-tests --settings-csv %S/../fixtures/candidate-test-settings-e2e.csv -n 1 --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin -j 2
 # RUN: test -f %t/gap-fill-pr/incremental/new_coverage.csv
 # RUN: %FileCheck %s --input-file=%t/gap-fill-pr/incremental/new_coverage.csv --check-prefix=GAP_FILL_PR_HDR
 # GAP_FILL_PR_HDR: test_name,file,line,covered-points

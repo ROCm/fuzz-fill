@@ -47,4 +47,7 @@ run_coverage_baseline() {
     fi
 
     "${args[@]}"
+
+    python -m gap_pruner "${output_dir}/line_coverage_uncovered.csv" \
+        --output "${output_dir}/line_coverage_uncovered_pruned.csv"
 }

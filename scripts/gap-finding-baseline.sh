@@ -76,4 +76,5 @@ rm -rf "$baseline_output_dir"
 run_coverage_baseline "$baseline_output_dir" "${lit_filters[@]}"
 
 echo "Uncovered baseline lines: ${baseline_output_dir}/line_coverage_uncovered.csv"
+echo "Uncovered baseline lines (pruned): ${baseline_output_dir}/line_coverage_uncovered_pruned.csv"
 emit_lit_failures_warning "$output_dir" "downstream gap lists"

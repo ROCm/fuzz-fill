@@ -52,4 +52,8 @@ run_gap_finding_pr() {
         target_args+=(--llvm-repo "$llvm_repo")
     fi
     "${target_args[@]}"
+
+    echo "=== gap-pruner ==="
+    python -m gap_pruner "${target_lines_dir}/target_lines_uncovered.csv" \
+        --output "${target_lines_dir}/target_lines_uncovered_pruned.csv"
 }
