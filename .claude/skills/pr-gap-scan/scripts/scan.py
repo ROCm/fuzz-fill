@@ -3,9 +3,8 @@
 
 Drives the pr-gap-analysis.yml workflow (ROCm/fuzz-fill) end to end:
 discover candidate PRs -> dispatch gap-finding-only runs -> poll and process
-each PR as soon as its runs finish (download artifacts, filter out trivial
-uncovered lines, write a draft review comment) without waiting on the rest
-of the batch.
+each PR as soon as its runs finish (download artifacts, write a draft review
+comment) without waiting on the rest of the batch.
 
 All state is persisted to a JSON file so the script can be re-run (e.g. after
 being interrupted, or hours later once CI runs complete) and pick up where it
@@ -23,7 +22,6 @@ import sys
 import tempfile
 import time
 import urllib.parse
-import urllib.request
 
 DEFAULT_LLVM_REPO = "llvm/llvm-project"
 DEFAULT_FUZZ_FILL_REPO = os.environ.get("FUZZ_FILL_GITHUB_REPO", "ROCm/fuzz-fill")
@@ -50,14 +48,8 @@ BACKEND_LABELS = {
 FINDING_ARTIFACT_RE = re.compile(r"^gap-finding-pr(\d+)-(\d+)$")
 PR_HEAD_ARTIFACT_RE = re.compile(r"^pr-head-pr(\d+)-(\d+)$")
 
-# Lines whose entire purpose is to be unreachable/defensive aren't meaningful
-# coverage gaps -- excluded per the review criteria this skill implements.
-TRIVIAL_LINE_RE = re.compile(
-    r"llvm_unreachable|\bassert\s*\(|\breportFatalInternalError\s*\(|\breport_fatal_error\s*\("
-)
-
 # gap-finding-pr.sh builds inside the container at this path, and
-# target_lines_uncovered.csv's `file` column reflects that absolute build
+# target_lines_uncovered_pruned.csv's `file` column reflects that absolute build
 # path rather than a path relative to the repo root. Strip it so permalinks
 # and raw.githubusercontent.com fetches resolve correctly.
 CONTAINER_BUILD_PREFIX = "/work/pr-llvm/"
@@ -463,26 +455,6 @@ def parse_readme(path):
     return info
 
 
-def fetch_source_lines(sha, path, cache):
-    key = (sha, path)
-    if key not in cache:
-        url = f"https://raw.githubusercontent.com/llvm/llvm-project/{sha}/{path}"
-        try:
-            with urllib.request.urlopen(url, timeout=15) as resp:
-                text = resp.read().decode("utf-8", errors="replace")
-        except Exception as e:  # network hiccup or file moved/renamed
-            log(f"warning: failed to fetch {url}: {e}")
-            text = ""
-        cache[key] = text.splitlines()
-    return cache[key]
-
-
-def is_trivial_line(sha, path, line_no, cache):
-    lines = fetch_source_lines(sha, path, cache)
-    text = lines[line_no - 1] if 1 <= line_no <= len(lines) else ""
-    return bool(TRIVIAL_LINE_RE.search(text))
-
-
 def render_comment(pr_head, entries):
     links = "\n".join(
         f"{i}. https://github.com/llvm/llvm-project/blob/{pr_head}/{file}#L{line}"
@@ -596,10 +568,8 @@ def render_lit_failures_warning(warnings):
 
 
 def render_pr_comment(cand, state, out_dir, cache):
-    """Build and write the draft comment for one candidate, if it has any
-    surviving (non-trivial) uncovered lines. Returns the written path, or
-    None if there was nothing to write (no artifact yet, or everything
-    filtered out as trivial).
+    """Build and write the draft comment for one candidate, if it has uncovered
+    lines. Returns the written path, or None if there was nothing to write.
     """
     number = cand["number"]
     entries = set()
@@ -611,7 +581,7 @@ def render_pr_comment(cand, state, out_dir, cache):
             continue
         adir = run["artifact_dir"]
         readme_path = os.path.join(adir, "README-finding.txt")
-        csv_path = os.path.join(adir, "out", "commit_lines_report", "target_lines_uncovered.csv")
+        csv_path = os.path.join(adir, "out", "commit_lines_report", "target_lines_uncovered_pruned.csv")
         if not os.path.isfile(csv_path):
             continue
         info = parse_readme(readme_path) if os.path.isfile(readme_path) else {}
@@ -625,11 +595,8 @@ def render_pr_comment(cand, state, out_dir, cache):
                 lit_warnings.append((backend, f.read().strip()))
     if not entries or pr_head is None:
         return None
-    surviving = sorted(e for e in entries if not is_trivial_line(pr_head, e[0], e[1], cache))
-    if not surviving:
-        log(f"PR #{number}: all {len(entries)} uncovered line(s) filtered as trivial")
-        return None
-    text = render_comment(pr_head, surviving)
+    uncovered = sorted(entries)
+    text = render_comment(pr_head, uncovered)
     llvm_repo = cand.get("llvm_repo", DEFAULT_LLVM_REPO)
     live_pr = fetch_live_pr(llvm_repo, number)
     live_head = live_pr["head_sha"] if live_pr else None
@@ -654,7 +621,7 @@ def render_pr_comment(cand, state, out_dir, cache):
     out_path = os.path.join(out_dir, f"pr-{number}.md")
     with open(out_path, "w") as f:
         f.write(text)
-    log(f"wrote {out_path} ({len(surviving)} line(s), {len(entries) - len(surviving)} filtered as trivial)")
+    log(f"wrote {out_path} ({len(uncovered)} uncovered line(s))")
     return out_path
 
 

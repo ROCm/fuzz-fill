@@ -80,7 +80,7 @@ stage_filling() {
 
     cp "${gap_fill_dir}/incremental/new_coverage.csv" \
         "${ARTIFACT_DIR}/gap-fill-pr/incremental/new_coverage.csv"
-    cp "${target_lines_csv}" "${ARTIFACT_DIR}/target_lines_uncovered.csv"
+    cp "${target_lines_csv}" "${ARTIFACT_DIR}/$(basename "${target_lines_csv}")"
 
     if [[ -n "$manifest" && -f "$manifest" ]]; then
         mkdir -p "${ARTIFACT_DIR}/gap-fill-pr/candidate_tests"

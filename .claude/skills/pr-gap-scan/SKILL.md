@@ -3,7 +3,7 @@ name: pr-gap-scan
 description: >-
   Scan recent llvm/llvm-project PRs touching the AMDGPU/SPIRV backends for
   fuzz-fill coverage gaps, and draft review comments for the ones that have
-  real (non-trivial) uncovered lines. Use when asked to "scan PRs for gaps",
+  real uncovered lines. Use when asked to "scan PRs for gaps",
   "run the PR gap scan", or similar.
 ---
 
@@ -65,12 +65,9 @@ always safe; completed phases are skipped.
    successfully, and immediately drafts the comment for any PR whose *every*
    backend run has now reached a terminal state — without waiting on any
    other PR's still-running jobs. It reads
-   `commit_lines_report/target_lines_uncovered.csv` from each artifact,
-   merges lines across backends for the same PR, fetches each line's actual
-   source text from
-   `raw.githubusercontent.com/llvm/llvm-project/<pr_head>/<file>`, and drops
-   any line whose text contains `llvm_unreachable`, `assert(`,
-   `reportFatalInternalError(`, or `report_fatal_error(` — those aren't meaningful gaps. If anything survives, re-checks the PR's *current*
+   `commit_lines_report/target_lines_uncovered_pruned.csv` from each artifact,
+   merges lines across backends for the same PR (already pruned by
+   gap-pruner in CI). If anything remains, re-checks the PR's *current*
    head against the `pr_head` the artifact was actually analyzed against
    (CI can take a long time — the PR may have gained new commits since it was
    dispatched); if they differ, prepends a drift warning to the file. It also
@@ -80,13 +77,13 @@ always safe; completed phases are skipped.
    re-fetches the PR's current base branch and, if it isn't the repo's
    default branch, prepends a stacked-PR warning (see "Stacked PRs" below).
    Then writes the draft comment for that PR to `--out-dir/pr-<N>.md` using
-   the template below. PRs where everything was filtered out get no file.
+   the template below. PRs with no uncovered lines get no file.
    The loop keeps polling until every dispatched run is terminal.
 
 Run all three phases in one go with `run`, or step through them individually
 (useful for resuming or debugging). `collect` and `comment` also remain
 available standalone for manual/debugging use (e.g. re-running `comment`
-after tweaking the trivial-line filter without re-running CI) — `process` is
+without re-running CI) — `process` is
 just the two of them driven incrementally off the polling loop instead of a
 one-shot pass after everything finishes.
 
@@ -200,7 +197,7 @@ file into the artifact if so), the file gets another hidden block, one
 > **amdgpu**:
 > WARNING: 3 LIT test(s) failed during the baseline run (e.g., failed a check, timed out, unresolved, or unexpectedly passed).
 > Failed tests may lead to an incomplete coverage profile. As a result,
-> target_lines_uncovered.csv may report lines as uncovered even though they are
+> target_lines_uncovered_pruned.csv may report lines as uncovered even though they are
 > actually covered by a (failing) test.
 > Review baseline/lit_failures.json for the list of failing tests.
 <!-- end internal note -->
@@ -269,7 +266,7 @@ this PR's head commit) has no way to catch it.
   branch of `ROCm/fuzz-fill` (`--ref` default). Update the default (or pass
   `--ref main`) once `pr-gap-analysis.yml` merges to `main`.
 - "Uncovered lines" always come from the gap-**finding** artifact
-  (`out/commit_lines_report/target_lines_uncovered.csv`); gap filling is
+  (`out/commit_lines_report/target_lines_uncovered_pruned.csv`); gap filling is
   intentionally skipped (`run_gap_filling=false`) per the ask.
 
 ## Prerequisites
@@ -277,5 +274,4 @@ this PR's head commit) has no way to catch it.
 - `gh` CLI authenticated with access to both `llvm/llvm-project` (read) and
   `ROCm/fuzz-fill` (`actions:write` to dispatch workflows, and read access to
   runs/artifacts).
-- Network access to `raw.githubusercontent.com` for the trivial-line filter.
 - No Python packages beyond the standard library.
