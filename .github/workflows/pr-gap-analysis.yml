@@ -206,13 +206,12 @@ jobs:
           path: ${{ env.LLVM_MIRROR_DIR }}
           key: ${{ steps.cache-mirror.outputs.cache-primary-key }}
 
-      - name: Resolve merge-base and warm mirror
+      - name: Warm mirror for PR
         run: |
-          git -C "${LLVM_MIRROR_DIR}" fetch origin "pull/${INPUT_PR_ID}/head"
-          pr_head_sha="$(git -C "${LLVM_MIRROR_DIR}" rev-parse FETCH_HEAD)"
-          base_sha="$(cat /work/pr-head/pr-base.txt)"
-          merge_base="$(git -C "${LLVM_MIRROR_DIR}" merge-base "${base_sha}" "${pr_head_sha}")"
-          git -C "${LLVM_MIRROR_DIR}" fetch --no-filter origin "${merge_base}"
+          ./scripts/warm-llvm-mirror-for-pr.sh "${LLVM_MIRROR_DIR}" \
+            --pr-id "${INPUT_PR_ID}" \
+            --github-repo "${INPUT_GITHUB_REPO}" \
+            --base-sha "$(cat /work/pr-head/pr-base.txt)"
 
       - name: Prepare PR llvm tree
         run: |
