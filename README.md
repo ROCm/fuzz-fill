@@ -900,6 +900,9 @@ Lines added or changed in LLVM pull requests that baseline coverage (including t
 | 2026-08-04 | [#212536](https://github.com/llvm/llvm-project/pull/212536#issuecomment-5179822882) | [AMDGPU] MachinePipeliner support |
 | 2026-08-04 | [#212539](https://github.com/llvm/llvm-project/pull/212539#issuecomment-5179840636) | [AMDGPU] Register pressure of pipelined loops |
 | 2026-08-05 | [#212305](https://github.com/llvm/llvm-project/pull/212305#event-29086350474) | [AMDGPU] Fold fsub into fma_mix via free neg_lo modifier |
+| 2026-08-21 | [#217396](https://github.com/llvm/llvm-project/pull/217396#issuecomment-5373728634) | [AMDGPU] Guard RewriteMFMAFormStage recolor against unsafe def/use |
+| 2026-08-25 | [#211937](https://github.com/llvm/llvm-project/pull/211937#issuecomment-5409652592) | [AMDGPU] Unpack V_PK_MOV_B32 for MFMA co-issue |
+| 2026-08-27 | [#218955](https://github.com/llvm/llvm-project/pull/218955#issuecomment-5437365595) | [AMDGPU] Use s_fmamk_f32 when the folded addend is inlinable |
 
 #### SPIR-V
 
@@ -907,3 +910,5 @@ Lines added or changed in LLVM pull requests that baseline coverage (including t
 |------|-----|---------|
 | 2026-08-05 | [#212999](https://github.com/llvm/llvm-project/pull/212999#issuecomment-5193889662) | [SPIRV] Legalize byte-buffer reinterpretation ptrcasts |
 | 2026-08-05 | [#213986](https://github.com/llvm/llvm-project/pull/213986#issuecomment-5193921835) | [OpenCL][Clang] Add support for cooperative matrix extension |
+| 2026-08-25 | [#215794](https://github.com/llvm/llvm-project/pull/215794#issuecomment-5412012574) | [SPIR-V] Preserve constexpr vectors as OpSpecConstantComposite |
+| 2026-08-27 | [#217965](https://github.com/llvm/llvm-project/pull/217965#pullrequestreview-5039288121) | [SPIR-V] Add support for DebugLexicalBlock |
