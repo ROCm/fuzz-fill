@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
 from pathlib import Path
 
 from gap_pruner.noncoverable_spans import find_noncoverable_lines
@@ -21,18 +22,22 @@ def write_target_lines(csv_path: Path, rows: list[dict[str, str]]) -> None:
         w.writerows(rows)
 
 
-def prune_uninteresting_lines(rows: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Drop rows whose line is empty or just a standalone '{' or '}'."""
-    return [row for row in rows if row["text"].strip() not in ("", "{", "}")]
-
-
 def prune_noncoverable_lines(
     rows: list[dict[str, str]], llvm_src_dir: Path | None
 ) -> list[dict[str, str]]:
-    """Drop rows whose line belongs to an assert/report_fatal_error/... call.
+    """Drop rows whose line is blank, a standalone '{'/'}', or belongs to an
+    assert/report_fatal_error/... call or multi-line control-flow header.
 
-    A relative ``file`` is resolved against ``llvm_src_dir``; an absolute
-    ``file`` is used as-is and ``llvm_src_dir`` is not needed for it.
+    What a line actually is comes from ``source_file`` on disk, never from a
+    CSV's own ``text`` column (which may be stale, absent, or simply not
+    trusted). A relative ``file`` is resolved against ``llvm_src_dir``; an
+    absolute ``file`` is used as-is and ``llvm_src_dir`` is not needed for it.
+
+    Coverage gaps can land in files outside the llvm-project checkout entirely
+    (e.g. libstdc++ headers pulled in by template instantiation), which may not
+    exist on disk in every environment. A row whose file can't be read is kept
+    rather than crashing: with no ability to inspect it, there's no basis to
+    call it non-coverable.
     """
     pruned_lines_by_file: dict[str, set[int]] = {}
     kept: list[dict[str, str]] = []
@@ -42,7 +47,11 @@ def prune_noncoverable_lines(
             path = Path(file)
             if not path.is_absolute():
                 path = llvm_src_dir / path
-            pruned_lines_by_file[file] = find_noncoverable_lines(path)
+            try:
+                pruned_lines_by_file[file] = find_noncoverable_lines(path)
+            except OSError as e:
+                print(f"warning: gap-pruner: skipping unreadable file {file}: {e}", file=sys.stderr)
+                pruned_lines_by_file[file] = set()
         if int(row["line"]) not in pruned_lines_by_file[file]:
             kept.append(row)
     return kept
@@ -53,7 +62,9 @@ def main(argv: list[str] | None = None) -> int:
         prog="gap-pruner",
         description="Prune uninteresting target lines from a coverage-gap CSV.",
     )
-    parser.add_argument("input_csv", type=Path, help="CSV with file,line,text columns to prune")
+    parser.add_argument(
+        "input_csv", type=Path, help="CSV with file,line columns to prune (an optional text column is ignored)"
+    )
     parser.add_argument(
         "--llvm-src-dir",
         type=Path,
@@ -72,7 +83,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.llvm_src_dir is None and any(not Path(r["file"]).is_absolute() for r in rows):
         parser.error("input_csv has relative file paths, --llvm-src-dir is required")
 
-    rows = prune_uninteresting_lines(rows)
     rows = prune_noncoverable_lines(rows, args.llvm_src_dir)
     write_target_lines(args.output, rows)
     return 0

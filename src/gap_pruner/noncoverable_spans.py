@@ -53,21 +53,29 @@ _TOKEN_RE = re.compile(
 def find_noncoverable_lines(
     source_file: Path, names: frozenset[str] = NONCOVERABLE_CALL_NAMES
 ) -> set[int]:
-    """Line numbers belonging to a call to one of ``names``, single- or multi-line,
-    plus multi-line if/else-if/while/for headers.
+    """Line numbers that are not meaningful coverage targets: a call to one of
+    ``names`` (single- or multi-line), a multi-line if/else-if/while/for
+    header, a blank line, or a line that is just a standalone '{' or '}'.
 
-    The test is purely lexical: a macro call (``assert``) and an ordinary
-    function call (``report_fatal_error``) both read as an identifier followed
-    by a balanced ``(...)``, so one pass over the text covers both and adding a
-    name to ``names`` needs no other change. Qualified calls such as
-    ``llvm::report_fatal_error(...)`` match; member calls such as
-    ``obj.assert(...)`` deliberately do not. Control-flow headers are found the
-    same way, keyed on a fixed keyword set instead of ``names``.
+    Everything is read straight off ``source_file`` -- never off a CSV's own
+    ``text`` column, which may be stale, absent, or simply not trusted -- so
+    the file is the one source of truth for what a line actually is.
+
+    The call/header test is purely lexical: a macro call (``assert``) and an
+    ordinary function call (``report_fatal_error``) both read as an
+    identifier followed by a balanced ``(...)``, so one pass over the text
+    covers both and adding a name to ``names`` needs no other change.
+    Qualified calls such as ``llvm::report_fatal_error(...)`` match; member
+    calls such as ``obj.assert(...)`` deliberately do not. Control-flow
+    headers are found the same way, keyed on a fixed keyword set instead of
+    ``names``.
     """
     text = source_file.read_text(encoding="utf-8")
     line_starts = [0, *(m.end() for m in re.finditer("\n", text))]
 
-    pruned: set[int] = set()
+    pruned: set[int] = {
+        i + 1 for i, line in enumerate(text.splitlines()) if line.strip() in ("", "{", "}")
+    }
     prev = prev2 = ""
     prev_start = call_start = 0
     depth = 0

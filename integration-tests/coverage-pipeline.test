@@ -3,16 +3,19 @@
 # COM:   b) candidate-test: measure coverage of an external test
 # COM:   c) incremental:    report lines the new test covers that the baseline misses
 # COM:   d) target-lines:   report which specific lines the baseline leaves uncovered
-# COM:   e) batch-from-coverage: real llvm-reduce on the first gap-fill hit
+# COM:   e) gap-pruner:     drop non-coverage-worthy lines from baseline/target-lines output
+# COM:   f) batch-from-coverage: real llvm-reduce on the first gap-fill hit
 # COM:
 # COM: Cross-check: the gaps incremental reports must match the lines target-lines flags, and a
 # COM: baseline-covered line must show up in baseline output but not in incremental/target-lines.
 
 # RUN: rm -rf %t && mkdir -p %t/baseline %t/gap-fill/candidate_tests %t/gap-fill/incremental %t/target_lines
 # RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter CodeGen/AMDGPU/loop -j2
+# RUN: %gap-pruner %t/baseline/line_coverage_uncovered.csv --output %t/baseline/line_coverage_uncovered_pruned.csv
 # RUN: %coverage candidate-test --output-dir %t/gap-fill/candidate_tests --llc %sancov-llc --candidate-tests-dir %S/fixtures/coverage-new-tests --n 1
 # RUN: %coverage incremental --output-dir %t/gap-fill/incremental --sancov %sancov --line-coverage-uncovered-csv %t/baseline/line_coverage_uncovered.csv --llc-address-line-map-csv %t/baseline/llc_address_line_map.csv --candidate-tests-output-dir %t/gap-fill/candidate_tests
 # RUN: %coverage target-lines --output-dir %t/target_lines --line-coverage-uncovered-csv %t/baseline/line_coverage_uncovered.csv --llvm-repo %llvm-repo --target-lines-csv %S/fixtures/target-lines-sample.csv
+# RUN: %gap-pruner %t/target_lines/target_lines_uncovered.csv --output %t/target_lines/target_lines_pruned.csv
 
 # RUN: test -f %t/baseline/line_coverage_summary.csv
 # RUN: test -f %t/baseline/line_coverage_covered.csv
@@ -21,8 +24,10 @@
 # RUN: test -f %t/baseline/llc_address_line_map.csv
 # RUN: test -f %t/baseline/llc_line_point_summary.csv
 # RUN: test -f %t/baseline/opt_line_point_summary.csv
+# RUN: test -f %t/baseline/line_coverage_uncovered_pruned.csv
 # RUN: test -f %t/gap-fill/incremental/new_coverage.csv
 # RUN: test -f %t/target_lines/target_lines_uncovered.csv
+# RUN: test -f %t/target_lines/target_lines_pruned.csv
 
 # COM: AMDGPUAlwaysInlinePass.cpp:160 is covered by the test suite slice itself,
 # COM: so it must appear in line_coverage_summary.csv as covered and must NOT be reported
@@ -77,6 +82,17 @@
 # COM: present in the sample target CSV, so target-lines must filter it out of the report.
 # RUN: %FileCheck %s --input-file=%t/target_lines/target_lines_uncovered.csv --check-prefix=TARGET_CSV_NOT
 # TARGET_CSV_NOT-NOT: /AMDGPUAliasAnalysis.cpp,103,
+
+# COM: None of these real coverage gaps are an assert/report_fatal_error/... call, a
+# COM: multi-line control-flow header, or a blank/brace-only line, so gap-pruner must
+# COM: leave every one of them in place.
+# RUN: %FileCheck %s --input-file=%t/target_lines/target_lines_pruned.csv --check-prefix=PRUNED_CSV
+# PRUNED_CSV-DAG: file,line,text
+# PRUNED_CSV-DAG: {{.*}}AMDGPUAsmPrinter.cpp,211,
+# PRUNED_CSV-DAG: {{.*}}AMDGPUAsmPrinter.cpp,222,
+# PRUNED_CSV-DAG: {{.*}}AMDGPUAsmPrinter.cpp,581,
+# PRUNED_CSV-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,590,
+# PRUNED_CSV-DAG: {{.*}}AMDGPUHSAMetadataStreamer.cpp,680,
 
 # COM: Real batch reduction on the first gap-fill row (manually confirmed with llvmorg-22.1.8 sancov build).
 # RUN: %reduce batch-from-coverage --gap-fill-dir %t/gap-fill -n 1 --corpus-dir %S/fixtures/coverage-new-tests --llvm-bin %llvm-sancov-bin --instrumented-bin-dir %llvm-sancov-bin --pipeline llvm_reduce_ir
