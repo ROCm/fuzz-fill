@@ -128,6 +128,22 @@ if lit_config.params.get("e2e"):
             ("%e2e-bootstrap-bin", shlex.quote(_e2e_bootstrap))
         )
 
+    # E2e PR prepare: CI sets FUZZ_FILL_E2E_LLVM_MIRROR to a cached filtered
+    # llvm-project git mirror; local runs leave it unset and use plain-clone.
+    _e2e_mirror = os.environ.get("FUZZ_FILL_E2E_LLVM_MIRROR")
+    if _e2e_mirror:
+        _e2e_mirror = os.path.abspath(os.path.expanduser(_e2e_mirror))
+        if os.path.isdir(os.path.join(_e2e_mirror, "llvm")):
+            config.available_features.add("e2e-llvm-mirror")
+            config.environment["FUZZ_FILL_E2E_LLVM_MIRROR"] = _e2e_mirror
+            config.substitutions.append(
+                ("%e2e-llvm-mirror", shlex.quote(_e2e_mirror))
+            )
+        else:
+            config.available_features.add("e2e-no-llvm-mirror")
+    else:
+        config.available_features.add("e2e-no-llvm-mirror")
+
 # PR prepare uses gh api; tests that clone by PR id require GH_TOKEN (e.g. CI:
 # GH_TOKEN: ${{ github.token }}).
 _gh_token = os.environ.get("GH_TOKEN")

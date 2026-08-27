@@ -5,7 +5,7 @@
 # COM: is reported as uncovered.
 
 # RUN: rm -rf %t && mkdir -p %t
-# RUN: %repo-root/scripts/prepare-pr-llvm.sh --pr-id 214457 --dest %t/llvm-project --plain-clone --squash-commit-file %t/squash-commit
+# RUN: %if e2e-llvm-mirror %{ %repo-root/scripts/prepare-pr-llvm.sh --pr-id 214457 --dest %t/llvm-project --reference %e2e-llvm-mirror --partial-reference --no-self-contained --squash-commit-file %t/squash-commit %} %else %{ %repo-root/scripts/prepare-pr-llvm.sh --pr-id 214457 --dest %t/llvm-project --plain-clone --squash-commit-file %t/squash-commit %}
 # RUN: test -x %t/build-sancov/bin/llvm-lit || %repo-root/scripts/build-llvm-sancov.sh %repo-root/scripts/allowlist-amdgpu.txt %t/llvm-project %t/build-sancov --bootstrap-bin %e2e-bootstrap-bin --ignorelist %repo-root/scripts/ignorelist-amdgpu.txt
 # RUN: bash -c '%repo-root/scripts/gap-finding-pr.sh --output-dir %t/out --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --commit "$(cat %t/squash-commit)" --backend-tests amdgpu'
 # RUN: %repo-root/scripts/gap-finding-baseline.sh --output-dir %t/out-direct --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --backend-tests amdgpu

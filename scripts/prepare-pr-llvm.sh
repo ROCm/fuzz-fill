@@ -14,6 +14,7 @@ dest=""
 github_repo=""
 reference_repo=""
 plain_clone=0
+partial_reference=0
 base_sha=""
 branch=""
 squash_msg=""
@@ -37,6 +38,11 @@ Clone source (one required):
   --plain-clone               Full git clone from GitHub (no reference)
 
 Options:
+  --partial-reference         Reference repo is a --filter=blob:none partial
+                               clone (e.g. a CI mirror); clone dest as a real
+                               partial-clone client and fetch the PR head
+                               with full blobs. Leave unset for full local
+                               reference checkouts.
   --github-repo <owner/repo>  GitHub repo hosting the PR (default: llvm/llvm-project)
   --base-sha <sha>            PR base commit (default: resolve via gh)
   --branch <name>             Squash branch name (default: fuzz-fill/pr-<id>-squash)
@@ -77,6 +83,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --plain-clone)
             plain_clone=1
+            shift
+            ;;
+        --partial-reference)
+            partial_reference=1
             shift
             ;;
         --base-sha)
@@ -128,6 +138,7 @@ args=(
 [[ -n "$github_repo" ]] && args+=(--github-repo "$github_repo")
 [[ -n "$reference_repo" ]] && args+=(--reference "$reference_repo")
 [[ "$plain_clone" -eq 1 ]] && args+=(--plain-clone)
+[[ "$partial_reference" -eq 1 ]] && args+=(--partial-reference)
 [[ -n "$base_sha" ]] && args+=(--base-sha "$base_sha")
 [[ -n "$branch" ]] && args+=(--branch "$branch")
 [[ -n "$squash_msg" ]] && args+=(--squash-message "$squash_msg")

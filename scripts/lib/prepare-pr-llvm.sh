@@ -79,6 +79,7 @@ prepare_pr_create_clone() {
     local github_repo="$2"
     local clone_mode="$3"
     local reference_repo="${4:-}"
+    local partial_reference="${5:-0}"
 
     local fetch_url="https://github.com/${github_repo}.git"
 
@@ -88,7 +89,18 @@ prepare_pr_create_clone() {
     case "$clone_mode" in
         reference)
             echo "Creating reference clone at ${dest}"
-            git clone --reference "$reference_repo" -n "file://${reference_repo}" "$dest"
+            if [[ "$partial_reference" -eq 1 ]]; then
+                # reference_repo is itself a partial (--filter=blob:none) clone.
+                # Clone from fetch_url (not file://reference_repo) with the same
+                # filter so dest is a real partial-clone client and can safely
+                # complete objects the reference repo doesn't have. A plain
+                # clone off a partial reference repo silently inherits its gaps
+                # without knowing how to fill them, breaking later fetches with
+                # "unresolved deltas left after unpacking".
+                git clone --reference "$reference_repo" --filter=blob:none -n "$fetch_url" "$dest"
+            else
+                git clone --reference "$reference_repo" -n "file://${reference_repo}" "$dest"
+            fi
             ;;
         plain)
             echo "Cloning ${fetch_url} into ${dest}"
@@ -108,6 +120,7 @@ prepare_pr_squash_in_repo() {
     local base_sha="$4"
     local branch="$5"
     local squash_msg="$6"
+    local partial_reference="${7:-0}"
 
     local pr_head_ref="refs/fuzz-fill/pr-${pr_id}/head"
     local fetch_url="https://github.com/${github_repo}.git"
@@ -115,7 +128,15 @@ prepare_pr_squash_in_repo() {
     prepare_pr_ensure_commit_available "$repo" "$base_sha" "PR base commit" "$fetch_url"
 
     echo "Fetching PR head via ${fetch_url}"
-    git -C "$repo" fetch "$fetch_url" "pull/${pr_id}/head:${pr_head_ref}"
+    if [[ "$partial_reference" -eq 1 ]]; then
+        # dest is a partial-clone client (see prepare_pr_create_clone); force
+        # full blobs for the PR head now (needed for checkout/build of the
+        # squashed tree) rather than deferring them to a lazy per-object
+        # fetch at checkout time.
+        git -C "$repo" fetch --no-filter "$fetch_url" "pull/${pr_id}/head:${pr_head_ref}"
+    else
+        git -C "$repo" fetch "$fetch_url" "pull/${pr_id}/head:${pr_head_ref}"
+    fi
 
     local merge_base_oid pr_head_oid pr_tree_oid merge_base_tree_oid squash_oid
     merge_base_oid="$(git -C "$repo" merge-base "$base_sha" "$pr_head_ref")"
@@ -163,6 +184,14 @@ prepare_pr_squash_in_repo() {
 #   --github-repo <owner/repo>  (default: llvm/llvm-project)
 #   --reference <path>          reference clone source
 #   --plain-clone               clone from GitHub instead of --reference
+#   --partial-reference         reference repo is a --filter=blob:none partial
+#                                clone; clone dest as a real partial-clone
+#                                client (via fetch_url, not file://) and
+#                                fetch the PR head with full blobs. Required
+#                                when --reference points at a partial mirror
+#                                (e.g. CI's cached filtered llvm-project
+#                                mirror); leave unset for full local
+#                                reference checkouts.
 #   --base-sha <sha>            override PR base (default: gh api)
 #   --branch <name>             squash branch (default: fuzz-fill/pr-<id>-squash)
 #   --squash-message <msg>      squash commit message
@@ -175,6 +204,7 @@ prepare_pr_llvm_worktree() {
     local github_repo="llvm/llvm-project"
     local reference_repo=""
     local plain_clone=0
+    local partial_reference=0
     local base_sha=""
     local branch=""
     local squash_msg=""
@@ -202,6 +232,10 @@ prepare_pr_llvm_worktree() {
                 ;;
             --plain-clone)
                 plain_clone=1
+                shift
+                ;;
+            --partial-reference)
+                partial_reference=1
                 shift
                 ;;
             --base-sha)
@@ -247,6 +281,11 @@ prepare_pr_llvm_worktree() {
 
     if [[ "$plain_clone" -eq 1 && -n "$reference_repo" ]]; then
         echo "error: pass only one of --plain-clone or --reference" >&2
+        return 1
+    fi
+
+    if [[ "$partial_reference" -eq 1 && "$plain_clone" -eq 1 ]]; then
+        echo "error: --partial-reference requires --reference, not --plain-clone" >&2
         return 1
     fi
 
@@ -305,9 +344,9 @@ prepare_pr_llvm_worktree() {
         fi
     fi
 
-    prepare_pr_create_clone "$dest" "$github_repo" "$clone_mode" "$reference_repo"
+    prepare_pr_create_clone "$dest" "$github_repo" "$clone_mode" "$reference_repo" "$partial_reference"
 
-    prepare_pr_squash_in_repo "$dest" "$github_repo" "$pr_id" "$base_sha" "$branch" "$squash_msg"
+    prepare_pr_squash_in_repo "$dest" "$github_repo" "$pr_id" "$base_sha" "$branch" "$squash_msg" "$partial_reference"
 
     if [[ "$self_contained" -eq 1 ]]; then
         echo "Exporting self-contained clone (depth 2)"
