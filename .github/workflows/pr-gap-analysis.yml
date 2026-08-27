@@ -317,7 +317,7 @@ jobs:
         if: inputs.run_gap_filling
         id: uncovered
         run: |
-          report="${OUT_DIR}/commit_lines_report/target_lines_uncovered.csv"
+          report="${OUT_DIR}/commit_lines_report/target_lines_uncovered_pruned.csv"
           if [[ ! -f "${report}" ]]; then
             echo "error: gap finding report not found: ${report}" >&2
             exit 1
@@ -402,7 +402,7 @@ jobs:
           fi
           gap_fill_args=(
             --output-dir "${GAP_FILL_DIR}"
-            --line-coverage-uncovered-csv "${OUT_DIR}/commit_lines_report/target_lines_uncovered.csv"
+            --line-coverage-uncovered-csv "${OUT_DIR}/commit_lines_report/target_lines_uncovered_pruned.csv"
             --llc-address-line-map-csv "${OUT_DIR}/baseline/llc_address_line_map.csv"
             --candidate-tests-dir "${CORPUS_DIR}"
             --llvm-repo "${PR_LLVM_DIR}"
@@ -439,7 +439,7 @@ jobs:
           args=(
             filling
             --gap-fill-dir "${GAP_FILL_DIR}"
-            --target-lines-csv "${OUT_DIR}/commit_lines_report/target_lines_uncovered.csv"
+            --target-lines-csv "${OUT_DIR}/commit_lines_report/target_lines_uncovered_pruned.csv"
             --readme /work/README-filling.txt
           )
           if [[ -f "${manifest}" ]]; then

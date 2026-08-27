@@ -16,8 +16,7 @@ that PR so a fresh CI job is always dispatched — it also skips pr-gap-scan's
 artifact-reuse cache check (never reuses an existing artifact from a
 matching prior run, even if one exists for the same commit). Everything
 else — gap-finding-only dispatch, incremental polling/artifact
-download, filtering `llvm_unreachable`/`assert(`/`reportFatalInternalError(`/`report_fatal_error(`
-lines, and drafting a
+download, and drafting a
 comment — is identical, including the drift check: since CI can take a long
 time, the draft comment re-checks the PR's live head against the commit the
 artifact was actually analyzed against, and prepends a warning if the PR has
@@ -71,7 +70,7 @@ python3 "$SCAN" process  --state "$STATE" --artifacts-dir "$ARTIFACTS" \
   --out-dir "$COMMENTS" --poll-interval 60
 ```
 
-Output is `$COMMENTS/pr-<N>.md` if the PR has real (non-trivial) uncovered
+Output is `$COMMENTS/pr-<N>.md` if the PR has uncovered
 lines, or nothing if it doesn't. As with pr-gap-scan, this is a **draft only**
 — review it and post it yourself with `gh pr comment <N> -R llvm/llvm-project
 --body-file "$COMMENTS/pr-<N>.md"`; always confirm with the user before
