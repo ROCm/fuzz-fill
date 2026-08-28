@@ -7,31 +7,15 @@ from pathlib import Path
 
 from gap_pruner.noncoverable_spans import find_noncoverable_lines
 
-FIELDNAMES = ["file", "line", "text"]
-
-
-def read_target_lines(csv_path: Path) -> list[dict[str, str]]:
-    with csv_path.open(encoding="utf-8", newline="") as f:
-        return list(csv.DictReader(f))
-
-
-def write_target_lines(csv_path: Path, rows: list[dict[str, str]]) -> None:
-    with csv_path.open("w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDNAMES, lineterminator="\n")
-        w.writeheader()
-        w.writerows(rows)
-
 
 def prune_noncoverable_lines(
     rows: list[dict[str, str]], llvm_src_dir: Path | None
 ) -> list[dict[str, str]]:
-    """Drop rows whose line is blank, a standalone '{'/'}', or belongs to an
-    assert/report_fatal_error/... call or multi-line control-flow header.
+    """Drop rows whose line is non-coverable per ``find_noncoverable_lines``.
 
-    What a line actually is comes from ``source_file`` on disk, never from a
-    CSV's own ``text`` column (which may be stale, absent, or simply not
-    trusted). A relative ``file`` is resolved against ``llvm_src_dir``; an
-    absolute ``file`` is used as-is and ``llvm_src_dir`` is not needed for it.
+    A relative ``file`` is resolved against ``llvm_src_dir``; an absolute one
+    is used as-is and needs no ``llvm_src_dir`` at all. Each file is scanned
+    once, however many rows point at it.
 
     Coverage gaps can land in files outside the llvm-project checkout entirely
     (e.g. libstdc++ headers pulled in by template instantiation), which may not
@@ -63,7 +47,9 @@ def main(argv: list[str] | None = None) -> int:
         description="Prune uninteresting target lines from a coverage-gap CSV.",
     )
     parser.add_argument(
-        "input_csv", type=Path, help="CSV with file,line columns to prune (an optional text column is ignored)"
+        "input_csv",
+        type=Path,
+        help="CSV with file,line columns to prune (any other column is passed through)",
     )
     parser.add_argument(
         "--llvm-src-dir",
@@ -79,12 +65,24 @@ def main(argv: list[str] | None = None) -> int:
     if not args.input_csv.is_file():
         parser.error(f"input_csv is not a file: {args.input_csv}")
 
-    rows = read_target_lines(args.input_csv)
+    with args.input_csv.open(encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        # Echo back whatever columns came in: callers pass file,line with or
+        # without a text column, and either must round-trip unchanged.
+        fieldnames = reader.fieldnames or []
+        rows = list(reader)
+
+    if not {"file", "line"} <= set(fieldnames):
+        parser.error(f"{args.input_csv}: expected file,line columns, got {fieldnames}")
     if args.llvm_src_dir is None and any(not Path(r["file"]).is_absolute() for r in rows):
         parser.error("input_csv has relative file paths, --llvm-src-dir is required")
 
     rows = prune_noncoverable_lines(rows, args.llvm_src_dir)
-    write_target_lines(args.output, rows)
+
+    with args.output.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
     return 0
 
 

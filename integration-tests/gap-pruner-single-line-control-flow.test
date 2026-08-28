@@ -1,0 +1,11 @@
+# COM: Three single-line if/while/for lines, each followed by the line it
+# COM: controls. 
+
+# RUN: rm -rf %t && mkdir -p %t
+# RUN: sed 's#@LLVM_REPO@#%llvm-repo#g' %S/fixtures/gap-pruner-single-line-control-flow.csv.tmpl > %t/input.csv
+# RUN: %gap-pruner %t/input.csv --output %t/out.csv
+# RUN: echo file,line,text > %t/expected.csv
+# RUN: echo '@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUWaitSGPRHazards.cpp,76,      return {};' | sed 's#@LLVM_REPO@#%llvm-repo#g' >> %t/expected.csv
+# RUN: echo '@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUWaitSGPRHazards.cpp,93,      I--;' | sed 's#@LLVM_REPO@#%llvm-repo#g' >> %t/expected.csv
+# RUN: echo '@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUWaitSGPRHazards.cpp,495,      Worklist.insert(&MBB);' | sed 's#@LLVM_REPO@#%llvm-repo#g' >> %t/expected.csv
+# RUN: diff %t/expected.csv %t/out.csv
