@@ -59,29 +59,14 @@ class TestBuildLitFilterRegex(unittest.TestCase):
 
     def test_amdgpu_workflow_filters(self) -> None:
         # Keep in sync with scripts/lit-filters-amdgpu.sh
-        filters = [
-            "CodeGen/AMDGPU",
-            "Analysis/[^/]+/AMDGPU",
-            "Transforms/[^/]+/AMDGPU",
-            "Verifier/[^/]+/AMDGPU",
-            "Instrumentation/[^/]+/AMDGPU",
-            "CodeGen/MIR/AMDGPU",
-            "MachineVerifier/AMDGPU",
-            "DebugInfo/AMDGPU",
-            "MachineVerifier/[^/]+/AMDGPU",
-            "tools/llvm-objdump/ELF/AMDGPU",
-            "ThinLTO/AMDGPU",
-            "LTO/AMDGPU",
-        ]
+        filters = [r"(?:^|/)AMDGPU(?:/|$)"]
         combined = build_lit_filter_regex(filters)
-        self.assertIn("Analysis/[^/]+/AMDGPU", combined)
-        self.assertIn("CodeGen/AMDGPU", combined)
-        self.assertIn("LTO/AMDGPU", combined)
+        self.assertEqual(combined, r"(?:^|/)AMDGPU(?:/|$)")
 
 
 class TestResolvedLitFilter(unittest.TestCase):
     def test_default(self) -> None:
-        self.assertEqual(resolved_lit_filter(None), "AMDGPU")
+        self.assertEqual(resolved_lit_filter(None), r"(?:^|/)AMDGPU(?:/|$)")
 
     def test_explicit_single(self) -> None:
         self.assertEqual(

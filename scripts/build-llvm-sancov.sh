@@ -16,9 +16,8 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
                     fuzz-fill expects basic-block (bb) coverage; func or edge will likely break it.
   ninja_jobs        Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
 
-Builds llvm-tblgen from the source tree, then instrumented llc/opt (Debug + SanitizerCoverage)
-and Release LIT helpers. Target-linked helpers are built in the instrumented tree; other helpers
-(and sancov) are Release-built in \${sancov_build_dir}-helpers and copied into bin/.
+Configures one RelWithDebInfo + SanitizerCoverage tree and builds ninja all.
+Bootstrap supplies clang/clang++ only; llvm-tblgen is built in-tree.
 EOF
 }
 
@@ -136,52 +135,21 @@ if [[ ! -x "$C_COMPILER" || ! -x "$CXX_COMPILER" ]]; then
     exit 1
 fi
 
-# Instrumented targets (Debug + SanitizerCoverage): coverage tools plus helpers that link
-# target disassemblers, asm parsers, or CodeGen (built in the same tree as llc/opt).
-SANCOV_INSTRUMENTED_TARGETS=(
-    llc
-    opt
-    llvm-debuginfo-analyzer
-    llvm-dwarfdump
-    llvm-lto
-    llvm-lto2
-    llvm-mc
-    llvm-objdump
-)
-
-# Release helpers with no target backend linkage, plus sancov (disassemblers only in Release).
-HELPER_RELEASE_TARGETS=(
-    FileCheck
-    count
-    not
-    sancov
-    split-file
-    llvm-as
-    llvm-config
-    llvm-dis
-    llvm-objcopy
-    llvm-readelf
-    llvm-readobj
-    llvm-reduce
-    llvm-strip
-    yaml2obj
-)
-
 mkdir -p "$SANCOV_BUILD_DIR"
 SANCOV_BUILD_DIR="$(realpath "$SANCOV_BUILD_DIR")"
-HELPERS_BUILD_DIR="${SANCOV_BUILD_DIR}-helpers"
-SANCOV_BIN="$SANCOV_BUILD_DIR/bin"
-HELPERS_BIN="$HELPERS_BUILD_DIR/bin"
 
 SANCOV_FLAGS="-fno-inline -fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=${INSTRUMENTATION_MODE},trace-pc-guard"
 if [[ -n "$IGNORELIST" ]]; then
     SANCOV_FLAGS+=" -fsanitize-coverage-ignorelist=$IGNORELIST"
 fi
 
-LLVM_CMAKE_BASE=(
+LLVM_CMAKE_ARGS=(
     -G Ninja
     -DCMAKE_C_COMPILER="$C_COMPILER"
     -DCMAKE_CXX_COMPILER="$CXX_COMPILER"
+    -DCMAKE_C_FLAGS="$SANCOV_FLAGS"
+    -DCMAKE_CXX_FLAGS="$SANCOV_FLAGS"
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo
     -DLLVM_TARGETS_TO_BUILD="X86;AMDGPU;SPIRV"
     -DLLVM_ENABLE_PROJECTS=""
     -DLLVM_ENABLE_ASSERTIONS=ON
@@ -197,7 +165,7 @@ if [[ -n "$NINJA_JOBS" ]]; then
     ninja_args=(-j "$NINJA_JOBS")
 fi
 
-echo "Building LLVM for fuzz-fill (Release helpers + instrumented tree)..."
+echo "Building LLVM for fuzz-fill (instrumented tree, ninja all)..."
 echo "  Allowlist:        $ALLOWLIST"
 echo "  Instrumentation:  $INSTRUMENTATION_MODE (trace-pc-guard)"
 if [[ -n "$IGNORELIST" ]]; then
@@ -205,7 +173,6 @@ if [[ -n "$IGNORELIST" ]]; then
 fi
 echo "  LLVM source:      $LLVM_DIR"
 echo "  Sancov build:     $SANCOV_BUILD_DIR"
-echo "  Helpers build:    $HELPERS_BUILD_DIR"
 echo "  Bootstrap bin:    $BOOTSTRAP_BIN (clang/clang++ only)"
 echo "  C compiler:       $C_COMPILER"
 echo "  C++ compiler:     $CXX_COMPILER"
@@ -214,47 +181,12 @@ if [[ -n "$NINJA_JOBS" ]]; then
 fi
 echo
 
-echo "=== llvm-tblgen (Release, from source) ==="
-mkdir -p "$HELPERS_BUILD_DIR"
-(
-    cd "$HELPERS_BUILD_DIR"
-    cmake "${LLVM_CMAKE_BASE[@]}" \
-        -DCMAKE_BUILD_TYPE=Release \
-        "$LLVM_DIR/llvm"
-    ninja "${ninja_args[@]}" llvm-tblgen
-)
-
-if [[ ! -x "$HELPERS_BIN/llvm-tblgen" ]]; then
-    echo "Error: llvm-tblgen not found at $HELPERS_BIN/llvm-tblgen after build" >&2
-    exit 1
-fi
-
-LLVM_CMAKE_CONFIGURED=(
-    "${LLVM_CMAKE_BASE[@]}"
-    -DLLVM_OPTIMIZED_TABLEGEN=ON
-    -DLLVM_NATIVE_TOOL_DIR="$HELPERS_BIN"
-)
-
-echo
-echo "=== Release helpers (${#HELPER_RELEASE_TARGETS[@]} targets) ==="
-(
-    cd "$HELPERS_BUILD_DIR"
-    cmake "${LLVM_CMAKE_CONFIGURED[@]}" \
-        -DCMAKE_BUILD_TYPE=Release \
-        "$LLVM_DIR/llvm"
-    ninja "${ninja_args[@]}" "${HELPER_RELEASE_TARGETS[@]}"
-)
-
-echo
-echo "=== Instrumented tree (RelWithDebInfo + SanitizerCoverage, ${#SANCOV_INSTRUMENTED_TARGETS[@]} targets) ==="
+echo "=== Instrumented tree (RelWithDebInfo + SanitizerCoverage, ninja all) ==="
 (
     cd "$SANCOV_BUILD_DIR"
-    cmake "${LLVM_CMAKE_CONFIGURED[@]}" \
-        -DCMAKE_C_FLAGS="$SANCOV_FLAGS" \
-        -DCMAKE_CXX_FLAGS="$SANCOV_FLAGS" \
-        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    cmake "${LLVM_CMAKE_ARGS[@]}" \
         "$LLVM_DIR/llvm"
-    ninja "${ninja_args[@]}" "${SANCOV_INSTRUMENTED_TARGETS[@]}"
+    ninja "${ninja_args[@]}"
 )
 
 if [[ ! -f "$SANCOV_BUILD_DIR/test/lit.site.cfg.py" ]]; then
@@ -262,16 +194,4 @@ if [[ ! -f "$SANCOV_BUILD_DIR/test/lit.site.cfg.py" ]]; then
     exit 1
 fi
 
-echo
-echo "=== Installing Release helpers into $SANCOV_BIN ==="
-mkdir -p "$SANCOV_BIN"
-for tool in "${HELPER_RELEASE_TARGETS[@]}"; do
-    src="$HELPERS_BIN/$tool"
-    if [[ ! -e "$src" ]]; then
-        echo "Error: helper tool not found after Release build: $src" >&2
-        exit 1
-    fi
-    cp -L "$src" "$SANCOV_BIN/$tool"
-done
-
-echo "Done. Unified build at $SANCOV_BUILD_DIR (instrumented llc/opt + target helpers; Release helpers installed)"
+echo "Done. Instrumented build at $SANCOV_BUILD_DIR"

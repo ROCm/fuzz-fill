@@ -114,9 +114,9 @@ You need an official **LLVM GitHub release** as bootstrap and one **SanitizerCov
 | Component | Purpose | How |
 |-----------|---------|-----|
 | **Release bootstrap** | `clang`, `clang++` for compiling LLVM | Download [LLVM release](https://github.com/llvm/llvm-project/releases) (e.g. `LLVM-22.1.8-Linux-X64.tar.xz`) |
-| **SanitizerCoverage** | Unified build tree: instrumented `llc`/`opt`, Release LIT helpers, `llvm-lit`, `sancov` | `./scripts/build-llvm-sancov.sh ./scripts/allowlist-amdgpu.txt llvm-project llvm-project/build-sancov --bootstrap-bin /path/to/LLVM-22.1.8/bin --ignorelist ./scripts/ignorelist-amdgpu.txt` |
+| **SanitizerCoverage** | Instrumented LLVM tree (`llc`, `opt`, `sancov`, …) | `./scripts/build-llvm-sancov.sh ./scripts/allowlist-amdgpu.txt llvm-project llvm-project/build-sancov --bootstrap-bin /path/to/LLVM-22.1.8/bin --ignorelist ./scripts/ignorelist-amdgpu.txt` |
 
-`build-llvm-sancov.sh` runs two partial builds from the same source: **`llvm-tblgen` is built from the source tree first**, then a **Release** tree for target-agnostic LIT helpers plus **`sancov`**, and a **Debug** SanitizerCoverage tree for **`llc`**, **`opt`**, and target-linked helpers (`llvm-mc`, `llvm-objdump`, …). Release tools are copied into the instrumented tree's `bin/`; `llvm-lit` is generated there by cmake. The bootstrap release supplies **clang/clang++ only** (TableGen must match the source).
+`build-llvm-sancov.sh` builds one instrumented RelWithDebInfo tree (`ninja all`). Bootstrap supplies **clang/clang++ only**.
 
 For AMDGPU builds, pass [`scripts/ignorelist-amdgpu.txt`](scripts/ignorelist-amdgpu.txt) with `--ignorelist`. It excludes MC-layer code (AsmParser, Disassembler, MCTargetDesc, MCA, TargetInfo), selected Utils used mainly by MC/PAL/asm, and `AMDGPUSplitModule.cpp` from instrumentation — keeping opt/llc codegen paths covered. SPIRV builds do not use an ignorelist.
 
@@ -124,7 +124,7 @@ For AMDGPU builds, pass [`scripts/ignorelist-amdgpu.txt`](scripts/ignorelist-amd
 
 The example scripts below assume paths like:
 
-- `$LLVM/build-sancov/bin` — unified build (`llvm-lit`, instrumented `llc`/`opt` + target helpers, Release `sancov`/other LIT helpers)
+- `$LLVM/build-sancov/bin` — instrumented build (`llvm-lit`, `llc`, `opt`, `sancov`, …)
 
 Adjust these to match your trees before running.
 
@@ -155,8 +155,8 @@ Required flags mirror the [Docker gap-finding runners](#gap-finding-baseline-in-
 | `--llvm-repo` | Path to your `llvm-project` checkout |
 | `--llvm-bin` | Uninstrumented `bin` directory (`sancov`) |
 | `--instrumented-bin-dir` | SanitizerCoverage `bin` directory (`llvm-lit`, `llc`, `opt`) |
-| `--lit-filter` | LIT directory prefix; repeat for multiple |
-| `--backend-tests` | `amdgpu` or `spirv` — default LIT filter(s) when `--lit-filter` is omitted |
+| `--lit-filter` | LIT `--filter=` regex; repeat for multiple |
+| `--backend-tests` | `amdgpu` or `spirv` — default LIT filter when `--lit-filter` is omitted |
 | `-j`, `--jobs` | Parallel jobs for llvm-lit |
 
 ```bash
@@ -177,10 +177,11 @@ Under `$OUTPUT_DIR/baseline/`:
 |------|----------|
 | `line_coverage_summary.csv` | Per-line baseline coverage: `covered`, `partially`, or `uncovered` |
 | `line_coverage_uncovered.csv` | **Main gap list** — input to `target-lines` and downstream gap filling |
-| `llc_address_line_map.csv` | LLC address-to-line map (same baseline run as the gap list) |
+| `<tool>_address_line_map.csv` | Per-tool address-to-line map (e.g. `llc_address_line_map.csv`) |
+| `<tool>_line_point_summary.csv` | Per-tool covered/all points per `(file, line)` |
 | `lit_failures.json` | Failed LIT tests (`name`, `code`, `output`, `elapsed`) |
 | `COMMIT` | Revision of the LLVM source tree the baseline ran against (omitted for a non-git tree) |
-| `processed_sancov/` | Merged symcov (debugging) |
+| `processed_sancov/` | Per-tool merged `.sancov` / `.symcov` |
 
 ---
 
@@ -408,9 +409,9 @@ PR gap finding input to `target-lines` remains `added-lines.csv` (`path`, `line_
 
 | Flag | Meaning |
 |------|---------|
-| `--lit-filter DIR` | LIT directory prefix; **repeat** for multiple prefixes (OR'd into one llvm-lit `--filter=` regex) |
+| `--lit-filter DIR` | LIT `--filter=` regex; **repeat** for multiple (OR'd) |
 
-Default when omitted: `AMDGPU` (see `DEFAULT_LIT_FILTER_DIRS` in [`src/coverage/constants.py`](src/coverage/constants.py)).
+Default when omitted: `(?:^|/)AMDGPU(?:/|$)`. `--backend-tests amdgpu|spirv` selects the matching AMDGPU or SPIRV pattern.
 
 Baseline symcov CSVs include **all** instrumented source paths from the LIT run. Use `--source-filter` on `coverage incremental` to scope gap finding (default: `(?:^|/)llvm/lib/`; see `DEFAULT_SOURCE_CODE_FILTER` in [`src/coverage/constants.py`](src/coverage/constants.py)).
 
@@ -509,7 +510,7 @@ Optional commands outside the main workflows in fuzz-fill.
 
 ## Docker test image
 
-The Docker image bundles an official LLVM release bootstrap, a dual-build SanitizerCoverage LLVM tree (instrumented `llc`/`opt` plus Release helpers), and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
+The Docker image bundles an official LLVM release bootstrap, an instrumented SanitizerCoverage LLVM tree, and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
 
 **Scripts** (under [`scripts/docker/`](scripts/docker/)): [`build-image.sh`](scripts/docker/build-image.sh), [`build-image-pr.sh`](scripts/docker/build-image-pr.sh), [`ensure-image.sh`](scripts/docker/ensure-image.sh), [`gap-finding-baseline.sh`](scripts/docker/gap-finding-baseline.sh), [`gap-finding-pr.sh`](scripts/docker/gap-finding-pr.sh), [`gap-filling.sh`](scripts/docker/gap-filling.sh), [`reduction.sh`](scripts/docker/reduction.sh), [`run-full-workflow.sh`](scripts/docker/run-full-workflow.sh), [`test-image.sh`](scripts/docker/test-image.sh), [`tmp-container.sh`](scripts/docker/tmp-container.sh)
 
@@ -635,7 +636,7 @@ Build once, then reuse on later runs (omit `--build-image`):
   -j "$(nproc)"
 ```
 
-For AMDGPU images, baseline defaults to the twelve LIT prefixes in [`scripts/lit-filters-amdgpu.sh`](scripts/lit-filters-amdgpu.sh); SPIRV defaults to `CodeGen/SPIRV`. Override with one or more `--lit-filter` prefixes.
+For AMDGPU images, baseline defaults to `(?:^|/)AMDGPU(?:/|$)`; SPIRV to `(?:^|/)SPIRV(?:/|$)`. Override with `--lit-filter`.
 
 | Option | Meaning |
 |--------|---------|
