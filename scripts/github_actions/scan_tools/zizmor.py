@@ -46,7 +46,7 @@ _SUPPORTED_FORMATS: dict[str, str] = {
     "plain": "txt",
     "github": "txt",
 }
-_ZIZMOR_VERSION = "1.24.1"
+_ZIZMOR_VERSION = "1.30.0"
 _CONFIG_PATH = "zizmor.yml"
 # Ascending severity order; threshold comparisons rely on it.
 _SEVERITY_ORDER: tuple[str, ...] = ("INFORMATIONAL", "LOW", "MEDIUM", "HIGH")
