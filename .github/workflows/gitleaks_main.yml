@@ -16,7 +16,7 @@ on:
 
 jobs:
   gitleaks:
-    uses: ./.github/workflows/gitleaks.yml
+    uses: $/.github/workflows/gitleaks.yml
     with:
       scan_mode: all
       report_formats: sarif

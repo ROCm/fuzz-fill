@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   gitleaks:
-    uses: ./.github/workflows/gitleaks.yml
+    uses: $/.github/workflows/gitleaks.yml
     with:
       scan_mode: changed
       report_formats: json
@@ -31,7 +31,7 @@ jobs:
       contents: read
 
   zizmor:
-    uses: ./.github/workflows/zizmor.yml
+    uses: $/.github/workflows/zizmor.yml
     with:
       scan_mode: changed
       report_formats: plain
@@ -39,7 +39,7 @@ jobs:
       contents: read
 
   bandit:
-    uses: ./.github/workflows/bandit.yml
+    uses: $/.github/workflows/bandit.yml
     with:
       scan_mode: changed
       report_formats: txt
@@ -47,7 +47,7 @@ jobs:
       contents: read
 
   trivy:
-    uses: ./.github/workflows/trivy.yml
+    uses: $/.github/workflows/trivy.yml
     with:
       scan_mode: changed
       report_formats: table
