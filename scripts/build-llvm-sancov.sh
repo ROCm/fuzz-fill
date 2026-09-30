@@ -9,15 +9,17 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
   allowlist         Sanitizer coverage allowlist file
   llvm_dir          LLVM source tree (directory containing llvm/)
   sancov_build_dir  Output directory for the SanitizerCoverage-instrumented LLVM build
-  --bootstrap-bin   Directory with clang and clang++ (e.g. official LLVM release bin/)
+  --bootstrap-bin   Directory with clang, clang++, and ld.lld (e.g. official LLVM release bin/)
   --ignorelist      Sanitizer coverage ignorelist file (optional)
   --instrumentation-mode func|bb|edge
                     SanitizerCoverage instrumentation granularity (default: bb).
                     fuzz-fill expects basic-block (bb) coverage; func or edge will likely break it.
+  --link-jobs <n>   Maximum concurrent link jobs (default: 8). Compile parallelism
+                    stays at ninja_jobs.
   ninja_jobs        Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
 
 Configures one RelWithDebInfo + SanitizerCoverage tree and builds ninja all.
-Bootstrap supplies clang/clang++ only; llvm-tblgen is built in-tree.
+Bootstrap supplies clang, clang++, and ld.lld; llvm-tblgen is built in-tree.
 EOF
 }
 
@@ -27,6 +29,7 @@ SANCOV_BUILD_DIR=""
 BOOTSTRAP_BIN=""
 IGNORELIST=""
 INSTRUMENTATION_MODE="bb"
+LINK_JOBS="8"
 NINJA_JOBS=""
 
 while [[ $# -gt 0 ]]; do
@@ -56,6 +59,15 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             INSTRUMENTATION_MODE="$2"
+            shift 2
+            ;;
+        --link-jobs)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --link-jobs requires a value" >&2
+                usage >&2
+                exit 1
+            fi
+            LINK_JOBS="$2"
             shift 2
             ;;
         --help|-h)
@@ -101,6 +113,11 @@ case "$INSTRUMENTATION_MODE" in
         ;;
 esac
 
+if [[ ! "$LINK_JOBS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: --link-jobs must be a positive integer: ${LINK_JOBS}" >&2
+    exit 1
+fi
+
 if [[ ! -f "$ALLOWLIST" ]]; then
     echo "Error: allowlist file not found: $ALLOWLIST" >&2
     exit 1
@@ -130,8 +147,9 @@ fi
 
 C_COMPILER="$BOOTSTRAP_BIN/clang"
 CXX_COMPILER="$BOOTSTRAP_BIN/clang++"
-if [[ ! -x "$C_COMPILER" || ! -x "$CXX_COMPILER" ]]; then
-    echo "Error: bootstrap bin must provide $C_COMPILER and $CXX_COMPILER" >&2
+LLD="$BOOTSTRAP_BIN/ld.lld"
+if [[ ! -x "$C_COMPILER" || ! -x "$CXX_COMPILER" || ! -x "$LLD" ]]; then
+    echo "Error: bootstrap bin must provide $C_COMPILER, $CXX_COMPILER, and $LLD" >&2
     exit 1
 fi
 
@@ -151,6 +169,8 @@ LLVM_CMAKE_ARGS=(
     -DCMAKE_CXX_FLAGS="$SANCOV_FLAGS"
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
     -DLLVM_TARGETS_TO_BUILD="X86;AMDGPU;SPIRV"
+    -DLLVM_PARALLEL_LINK_JOBS="$LINK_JOBS"
+    -DLLVM_USE_LINKER=lld
     -DLLVM_ENABLE_PROJECTS=""
     -DLLVM_ENABLE_ASSERTIONS=ON
     -DLLVM_USE_SPLIT_DWARF=ON
@@ -173,12 +193,14 @@ if [[ -n "$IGNORELIST" ]]; then
 fi
 echo "  LLVM source:      $LLVM_DIR"
 echo "  Sancov build:     $SANCOV_BUILD_DIR"
-echo "  Bootstrap bin:    $BOOTSTRAP_BIN (clang/clang++ only)"
+echo "  Bootstrap bin:    $BOOTSTRAP_BIN (clang/clang++ and ld.lld)"
 echo "  C compiler:       $C_COMPILER"
 echo "  C++ compiler:     $CXX_COMPILER"
 if [[ -n "$NINJA_JOBS" ]]; then
     echo "  Ninja jobs:       $NINJA_JOBS"
 fi
+echo "  Link jobs:        $LINK_JOBS"
+echo "  Linker:           lld ($LLD)"
 echo
 
 echo "=== Instrumented tree (RelWithDebInfo + SanitizerCoverage, ninja all) ==="
