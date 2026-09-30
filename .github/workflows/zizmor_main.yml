@@ -18,7 +18,7 @@ on:
 
 jobs:
   zizmor:
-    uses: ./.github/workflows/zizmor.yml
+    uses: $/.github/workflows/zizmor.yml
     with:
       scan_mode: all
       report_formats: sarif

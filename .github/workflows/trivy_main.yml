@@ -21,7 +21,7 @@ on:
 
 jobs:
   trivy:
-    uses: ./.github/workflows/trivy.yml
+    uses: $/.github/workflows/trivy.yml
     with:
       scan_mode: all
       report_formats: sarif
