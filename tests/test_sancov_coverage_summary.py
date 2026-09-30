@@ -309,5 +309,31 @@ class SancovParsePrintOutputTest(unittest.TestCase):
         )
 
 
+class SancovDiscoverToolsTest(unittest.TestCase):
+    def test_groups_by_tool_suffix_and_ignores_non_matching(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp)
+            (raw / "llc.123.sancov").write_bytes(b"")
+            (raw / "llc.456.sancov").write_bytes(b"")
+            (raw / "opt.789.sancov").write_bytes(b"")
+            (raw / "llvm-mc.42.sancov").write_bytes(b"")
+            (raw / "notes.txt").write_text("ignore", encoding="utf-8")
+            (raw / "not-a-dump.sancov").write_bytes(b"")
+            self.assertEqual(
+                Sancov.discover_tools(raw),
+                ["llc", "llvm-mc", "opt"],
+            )
+
+    def test_empty_directory(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(Sancov.discover_tools(Path(tmp)), [])
+
+
 if __name__ == "__main__":
     unittest.main()

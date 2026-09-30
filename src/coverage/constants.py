@@ -2,8 +2,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Default LIT directory prefixes when none are passed (combined into one --filter= regex).
-DEFAULT_LIT_FILTER_DIRS = ["AMDGPU"]
+# Default LIT --filter= regex (AMDGPU path component; see scripts/lit-filters-amdgpu.sh).
+DEFAULT_LIT_FILTER_DIRS = [r"(?:^|/)AMDGPU(?:/|$)"]
 # Default symcov source-path regex for incremental gap scoping (--source-filter).
 DEFAULT_SOURCE_CODE_FILTER = r"(?:^|/)llvm/lib/"
 
@@ -11,9 +11,6 @@ DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "coverage_output" / f"cov_<timestamp>"
 
 # CSV file names
 DEFAULT_LLC_ADDRESS_LINE_MAP_FILE = "llc_address_line_map.csv"
-DEFAULT_OPT_ADDRESS_LINE_MAP_FILE = "opt_address_line_map.csv"
-DEFAULT_LLC_LINE_POINT_SUMMARY_FILE = "llc_line_point_summary.csv"
-DEFAULT_OPT_LINE_POINT_SUMMARY_FILE = "opt_line_point_summary.csv"
 DEFAULT_LINE_COVERAGE_SUMMARY_FILE = "line_coverage_summary.csv"
 DEFAULT_LINE_COVERAGE_COVERED_FILE = "line_coverage_covered.csv"
 DEFAULT_LINE_COVERAGE_PARTIALLY_FILE = "line_coverage_partially.csv"

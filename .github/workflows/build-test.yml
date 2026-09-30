@@ -48,7 +48,6 @@ jobs:
       WORK_ROOT: /work
       LLVM_RELEASE_VERSION: "22.1.8"
       SANCOV_ALLOWLIST: scripts/allowlist-amdgpu.txt
-      SANCOV_IGNORELIST: scripts/ignorelist-amdgpu.txt
       LLVM_RELEASE_DIR: /work/llvm-release
       LLVM_RELEASE_BIN: /work/llvm-release/bin
       LLVM_PROJECT_DIR: /work/llvm-project
@@ -112,7 +111,6 @@ jobs:
             "${LLVM_PROJECT_DIR}" \
             "${LLVM_BUILD_DIR}" \
             --bootstrap-bin "${LLVM_RELEASE_BIN}" \
-            --ignorelist "${SANCOV_IGNORELIST}" \
             "$(nproc)"
 
       - name: Install fuzz-fill venv

@@ -77,7 +77,6 @@ RUN --mount=type=bind,from=llvm,source=.,target=/llvm-src,ro \
 COPY scripts/build-llvm-sancov.sh /usr/local/bin/
 COPY scripts/allowlist-amdgpu.txt /work/allowlist-amdgpu.txt
 COPY scripts/allowlist-spirv.txt /work/allowlist-spirv.txt
-COPY scripts/ignorelist-amdgpu.txt /work/ignorelist-amdgpu.txt
 RUN chmod +x /usr/local/bin/build-llvm-sancov.sh
 
 ARG SANCOV_ALLOWLIST=amdgpu
@@ -88,41 +87,25 @@ RUN case "${SANCOV_INSTRUMENTATION_MODE:-bb}" in \
         *) echo "error: SANCOV_INSTRUMENTATION_MODE must be func, bb, or edge: ${SANCOV_INSTRUMENTATION_MODE:-<unset>}" >&2; exit 1 ;; \
     esac \
  && case "${SANCOV_ALLOWLIST}" in \
-        amdgpu) allowlist=/work/allowlist-amdgpu.txt; ignorelist=/work/ignorelist-amdgpu.txt ;; \
-        spirv) allowlist=/work/allowlist-spirv.txt; ignorelist="" ;; \
+        amdgpu) allowlist=/work/allowlist-amdgpu.txt ;; \
+        spirv) allowlist=/work/allowlist-spirv.txt ;; \
         *) echo "error: unsupported SANCOV_ALLOWLIST: ${SANCOV_ALLOWLIST} (expected amdgpu or spirv)" >&2; exit 1 ;; \
     esac \
  && echo "${SANCOV_ALLOWLIST}" > /work/.sancov-allowlist \
  && echo "${sancov_mode}" > /work/.sancov-instrumentation-mode \
  && echo "=== fuzz-fill: SanitizerCoverage allowlist = ${SANCOV_ALLOWLIST} ===" \
  && echo "=== fuzz-fill: SanitizerCoverage instrumentation mode = ${sancov_mode} (default: bb) ===" \
- && if [ -n "${ignorelist}" ]; then echo "=== fuzz-fill: SanitizerCoverage ignorelist = ${ignorelist} ==="; fi \
  && llvm_build_start=$(date +%s) \
- && if [ -n "${ignorelist}" ]; then \
-        /usr/local/bin/build-llvm-sancov.sh \
-            "${allowlist}" \
-            /work/llvm-project \
-            /work/llvm-build-sancov \
-            --bootstrap-bin /work/llvm-release/bin \
-            --ignorelist "${ignorelist}" \
-            --instrumentation-mode "${sancov_mode}" \
-            "${NINJA_JOBS}"; \
-    else \
-        /usr/local/bin/build-llvm-sancov.sh \
-            "${allowlist}" \
-            /work/llvm-project \
-            /work/llvm-build-sancov \
-            --bootstrap-bin /work/llvm-release/bin \
-            --instrumentation-mode "${sancov_mode}" \
-            "${NINJA_JOBS}"; \
-    fi \
+ && /usr/local/bin/build-llvm-sancov.sh \
+        "${allowlist}" \
+        /work/llvm-project \
+        /work/llvm-build-sancov \
+        --bootstrap-bin /work/llvm-release/bin \
+        --instrumentation-mode "${sancov_mode}" \
+        "${NINJA_JOBS}" \
  && llvm_build_secs=$(( $(date +%s) - llvm_build_start )) \
  && echo "${llvm_build_secs}" > /work/.llvm-build-time \
  && echo "=== fuzz-fill: LLVM build wall time: ${llvm_build_secs}s ==="
-
-# llvm-reduce is a Release helper (not instrumented); install from the bootstrap
-# toolchain so reduction works without rebuilding the entire sancov tree.
-RUN cp /work/llvm-release/bin/llvm-reduce /work/llvm-build-sancov/bin/llvm-reduce
 
 FROM ubuntu:24.04 AS final
 

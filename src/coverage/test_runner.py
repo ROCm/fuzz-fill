@@ -37,21 +37,12 @@ from fuzz_fill.log import get_logger, log_timing, run_subprocess
 logger = get_logger("coverage.test_runner")
 
 
-def _merge_and_symbolize_sancov(sancov: Sancov, raw_sancov_output_dir: Path) -> None:
-    if sancov.has_raw_files():
-        sancov.merge()
-        sancov.symbolize(
-            sancov.get_merged_sancov_path(),
-            sancov.get_merged_symcov_path(),
-        )
-    else:
-        print(
-            f"warning: no {sancov.suffix} sancov files in {raw_sancov_output_dir}; "
-            f"the selected tests produced no {sancov.suffix} coverage. "
-            f"Treating {sancov.suffix} as empty.",
-            flush=True,
-        )
-        sancov.write_empty_symcov()
+def _merge_and_symbolize_sancov(sancov: Sancov) -> None:
+    sancov.merge()
+    sancov.symbolize(
+        sancov.get_merged_sancov_path(),
+        sancov.get_merged_symcov_path(),
+    )
 
 
 class TestRunner:
@@ -90,7 +81,6 @@ class TestRunner:
         if self.mode == "lit":
             self._lit_filter = resolved_lit_filter(lit_filters)
             self.raw_sancov_output_dir.mkdir(parents=True, exist_ok=True)
-            self._symbolize_jobs = min(jobs, 2) if jobs is not None else 2
 
         elif self.mode == "standalone":
             self._candidate_tests_limit = candidate_tests_limit
@@ -344,52 +334,75 @@ class TestRunner:
     def get_aggregate_coverage(self) -> None:
         """Get the aggregate coverage for the test suite."""
         with log_timing(logger, "aggregate coverage (sancov merge+symbolize)"):
-            if self.require_sancov and not any(self.raw_sancov_output_dir.glob("*.sancov")):
+            tools = Sancov.discover_tools(self.raw_sancov_output_dir)
+            if not tools:
+                if self.require_sancov:
+                    raise SystemExit(
+                        f"error: no sancov files found in {self.raw_sancov_output_dir}; "
+                        "the selected tests produced no coverage. "
+                        "Use --no-require-sancov to allow an empty baseline."
+                    )
+                coverage = Sancov.build_coverage_summary([])
+                coverage.to_csv(
+                    self.filepaths.output_dir / self.filepaths.line_coverage_summary_file,
+                    index=False,
+                )
+                write_line_coverage_summary_splits(coverage, self.filepaths.output_dir)
+                return
+
+            if self.filepaths.llc is None:
                 raise SystemExit(
-                    f"error: no sancov files found in {self.raw_sancov_output_dir}; "
-                    "the selected tests produced no coverage. "
-                    "Use --no-require-sancov to allow an empty baseline."
+                    "error: --llc is required to locate the instrumented bin directory"
+                )
+            if self.filepaths.sancov is None:
+                raise SystemExit("error: --sancov is required to merge and symbolize coverage")
+
+            instrumented_bin = self.filepaths.llc.parent
+            sancovs: list[Sancov] = []
+            for tool in tools:
+                symbolize_target = instrumented_bin / tool
+                if not symbolize_target.is_file():
+                    raise SystemExit(
+                        f"error: instrumented binary for {tool!r} not found: "
+                        f"{symbolize_target}"
+                    )
+                sancovs.append(
+                    Sancov(
+                        self.filepaths.sancov,
+                        symbolize_target,
+                        self.raw_sancov_output_dir,
+                        tool,
+                    )
                 )
 
-            llc_sancov = Sancov(
-                self.filepaths.sancov,
-                self.filepaths.llc,
-                self.raw_sancov_output_dir,
-                "llc",
-            )
-
-            opt_sancov = Sancov(
-                self.filepaths.sancov,
-                self.filepaths.opt,
-                self.raw_sancov_output_dir,
-                "opt",
-            )
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self._symbolize_jobs) as pool:
+            workers = len(sancovs)
+            if self.jobs is not None:
+                workers = min(self.jobs, workers)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
                 futures = [
-                    pool.submit(_merge_and_symbolize_sancov, s, self.raw_sancov_output_dir)
-                    for s in (llc_sancov, opt_sancov)
+                    pool.submit(_merge_and_symbolize_sancov, s) for s in sancovs
                 ]
                 for future in concurrent.futures.as_completed(futures):
                     future.result()
 
-        sancovs = [llc_sancov, opt_sancov]
         coverage_dfs = Sancov.load_coverage_dfs_from_sancovs(sancovs)
         address_line_maps, line_point_summaries, coverage = Sancov.get_joint_coverage(
             coverage_dfs
         )
 
-        llc_address_line_map, opt_address_line_map = address_line_maps
-        llc_line_point_summary, opt_line_point_summary = line_point_summaries
-
-        llc_address_line_map.to_csv(self.filepaths.output_dir / self.filepaths.llc_address_line_map_file, index=False)
-        opt_address_line_map.to_csv(self.filepaths.output_dir / self.filepaths.opt_address_line_map_file, index=False)
-        llc_line_point_summary.to_csv(
-            self.filepaths.output_dir / self.filepaths.llc_line_point_summary_file, index=False
-        )
-        opt_line_point_summary.to_csv(
-            self.filepaths.output_dir / self.filepaths.opt_line_point_summary_file, index=False
-        )
+        for tool, address_line_map, line_point_summary in zip(
+            tools, address_line_maps, line_point_summaries
+        ):
+            address_line_map.to_csv(
+                self.filepaths.output_dir
+                / Sancov.tool_address_line_map_filename(tool),
+                index=False,
+            )
+            line_point_summary.to_csv(
+                self.filepaths.output_dir
+                / Sancov.tool_line_point_summary_filename(tool),
+                index=False,
+            )
         coverage.to_csv(
             self.filepaths.output_dir / self.filepaths.line_coverage_summary_file,
             index=False,

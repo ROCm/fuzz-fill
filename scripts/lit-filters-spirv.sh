@@ -1,8 +1,5 @@
-# Shared SPIRV llvm-lit --filter= regex fragments for baseline coverage runs.
-# Sourced by scripts/lib/lit-filters.sh (via --backend-tests spirv) and referenced
-# by scripts/docker/gap-finding-pr.sh for default spirv allowlist filters.
+# Default SPIRV llvm-lit --filter= (--backend-tests spirv).
 
 SPIRV_LIT_FILTERS=(
-    CodeGen/SPIRV
-    Transforms/[^/]+/SPIRV
+    '(?:^|/)SPIRV(?:/|$)'
 )

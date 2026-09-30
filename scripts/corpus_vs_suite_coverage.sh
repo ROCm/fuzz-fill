@@ -5,14 +5,13 @@
 #   pip install -e .
 #   Download LLVM release and checkout llvm-project at the matching tag, then:
 #   ./scripts/build-llvm-sancov.sh scripts/allowlist-amdgpu.txt llvm-project \
-#       llvm-project/build-sancov --bootstrap-bin /path/to/LLVM-22.1.8/bin \
-#       --ignorelist scripts/ignorelist-amdgpu.txt
+#       llvm-project/build-sancov --bootstrap-bin /path/to/LLVM-22.1.8/bin
 #
 # Usage:
 #   ./scripts/corpus_vs_suite_coverage.sh
 #   CORPUS_N=100 ./scripts/corpus_vs_suite_coverage.sh          # smoke: first 100 files
 #   FILTER='CodeGen/AMDGPU/loop' ./scripts/corpus_vs_suite_coverage.sh
-#   FILTER='AMDGPU' ./scripts/corpus_vs_suite_coverage.sh
+#   FILTER='(?:^|/)AMDGPU(?:/|$)' ./scripts/corpus_vs_suite_coverage.sh
 #   REFRESH=all ./scripts/corpus_vs_suite_coverage.sh           # wipe prior outputs under OUTPUT_DIR
 #   SKIP_TEST_SUITE=1 ./scripts/corpus_vs_suite_coverage.sh     # reuse baseline, run corpus + diff only
 #
@@ -28,7 +27,7 @@ LLVM="${LLVM:-$FUZZ_FILL/llvm-project}"
 LLVM_BIN="${LLVM_BIN:-$LLVM/build-sancov/bin}"
 INSTRUMENTED_BIN="${INSTRUMENTED_BIN:-$LLVM/build-sancov/bin}"
 CORPUS="${CORPUS:-$FUZZ_FILL/amdgpu-tests}"
-FILTER="${FILTER:-AMDGPU}"
+FILTER="${FILTER:-(?:^|/)AMDGPU(?:/|$)}"
 OUTPUT_DIR="${OUTPUT_DIR:-$FUZZ_FILL/data/coverage_output/corpus_vs_suite_$(date +%y%m%d_%H%M%S)}"
 
 TEST_SUITE_OUTPUT_DIR="$OUTPUT_DIR/test_suite"
