@@ -14,6 +14,8 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
   --instrumentation-mode func|bb|edge
                     SanitizerCoverage instrumentation granularity (default: bb).
                     fuzz-fill expects basic-block (bb) coverage; func or edge will likely break it.
+  --enable-ccache   Route compilation through ccache (CMAKE_C/CXX_COMPILER_LAUNCHER=ccache).
+                    Disabled by default. Fails if ccache is not installed.
   ninja_jobs        Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
 
 Builds llvm-tblgen from the source tree, then instrumented llc/opt (Debug + SanitizerCoverage)
@@ -29,6 +31,7 @@ BOOTSTRAP_BIN=""
 IGNORELIST=""
 INSTRUMENTATION_MODE="bb"
 NINJA_JOBS=""
+ENABLE_CCACHE=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -58,6 +61,10 @@ while [[ $# -gt 0 ]]; do
             fi
             INSTRUMENTATION_MODE="$2"
             shift 2
+            ;;
+        --enable-ccache)
+            ENABLE_CCACHE=1
+            shift
             ;;
         --help|-h)
             usage
@@ -173,6 +180,37 @@ HELPERS_BUILD_DIR="${SANCOV_BUILD_DIR}-helpers"
 SANCOV_BIN="$SANCOV_BUILD_DIR/bin"
 HELPERS_BIN="$HELPERS_BUILD_DIR/bin"
 
+CCACHE_LAUNCHER_ARGS=()
+if [[ "$ENABLE_CCACHE" -eq 1 ]]; then
+    if ! command -v ccache >/dev/null 2>&1; then
+        echo "Error: --enable-ccache was passed but ccache is not installed" >&2
+        exit 1
+    fi
+    # LLVM builds with precompiled headers by default (LLVM_ENABLE_PCH). Without this
+    # sloppiness, ccache cannot cache PCH-dependent compiles at all (nearly the entire
+    # build), since it can't verify __DATE__/__TIME__ or #define usage across the PCH.
+    # See ccache(1) PRECOMPILED HEADERS. Respect a caller-provided value if already set.
+    export CCACHE_SLOPPINESS="${CCACHE_SLOPPINESS:-pch_defines,time_macros}"
+
+    # The allowlist/ignorelist are passed to clang as plain file paths, not #include'd
+    # and not recorded in -MD dependency output, so ccache only hashes the path string
+    # unless we list them in extra_files_to_hash (CCACHE_EXTRAFILES). See ccache(1).
+    _ccache_extra_files="${ALLOWLIST}"
+    if [[ -n "$IGNORELIST" ]]; then
+        _ccache_extra_files+=":${IGNORELIST}"
+    fi
+    if [[ -n "${CCACHE_EXTRAFILES:-}" ]]; then
+        export CCACHE_EXTRAFILES="${CCACHE_EXTRAFILES}:${_ccache_extra_files}"
+    else
+        export CCACHE_EXTRAFILES="${_ccache_extra_files}"
+    fi
+
+    CCACHE_LAUNCHER_ARGS=(
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+    )
+fi
+
 SANCOV_FLAGS="-fno-inline -fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=${INSTRUMENTATION_MODE},trace-pc-guard"
 if [[ -n "$IGNORELIST" ]]; then
     SANCOV_FLAGS+=" -fsanitize-coverage-ignorelist=$IGNORELIST"
@@ -182,6 +220,7 @@ LLVM_CMAKE_BASE=(
     -G Ninja
     -DCMAKE_C_COMPILER="$C_COMPILER"
     -DCMAKE_CXX_COMPILER="$CXX_COMPILER"
+    "${CCACHE_LAUNCHER_ARGS[@]}"
     -DLLVM_TARGETS_TO_BUILD="X86;AMDGPU;SPIRV"
     -DLLVM_ENABLE_PROJECTS=""
     -DLLVM_ENABLE_ASSERTIONS=ON
@@ -212,6 +251,7 @@ echo "  C++ compiler:     $CXX_COMPILER"
 if [[ -n "$NINJA_JOBS" ]]; then
     echo "  Ninja jobs:       $NINJA_JOBS"
 fi
+echo "  ccache:           $([[ "$ENABLE_CCACHE" -eq 1 ]] && echo enabled || echo disabled)"
 echo
 
 echo "=== llvm-tblgen (Release, from source) ==="
@@ -273,5 +313,11 @@ for tool in "${HELPER_RELEASE_TARGETS[@]}"; do
     fi
     cp -L "$src" "$SANCOV_BIN/$tool"
 done
+
+if [[ "$ENABLE_CCACHE" -eq 1 ]]; then
+    echo
+    echo "=== ccache stats ==="
+    ccache --show-stats
+fi
 
 echo "Done. Unified build at $SANCOV_BUILD_DIR (instrumented llc/opt + target helpers; Release helpers installed)"

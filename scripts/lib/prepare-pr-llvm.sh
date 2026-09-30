@@ -294,6 +294,11 @@ prepare_pr_llvm_worktree() {
         return 1
     fi
 
+    if [[ "$partial_reference" -eq 1 && "$plain_clone" -eq 1 ]]; then
+        echo "error: --partial-reference requires --reference, not --plain-clone" >&2
+        return 1
+    fi
+
     dest="$(realpath -m "$dest")"
     PREPARE_PR_REPO_DIR="$dest"
 

@@ -1,0 +1,458 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# Manual PR gap finding and gap filling for llvm/llvm-project pull requests.
+# Produces two downloadable artifacts: gap-finding CSVs and gap-filling results.
+
+name: PR gap analysis
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+      && format('PR gap analysis - llvm#{0} ({1}) by {2}', inputs.pr_id, inputs.backend_tests, github.actor)
+      || 'PR gap analysis' }}
+
+on:
+  # Temporary: registers the workflow with GitHub before merge to main.
+  # REMOVE
+  pull_request:
+    paths:
+      - .github/workflows/pr-gap-analysis.yml
+  workflow_dispatch:
+    inputs:
+      pr_id:
+        description: llvm/llvm-project pull request number
+        required: true
+        type: number
+      github_repo:
+        description: GitHub repository hosting the PR
+        required: false
+        type: string
+        default: llvm/llvm-project
+      backend_tests:
+        description: Backend test slice for LIT coverage
+        required: true
+        type: choice
+        options:
+          - amdgpu
+          - spirv
+      run_gap_filling:
+        description: Run gap filling after gap finding
+        required: false
+        type: boolean
+        default: true
+      llc_command_1:
+        description: >-
+          Optional llc flag variant 1 for gap filling (flags only, not the llc
+          binary or input file), e.g. "-O2 -global-isel=1"
+        required: false
+        type: string
+      llc_command_2:
+        description: Optional llc flag variant 2 for gap filling
+        required: false
+        type: string
+      llc_command_3:
+        description: Optional llc flag variant 3 for gap filling
+        required: false
+        type: string
+      llc_command_4:
+        description: Optional llc flag variant 4 for gap filling
+        required: false
+        type: string
+      llc_command_5:
+        description: Optional llc flag variant 5 for gap filling
+        required: false
+        type: string
+      llc_command_6:
+        description: Optional llc flag variant 6 for gap filling
+        required: false
+        type: string
+      llc_command_7:
+        description: Optional llc flag variant 7 for gap filling
+        required: false
+        type: string
+      llc_command_8:
+        description: Optional llc flag variant 8 for gap filling
+        required: false
+        type: string
+      llc_command_9:
+        description: Optional llc flag variant 9 for gap filling
+        required: false
+        type: string
+      llc_command_10:
+        description: Optional llc flag variant 10 for gap filling
+        required: false
+        type: string
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  WORK_ROOT: /work
+  ARTIFACT_DIR: /work/artifact
+  LLVM_RELEASE_VERSION: "22.1.8"
+  LLVM_RELEASE_DIR: /work/llvm-release
+  LLVM_RELEASE_BIN: /work/llvm-release/bin
+  LLVM_MIRROR_DIR: /work/llvm-mirror
+  PR_LLVM_DIR: /work/pr-llvm
+  PR_BUILD_DIR: /work/build-sancov
+  PR_BUILD_BIN: /work/build-sancov/bin
+  OUT_DIR: /work/out
+  GAP_FILL_DIR: /work/gap-fill-pr
+  SQUASH_COMMIT_FILE: /work/squash-commit
+  CUSTOM_LLC_COMMANDS_CSV: /work/custom-llc-commands.csv
+  VENV_DIR: /work/fuzz-fill-venv
+  CORPUS_ROOT: ${{ github.workspace }}/candidate-tests-dataset
+  GH_TOKEN: ${{ github.token }}
+  CCACHE_DIR: /work/ccache
+  CCACHE_MAXSIZE: 3G
+  CCACHE_COMPRESS: "true"
+
+jobs:
+  pr-gap-analysis:
+    # Skip pull_request runs (registration only); workflow_dispatch runs normally.
+    if: github.event_name == 'workflow_dispatch'
+    name: PR gap analysis
+    runs-on: aws-linux-scale-rocm-medium-dev
+    timeout-minutes: 480
+    container:
+      image: ubuntu:24.04
+    env:
+      INPUT_PR_ID: ${{ inputs.pr_id }}
+      INPUT_GITHUB_REPO: ${{ inputs.github_repo }}
+      INPUT_BACKEND_TESTS: ${{ inputs.backend_tests }}
+    steps:
+      - name: Checkout fuzz-fill
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install apt packages
+        run: ./scripts/image/install-apt-packages.sh all
+
+      - name: Install CMake
+        run: ./scripts/image/install-cmake.sh
+
+      - name: Restore LLVM release bootstrap binaries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache-llvm-release
+        with:
+          path: ${{ env.LLVM_RELEASE_DIR }}
+          key: fuzz-fill-llvm-release-${{ env.LLVM_RELEASE_VERSION }}
+
+      - name: Download LLVM release bootstrap binaries
+        if: steps.cache-llvm-release.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "${LLVM_RELEASE_DIR}"
+          curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_RELEASE_VERSION}/LLVM-${LLVM_RELEASE_VERSION}-Linux-X64.tar.xz" \
+            | tar -xJ --strip-components=1 -C "${LLVM_RELEASE_DIR}"
+
+      - name: Install gh
+        run: |
+          if ! command -v gh >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y gh
+          fi
+
+      - name: Resolve PR head and base early
+        run: |
+          mkdir -p /work/pr-head
+          gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.sha' \
+            > /work/pr-head/pr-head.txt
+          gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.base.sha' \
+            > /work/pr-head/pr-base.txt
+
+      - name: Upload PR head artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr-head-pr${{ inputs.pr_id }}-${{ github.run_id }}
+          path: /work/pr-head/pr-head.txt
+
+      - name: Resolve allowlist
+        id: allowlist
+        run: |
+          case "${INPUT_BACKEND_TESTS}" in
+            spirv) echo "path=scripts/allowlist-spirv.txt" >> "${GITHUB_OUTPUT}" ;;
+            *) echo "path=scripts/allowlist-amdgpu.txt" >> "${GITHUB_OUTPUT}" ;;
+          esac
+
+      - name: Compute mirror cache key
+        id: mirror-cache-key
+        run: |
+          echo "week=$(date -u +%G-%V)" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore filtered llvm-project mirror
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache-mirror
+        with:
+          path: ${{ env.LLVM_MIRROR_DIR }}
+          key: fuzz-fill-llvm-mirror-${{ steps.mirror-cache-key.outputs.week }}
+          restore-keys: |
+            fuzz-fill-llvm-mirror-
+
+      - name: Clone filtered llvm-project mirror
+        if: steps.cache-mirror.outputs.cache-matched-key == ''
+        run: |
+          git clone --filter=blob:none "https://github.com/${INPUT_GITHUB_REPO}.git" "${LLVM_MIRROR_DIR}"
+
+      - name: Save filtered llvm-project mirror
+        if: steps.cache-mirror.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.LLVM_MIRROR_DIR }}
+          key: ${{ steps.cache-mirror.outputs.cache-primary-key }}
+
+      - name: Warm mirror for PR
+        run: |
+          ./scripts/warm-llvm-mirror-for-pr.sh "${LLVM_MIRROR_DIR}" \
+            --pr-id "${INPUT_PR_ID}" \
+            --github-repo "${INPUT_GITHUB_REPO}" \
+            --base-sha "$(cat /work/pr-head/pr-base.txt)"
+
+      - name: Prepare PR llvm tree
+        run: |
+          ./scripts/prepare-pr-llvm.sh \
+            --pr-id "${INPUT_PR_ID}" \
+            --dest "${PR_LLVM_DIR}" \
+            --github-repo "${INPUT_GITHUB_REPO}" \
+            --reference "${LLVM_MIRROR_DIR}" \
+            --partial-reference \
+            --no-self-contained \
+            --squash-commit-file "${SQUASH_COMMIT_FILE}"
+
+      - name: Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache-ccache
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: fuzz-fill-llvm-sancov-ccache-${{ env.LLVM_RELEASE_VERSION }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-fill-llvm-sancov-ccache-${{ env.LLVM_RELEASE_VERSION }}-
+
+      - name: Reset ccache stats for this run
+        run: ccache --zero-stats
+
+      - name: Build instrumented LLVM for PR
+        env:
+          ALLOWLIST_PATH: ${{ steps.allowlist.outputs.path }}
+        run: |
+          ./scripts/build-llvm-sancov.sh \
+            "${ALLOWLIST_PATH}" \
+            "${PR_LLVM_DIR}" \
+            "${PR_BUILD_DIR}" \
+            --bootstrap-bin "${LLVM_RELEASE_BIN}" \
+            --ignorelist scripts/ignorelist-amdgpu.txt \
+            --enable-ccache \
+            "$(nproc)"
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache --show-stats -v
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.cache-ccache.outputs.cache-primary-key }}
+
+      - name: Install fuzz-fill venv
+        run: |
+          python3 -m venv "${VENV_DIR}"
+          "${VENV_DIR}/bin/pip" install --no-cache-dir -e "${GITHUB_WORKSPACE}"
+
+      - name: Run gap finding
+        env:
+          LIT_ALLOW_FAILURES: "1"
+        run: |
+          source "${VENV_DIR}/bin/activate"
+          ./scripts/gap-finding-pr.sh \
+            --output-dir "${OUT_DIR}" \
+            --llvm-repo "${PR_LLVM_DIR}" \
+            --llvm-bin "${PR_BUILD_BIN}" \
+            --instrumented-bin-dir "${PR_BUILD_BIN}" \
+            --commit "$(cat "${SQUASH_COMMIT_FILE}")" \
+            --backend-tests "${INPUT_BACKEND_TESTS}" \
+            -j "$(nproc)"
+
+      - name: Write finding README
+        run: |
+          pr_head="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.sha')"
+          pr_head_ref="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.ref')"
+          requested_at="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq '.created_at')"
+          {
+            echo "PR gap finding report"
+            echo "pr_id: ${INPUT_PR_ID}"
+            echo "github_repo: ${INPUT_GITHUB_REPO}"
+            echo "backend_tests: ${INPUT_BACKEND_TESTS}"
+            echo "pr_head: ${pr_head}"
+            echo "pr_head_ref: ${pr_head_ref}"
+            echo "squash_commit: $(cat "${SQUASH_COMMIT_FILE}")"
+            echo "requested_at: ${requested_at}"
+            echo "workflow_run: ${GITHUB_RUN_ID}"
+          } > /work/README-finding.txt
+
+      - name: Stage finding artifact
+        run: |
+          chmod +x .github/scripts/pr-gap-artifact.sh
+          .github/scripts/pr-gap-artifact.sh finding \
+            --out-dir "${OUT_DIR}" \
+            --squash-commit "${SQUASH_COMMIT_FILE}" \
+            --readme /work/README-finding.txt
+          .github/scripts/pr-gap-artifact.sh finalize
+
+      - name: Upload gap finding artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gap-finding-pr${{ inputs.pr_id }}-${{ github.run_id }}
+          path: ${{ env.ARTIFACT_DIR }}
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Check uncovered PR lines
+        if: inputs.run_gap_filling
+        id: uncovered
+        run: |
+          report="${OUT_DIR}/commit_lines_report/target_lines_uncovered_pruned.csv"
+          if [[ ! -f "${report}" ]]; then
+            echo "error: gap finding report not found: ${report}" >&2
+            exit 1
+          fi
+          count="$(tail -n +2 "${report}" | grep -c . || true)"
+          if [[ "${count}" -gt 0 ]]; then
+            echo "has_uncovered_lines=true" >> "${GITHUB_OUTPUT}"
+            echo "Found ${count} uncovered PR target line(s); gap filling will run."
+          else
+            echo "has_uncovered_lines=false" >> "${GITHUB_OUTPUT}"
+            echo "No uncovered PR target lines; skipping gap filling."
+          fi
+
+      - name: Resolve corpus directory
+        if: inputs.run_gap_filling && steps.uncovered.outputs.has_uncovered_lines == 'true'
+        id: corpus
+        run: |
+          case "${INPUT_BACKEND_TESTS}" in
+            spirv) subdir="spirv64-amd-amdhsa" ;;
+            *) subdir="amdgcn-amd-amdhsa" ;;
+          esac
+          echo "dir=${CORPUS_ROOT}/${subdir}" >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve candidate-test settings
+        if: inputs.run_gap_filling && steps.uncovered.outputs.has_uncovered_lines == 'true'
+        id: settings
+        env:
+          LLC_COMMAND_1: ${{ inputs.llc_command_1 }}
+          LLC_COMMAND_2: ${{ inputs.llc_command_2 }}
+          LLC_COMMAND_3: ${{ inputs.llc_command_3 }}
+          LLC_COMMAND_4: ${{ inputs.llc_command_4 }}
+          LLC_COMMAND_5: ${{ inputs.llc_command_5 }}
+          LLC_COMMAND_6: ${{ inputs.llc_command_6 }}
+          LLC_COMMAND_7: ${{ inputs.llc_command_7 }}
+          LLC_COMMAND_8: ${{ inputs.llc_command_8 }}
+          LLC_COMMAND_9: ${{ inputs.llc_command_9 }}
+          LLC_COMMAND_10: ${{ inputs.llc_command_10 }}
+        run: |
+          llc_commands=()
+          for i in $(seq 1 10); do
+            var="LLC_COMMAND_${i}"
+            val="${!var:-}"
+            val="${val#"${val%%[![:space:]]*}"}"
+            val="${val%"${val##*[![:space:]]}"}"
+            if [[ -n "$val" ]]; then
+              llc_commands+=("$val")
+            fi
+          done
+
+          if [[ ${#llc_commands[@]} -gt 0 ]]; then
+            {
+              echo "llc_flags"
+              for cmd in "${llc_commands[@]}"; do
+                escaped="${cmd//\"/\"\"}"
+                printf '"%s"\n' "$escaped"
+              done
+            } > "${CUSTOM_LLC_COMMANDS_CSV}"
+            echo "csv=${CUSTOM_LLC_COMMANDS_CSV}" >> "${GITHUB_OUTPUT}"
+            echo "Using ${#llc_commands[@]} custom llc flag variant(s) from workflow inputs."
+          else
+            case "${INPUT_BACKEND_TESTS}" in
+              amdgpu)
+                echo "csv=${GITHUB_WORKSPACE}/scripts/candidate-test-settings-amdgpu-o-global-isel.csv" \
+                  >> "${GITHUB_OUTPUT}"
+                ;;
+              *)
+                echo "csv=" >> "${GITHUB_OUTPUT}"
+                ;;
+            esac
+          fi
+
+      - name: Run gap filling
+        if: inputs.run_gap_filling && steps.uncovered.outputs.has_uncovered_lines == 'true'
+        env:
+          CORPUS_DIR: ${{ steps.corpus.outputs.dir }}
+          SETTINGS_CSV: ${{ steps.settings.outputs.csv }}
+        run: |
+          source "${VENV_DIR}/bin/activate"
+          if [[ ! -d "${CORPUS_DIR}" ]]; then
+            echo "error: corpus directory not found: ${CORPUS_DIR}" >&2
+            exit 1
+          fi
+          gap_fill_args=(
+            --output-dir "${GAP_FILL_DIR}"
+            --line-coverage-uncovered-csv "${OUT_DIR}/commit_lines_report/target_lines_uncovered_pruned.csv"
+            --llc-address-line-map-csv "${OUT_DIR}/baseline/llc_address_line_map.csv"
+            --candidate-tests-dir "${CORPUS_DIR}"
+            --llvm-repo "${PR_LLVM_DIR}"
+            --llvm-bin "${PR_BUILD_BIN}"
+            --instrumented-bin-dir "${PR_BUILD_BIN}"
+            -j "$(nproc)"
+          )
+          if [[ -n "${SETTINGS_CSV}" ]]; then
+            gap_fill_args+=(--settings-csv "${SETTINGS_CSV}")
+          fi
+          ./scripts/gap-filling.sh "${gap_fill_args[@]}"
+
+      - name: Write filling README
+        if: inputs.run_gap_filling && steps.uncovered.outputs.has_uncovered_lines == 'true'
+        env:
+          CORPUS_DIR: ${{ steps.corpus.outputs.dir }}
+          SETTINGS_CSV: ${{ steps.settings.outputs.csv }}
+        run: |
+          {
+            echo "PR gap filling report"
+            echo "pr_id: ${INPUT_PR_ID}"
+            echo "github_repo: ${INPUT_GITHUB_REPO}"
+            echo "backend_tests: ${INPUT_BACKEND_TESTS}"
+            echo "corpus_dir: ${CORPUS_DIR}"
+            echo "settings_csv: ${SETTINGS_CSV:-default (-O0..-O3)}"
+            echo "workflow_run: ${GITHUB_RUN_ID}"
+          } > /work/README-filling.txt
+
+      - name: Stage filling artifact
+        if: inputs.run_gap_filling && steps.uncovered.outputs.has_uncovered_lines == 'true'
+        run: |
+          chmod +x .github/scripts/pr-gap-artifact.sh
+          manifest="${GAP_FILL_DIR}/candidate_tests/candidate_test_manifest.csv"
+          args=(
+            filling
+            --gap-fill-dir "${GAP_FILL_DIR}"
+            --target-lines-csv "${OUT_DIR}/commit_lines_report/target_lines_uncovered_pruned.csv"
+            --readme /work/README-filling.txt
+          )
+          if [[ -f "${manifest}" ]]; then
+            args+=(--manifest "${manifest}")
+          fi
+          .github/scripts/pr-gap-artifact.sh "${args[@]}"
+          .github/scripts/pr-gap-artifact.sh finalize
+
+      - name: Upload gap filling artifact
+        if: inputs.run_gap_filling && steps.uncovered.outputs.has_uncovered_lines == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gap-filling-pr${{ inputs.pr_id }}-${{ github.run_id }}
+          path: ${{ env.ARTIFACT_DIR }}
+          retention-days: 7
+          if-no-files-found: error
