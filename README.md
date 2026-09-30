@@ -895,6 +895,7 @@ Lines added or changed in LLVM pull requests that baseline coverage (including t
 | Date | PR | Summary |
 |------|-----|---------|
 | 2026-08-04 | [#211465](https://github.com/llvm/llvm-project/pull/211465#issuecomment-5179521133) | [AMDGPU] TFE D16 format buffer loads |
+| 2026-08-04 | [#212755](https://github.com/llvm/llvm-project/pull/212755#issuecomment-5179612811) | [AMDGPU] Constant folding for wave-reduce intrinsics |
 | 2026-08-04 | [#213202](https://github.com/llvm/llvm-project/pull/213202#issuecomment-5179767021) | [AMDGPU] Negated f16 and fp conversion DAG combines |
 | 2026-08-04 | [#212507](https://github.com/llvm/llvm-project/pull/212507#issuecomment-5179801936) | [AMDGPU] FLAT_SCRATCH in SILoadStoreOptimizer |
 | 2026-08-04 | [#212536](https://github.com/llvm/llvm-project/pull/212536#issuecomment-5179822882) | [AMDGPU] MachinePipeliner support |
