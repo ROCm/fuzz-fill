@@ -1,0 +1,36 @@
+# COM: Run `coverage baseline` on a single LLVM-Unit shard for AMDGPUMCTests.
+# COM: Lit shards gtest binaries by core count, so filter shard 0 only (always
+# COM: one lit test). Verify the unit-test binary under unittests/ is symbolized
+# COM: and produces covered lines in the joint summary.
+
+# RUN: rm -rf %t && mkdir -p %t/baseline
+# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter 'MC/AMDGPU/\./AMDGPUMCTests/0/' --lit-verbose --lit-allow-failures -j1 | tee %t/baseline.log
+
+# RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=PASS
+# PASS-COUNT-1: PASS:
+# PASS: AMDGPUMCTests
+# PASS-NOT: warning: llvm-lit exited with code
+
+# COM: Shared baseline artifacts.
+# RUN: test -f %t/baseline/line_coverage_summary.csv
+# RUN: test -f %t/baseline/line_coverage_covered.csv
+# RUN: test -f %t/baseline/line_coverage_partially.csv
+# RUN: test -f %t/baseline/line_coverage_uncovered.csv
+# RUN: test -f %t/baseline/lit_failures.json
+
+# COM: AMDGPUMCTests emitted coverage; llc/opt did not run for this filter.
+# RUN: test -f %t/baseline/AMDGPUMCTests_address_line_map.csv
+# RUN: test -f %t/baseline/AMDGPUMCTests_line_point_summary.csv
+# RUN: test ! -f %t/baseline/llc_address_line_map.csv
+# RUN: test ! -f %t/baseline/opt_address_line_map.csv
+# RUN: ls %t/baseline/raw_sancov/AMDGPUMCTests.*.sancov
+# RUN: test -f %t/baseline/processed_sancov/AMDGPUMCTests.0.sancov
+# RUN: test -f %t/baseline/processed_sancov/AMDGPUMCTests.0.symcov
+
+# COM: Address map has at least one real instrumentation point, and the joint
+# COM: summary marks at least one line covered or partially covered.
+# RUN: %FileCheck %s --input-file=%t/baseline/AMDGPUMCTests_address_line_map.csv --check-prefix=COVERAGE
+# COVERAGE: file,line,point
+# COVERAGE: {{.*}},{{[0-9]+}},0x{{[0-9a-f]+}}
+# RUN: %FileCheck %s --input-file=%t/baseline/line_coverage_summary.csv --check-prefix=HIT
+# HIT: {{.*,(covered|partially)$}}

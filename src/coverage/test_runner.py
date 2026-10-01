@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import os
+import re
 import shutil
 import subprocess
 import sys
+import time
 import pandas as pd
 from pathlib import Path
 
@@ -32,9 +34,13 @@ from coverage.lit_config import (
 from coverage.line_coverage_summary import write_line_coverage_summary_splits
 from coverage.revision_check import record_baseline_revision
 from coverage.sancov import Sancov
-from fuzz_fill.log import get_logger, log_timing, run_subprocess
+from fuzz_fill.log import get_logger, log_timing
 
 logger = get_logger("coverage.test_runner")
+
+_LIT_SELECTED_NONE = re.compile(
+    r"filter did not match any tests|-- Testing: 0 of "
+)
 
 
 def _merge_and_symbolize_sancov(sancov: Sancov) -> None:
@@ -43,6 +49,68 @@ def _merge_and_symbolize_sancov(sancov: Sancov) -> None:
         sancov.get_merged_sancov_path(),
         sancov.get_merged_symcov_path(),
     )
+
+
+def _find_unittests_executables(unittests_root: Path, tool: str) -> list[Path]:
+    """Executable paths under ``unittests/`` whose basename matches *tool*."""
+    if not unittests_root.is_dir():
+        return []
+    matches: list[Path] = []
+    for dirpath, _dirnames, filenames in os.walk(unittests_root):
+        if tool not in filenames:
+            continue
+        path = Path(dirpath) / tool
+        try:
+            if path.is_file() and os.access(path, os.X_OK):
+                matches.append(path)
+        except OSError:
+            continue
+    return matches
+
+
+def _resolve_symbolize_target(bin_dir: Path, build_root: Path, tool: str) -> Path:
+    """Locate the binary that produced ``<tool>.*.sancov`` dumps.
+
+    Tools normally live in ``bin/``. Backend lit filters can also select
+    LLVM-Unit shards whose binaries live under ``unittests/`` (for example
+    ``unittests/MC/AMDGPU/AMDGPUMCTests``).
+    """
+    candidate = bin_dir / tool
+    if candidate.is_file():
+        return candidate
+
+    matches = _find_unittests_executables(build_root / "unittests", tool)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        listed = "\n".join(f"  {path}" for path in matches)
+        raise SystemExit(
+            f"error: multiple instrumented binaries named {tool!r} under "
+            f"{build_root / 'unittests'}:\n{listed}"
+        )
+    raise SystemExit(
+        f"error: instrumented binary for {tool!r} not found: {candidate} "
+        f"(also searched under {build_root / 'unittests'})"
+    )
+
+
+def _lit_selected_no_tests(lit_output: str) -> bool:
+    """True when llvm-lit discovered tests but selected none to run."""
+    return _LIT_SELECTED_NONE.search(lit_output) is not None
+
+
+def _discard_sancovs(raw_sancov_dir: Path) -> int:
+    """Delete every ``.sancov`` dump in *raw_sancov_dir*.
+
+    A lit filter that selects no tests still runs ``--gtest_list_tests`` on
+    every unit-test binary, and those processes write coverage dumps. No
+    selected test ran, so none of the dumps are coverage to keep.
+    """
+    removed = 0
+    for path in raw_sancov_dir.glob("*.sancov"):
+        path.unlink()
+        removed += 1
+    return removed
 
 
 class TestRunner:
@@ -75,6 +143,7 @@ class TestRunner:
         self.lit_priority_slow_tests = lit_priority_slow_tests
         self.require_sancov = require_sancov
         self.debug = debug
+        self._lit_selected_no_tests = False
 
         self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -186,25 +255,35 @@ class TestRunner:
             print(f"\tLit site config: {lit_site_cfg}")
             print(f"\tCoverage directory: {self.raw_sancov_output_dir}")
         else:
-            result = run_subprocess(
-                logger,
+            logger.debug("running %s", argv)
+            logger.debug("cwd: %s", cwd)
+            started = time.perf_counter()
+            lit_proc = subprocess.Popen(
                 argv,
-                label="llvm-lit",
                 cwd=cwd,
                 env=env,
-                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
             )
-            if result.returncode != 0:
+            assert lit_proc.stdout is not None
+            for line in lit_proc.stdout:
+                print(line, end="", flush=True)
+                if _lit_selected_no_tests(line):
+                    self._lit_selected_no_tests = True
+            returncode = lit_proc.wait()
+            logger.info(
+                "llvm-lit finished in %.2fs", time.perf_counter() - started
+            )
+            if returncode != 0:
                 if self.lit_allow_failures:
                     print(
-                        f"warning: llvm-lit exited with code {result.returncode}; "
+                        f"warning: llvm-lit exited with code {returncode}; "
                         "continuing baseline coverage (--lit-allow-failures)",
                         flush=True,
                     )
                 else:
-                    raise subprocess.CalledProcessError(
-                        result.returncode, argv, result.stdout, result.stderr
-                    )
+                    raise subprocess.CalledProcessError(returncode, argv)
 
     def _print_standalone_progress(self, label: str | None = None) -> None:
         remaining = (
@@ -334,6 +413,14 @@ class TestRunner:
     def get_aggregate_coverage(self) -> None:
         """Get the aggregate coverage for the test suite."""
         with log_timing(logger, "aggregate coverage (sancov merge+symbolize)"):
+            if self._lit_selected_no_tests:
+                removed = _discard_sancovs(self.raw_sancov_output_dir)
+                if removed:
+                    print(
+                        "warning: ignoring "
+                        f"{removed} sancov dump(s); llvm-lit selected no tests",
+                        flush=True,
+                    )
             tools = Sancov.discover_tools(self.raw_sancov_output_dir)
             if not tools:
                 if self.require_sancov:
@@ -358,14 +445,12 @@ class TestRunner:
                 raise SystemExit("error: --sancov is required to merge and symbolize coverage")
 
             instrumented_bin = self.filepaths.llc.parent
+            build_root = instrumented_bin.parent
             sancovs: list[Sancov] = []
             for tool in tools:
-                symbolize_target = instrumented_bin / tool
-                if not symbolize_target.is_file():
-                    raise SystemExit(
-                        f"error: instrumented binary for {tool!r} not found: "
-                        f"{symbolize_target}"
-                    )
+                symbolize_target = _resolve_symbolize_target(
+                    instrumented_bin, build_root, tool
+                )
                 sancovs.append(
                     Sancov(
                         self.filepaths.sancov,
