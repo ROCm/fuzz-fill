@@ -45,6 +45,49 @@ def _merge_and_symbolize_sancov(sancov: Sancov) -> None:
     )
 
 
+def _find_unittests_executables(unittests_root: Path, tool: str) -> list[Path]:
+    """Executable paths under ``unittests/`` whose basename matches *tool*."""
+    if not unittests_root.is_dir():
+        return []
+    matches: list[Path] = []
+    for dirpath, _dirnames, filenames in os.walk(unittests_root):
+        if tool not in filenames:
+            continue
+        path = Path(dirpath) / tool
+        try:
+            if path.is_file() and os.access(path, os.X_OK):
+                matches.append(path)
+        except OSError:
+            continue
+    return matches
+
+
+def _resolve_symbolize_target(bin_dir: Path, build_root: Path, tool: str) -> Path:
+    """Locate the binary that produced ``<tool>.*.sancov`` dumps.
+
+    Tools normally live in ``bin/``. Backend lit filters can also select
+    LLVM-Unit shards whose binaries live under ``unittests/`` (for example
+    ``unittests/MC/AMDGPU/AMDGPUMCTests``).
+    """
+    candidate = bin_dir / tool
+    if candidate.is_file():
+        return candidate
+
+    matches = _find_unittests_executables(build_root / "unittests", tool)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        listed = "\n".join(f"  {path}" for path in matches)
+        raise SystemExit(
+            f"error: multiple instrumented binaries named {tool!r} under "
+            f"{build_root / 'unittests'}:\n{listed}"
+        )
+    raise SystemExit(
+        f"error: instrumented binary for {tool!r} not found: {candidate} "
+        f"(also searched under {build_root / 'unittests'})"
+    )
+
+
 class TestRunner:
     """
     Executes tests using an instrumented LLVM build.
@@ -358,14 +401,12 @@ class TestRunner:
                 raise SystemExit("error: --sancov is required to merge and symbolize coverage")
 
             instrumented_bin = self.filepaths.llc.parent
+            build_root = instrumented_bin.parent
             sancovs: list[Sancov] = []
             for tool in tools:
-                symbolize_target = instrumented_bin / tool
-                if not symbolize_target.is_file():
-                    raise SystemExit(
-                        f"error: instrumented binary for {tool!r} not found: "
-                        f"{symbolize_target}"
-                    )
+                symbolize_target = _resolve_symbolize_target(
+                    instrumented_bin, build_root, tool
+                )
                 sancovs.append(
                     Sancov(
                         self.filepaths.sancov,
