@@ -12,6 +12,8 @@ allowlist="amdgpu"
 sancov_instrumentation_mode=""
 llvm_release_version="22.1.8"
 ninja_jobs=""
+llvm_targets=""
+llvm_enable_projects=""
 no_cache=0
 
 usage() {
@@ -32,6 +34,10 @@ Options:
   --sancov-instrumentation-mode func|bb|edge
                                  SanitizerCoverage instrumentation mode (default: bb).
                                  fuzz-fill expects basic-block (bb) coverage; func or edge will likely break it.
+  --targets <list>               Semicolon-separated LLVM_TARGETS_TO_BUILD
+                                 (default: X86;AMDGPU;SPIRV)
+  --enable-projects <list>       Semicolon-separated LLVM_ENABLE_PROJECTS
+                                 (default: empty). Pass clang to enable the clang suite.
   -j <n>, --jobs <n>             Parallel jobs for ninja when building LLVM (default: unconstrained)
   --no-cache                     Pass --no-cache to docker build (ignore layer cache)
 
@@ -44,6 +50,7 @@ Examples:
   $(basename "$0") --llvm-dir /path/to/llvm-project --tag local-llvm
   $(basename "$0") --allowlist spirv --tag spirv
   $(basename "$0") --sancov-instrumentation-mode edge --tag edge
+  $(basename "$0") --targets 'X86;AMDGPU' --enable-projects clang --tag bench
   $(basename "$0") --llvm-release-version 22.1.8 -j "\$(nproc)"
 EOF
 }
@@ -103,6 +110,22 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             ninja_jobs="$2"
+            shift 2
+            ;;
+        --targets)
+            if [[ $# -lt 2 ]]; then
+                echo "error: --targets requires a value" >&2
+                exit 1
+            fi
+            llvm_targets="$2"
+            shift 2
+            ;;
+        --enable-projects)
+            if [[ $# -lt 2 ]]; then
+                echo "error: --enable-projects requires a value" >&2
+                exit 1
+            fi
+            llvm_enable_projects="$2"
             shift 2
             ;;
         --no-cache)
@@ -183,6 +206,12 @@ if [[ -n "$sancov_instrumentation_mode" ]]; then
 fi
 if [[ -n "$ninja_jobs" ]]; then
     docker_build_args+=(--build-arg NINJA_JOBS="${ninja_jobs}")
+fi
+if [[ -n "$llvm_targets" ]]; then
+    docker_build_args+=(--build-arg LLVM_TARGETS_TO_BUILD="${llvm_targets}")
+fi
+if [[ -n "$llvm_enable_projects" ]]; then
+    docker_build_args+=(--build-arg LLVM_ENABLE_PROJECTS="${llvm_enable_projects}")
 fi
 if [[ "$no_cache" -eq 1 ]]; then
     docker_build_args+=(--no-cache)

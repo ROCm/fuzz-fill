@@ -14,6 +14,10 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
   --instrumentation-mode func|bb|edge
                     SanitizerCoverage instrumentation granularity (default: bb).
                     fuzz-fill expects basic-block (bb) coverage; func or edge will likely break it.
+  --targets <list>  Semicolon-separated LLVM_TARGETS_TO_BUILD (default: X86;AMDGPU;SPIRV)
+  --enable-projects <list>
+                    Semicolon-separated LLVM_ENABLE_PROJECTS (default: empty).
+                    Pass clang to build an instrumented Clang and its lit suite.
   --link-jobs <n>   Maximum concurrent link jobs (default: 8). Compile parallelism
                     stays at ninja_jobs.
   ninja_jobs        Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
@@ -29,6 +33,8 @@ SANCOV_BUILD_DIR=""
 BOOTSTRAP_BIN=""
 IGNORELIST=""
 INSTRUMENTATION_MODE="bb"
+TARGETS="X86;AMDGPU;SPIRV"
+ENABLE_PROJECTS=""
 LINK_JOBS="8"
 NINJA_JOBS=""
 
@@ -59,6 +65,24 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             INSTRUMENTATION_MODE="$2"
+            shift 2
+            ;;
+        --targets)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --targets requires a value" >&2
+                usage >&2
+                exit 1
+            fi
+            TARGETS="$2"
+            shift 2
+            ;;
+        --enable-projects)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --enable-projects requires a value" >&2
+                usage >&2
+                exit 1
+            fi
+            ENABLE_PROJECTS="$2"
             shift 2
             ;;
         --link-jobs)
@@ -161,6 +185,21 @@ if [[ -n "$IGNORELIST" ]]; then
     SANCOV_FLAGS+=" -fsanitize-coverage-ignorelist=$IGNORELIST"
 fi
 
+if [[ -z "$TARGETS" ]]; then
+    echo "Error: --targets must not be empty" >&2
+    exit 1
+fi
+
+# Split projects on ';' and detect clang.
+enable_clang=0
+IFS=';' read -r -a _projects <<< "$ENABLE_PROJECTS"
+for _project in "${_projects[@]}"; do
+    if [[ "$_project" == "clang" ]]; then
+        enable_clang=1
+        break
+    fi
+done
+
 LLVM_CMAKE_ARGS=(
     -G Ninja
     -DCMAKE_C_COMPILER="$C_COMPILER"
@@ -168,17 +207,20 @@ LLVM_CMAKE_ARGS=(
     -DCMAKE_C_FLAGS="$SANCOV_FLAGS"
     -DCMAKE_CXX_FLAGS="$SANCOV_FLAGS"
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
-    -DLLVM_TARGETS_TO_BUILD="X86;AMDGPU;SPIRV"
+    -DLLVM_TARGETS_TO_BUILD="$TARGETS"
     -DLLVM_PARALLEL_LINK_JOBS="$LINK_JOBS"
     -DLLVM_USE_LINKER=lld
-    -DLLVM_ENABLE_PROJECTS=""
+    -DLLVM_ENABLE_PROJECTS="$ENABLE_PROJECTS"
     -DLLVM_ENABLE_ASSERTIONS=ON
     -DLLVM_USE_SPLIT_DWARF=ON
     -DLLVM_INCLUDE_EXAMPLES=OFF
     -DLLVM_INCLUDE_BENCHMARKS=OFF
     -DLLVM_BUILD_TESTS=ON
-    -DLLVM_TOOL_LTO_BUILD=OFF
     -DBUILD_SHARED_LIBS=OFF
+    # An instrumented Clang would otherwise link libclang.so, which pulls in
+    # instrumented objects and fails on unresolved SanitizerCoverage symbols.
+    # PIC off builds libclang static and, in CMake, skips libLTO and plugins.
+    -DLLVM_ENABLE_PIC=OFF
 )
 
 ninja_args=()
@@ -192,6 +234,8 @@ echo "  Instrumentation:  $INSTRUMENTATION_MODE (trace-pc-guard)"
 if [[ -n "$IGNORELIST" ]]; then
     echo "  Ignorelist:       $IGNORELIST"
 fi
+echo "  Targets:          $TARGETS"
+echo "  Enable projects:  ${ENABLE_PROJECTS:-<none>}"
 echo "  LLVM source:      $LLVM_DIR"
 echo "  Sancov build:     $SANCOV_BUILD_DIR"
 echo "  Bootstrap bin:    $BOOTSTRAP_BIN (clang/clang++ and ld.lld)"
@@ -215,6 +259,13 @@ echo "=== Instrumented tree (RelWithDebInfo + SanitizerCoverage, ninja all) ==="
 if [[ ! -f "$SANCOV_BUILD_DIR/test/lit.site.cfg.py" ]]; then
     echo "Error: test/lit.site.cfg.py not found under $SANCOV_BUILD_DIR" >&2
     exit 1
+fi
+
+if [[ "$enable_clang" -eq 1 ]]; then
+    if [[ ! -f "$SANCOV_BUILD_DIR/tools/clang/test/lit.site.cfg.py" ]]; then
+        echo "Error: tools/clang/test/lit.site.cfg.py not found under $SANCOV_BUILD_DIR" >&2
+        exit 1
+    fi
 fi
 
 echo "Done. Instrumented build at $SANCOV_BUILD_DIR"
