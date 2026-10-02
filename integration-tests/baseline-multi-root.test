@@ -16,7 +16,7 @@
 # ALLOW_OK-NOT: warning: llvm-lit exited with code
 
 # COM: The Clang suite config was found by walking up from clang/test/Sema.
-# RUN: %FileCheck %s --input-file=$(dirname $(dirname %llvm-lit))/tools/clang/test/lit.site.cfg.py --check-prefix=CLANG_SITE
+# RUN: %FileCheck %s --input-file=%clang-lit-site --check-prefix=CLANG_SITE
 # CLANG_SITE: fuzz-fill: SanitizerCoverage env forwarding
 
 # RUN: test -f %t/baseline/line_coverage_summary.csv

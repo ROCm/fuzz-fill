@@ -125,6 +125,7 @@ _clang_lit_site = os.path.join(
 )
 if os.path.isfile(_clang_lit_site):
     config.available_features.add("clang-lit")
+    config.substitutions.append(("%clang-lit-site", shlex.quote(_clang_lit_site)))
 
 # E2E tests are opt-in: pass --param e2e=1 to enable them.
 if lit_config.params.get("e2e"):
