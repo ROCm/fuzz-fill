@@ -23,6 +23,8 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
   ninja_jobs        Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
 
 Configures one RelWithDebInfo + SanitizerCoverage tree and builds ninja all.
+The sancov tool in that tree is then replaced by a separate Release build with
+assertions and SanitizerCoverage disabled.
 Bootstrap supplies clang, clang++, and ld.lld; llvm-tblgen is built in-tree.
 EOF
 }
@@ -179,6 +181,7 @@ fi
 
 mkdir -p "$SANCOV_BUILD_DIR"
 SANCOV_BUILD_DIR="$(realpath "$SANCOV_BUILD_DIR")"
+SANCOV_TOOL_BUILD_DIR="${SANCOV_BUILD_DIR}.sancov-release"
 
 SANCOV_FLAGS="-fno-inline -fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=${INSTRUMENTATION_MODE},trace-pc-guard"
 if [[ -n "$IGNORELIST" ]]; then
@@ -223,6 +226,24 @@ LLVM_CMAKE_ARGS=(
     -DLLVM_ENABLE_PIC=OFF
 )
 
+SANCOV_TOOL_CMAKE_ARGS=(
+    -G Ninja
+    -DCMAKE_C_COMPILER="$C_COMPILER"
+    -DCMAKE_CXX_COMPILER="$CXX_COMPILER"
+    -DCMAKE_BUILD_TYPE=Release
+    -DLLVM_TARGETS_TO_BUILD="$TARGETS"
+    -DLLVM_PARALLEL_LINK_JOBS="$LINK_JOBS"
+    -DLLVM_USE_LINKER=lld
+    -DLLVM_ENABLE_PROJECTS=""
+    -DLLVM_ENABLE_ASSERTIONS=OFF
+    -DLLVM_INCLUDE_EXAMPLES=OFF
+    -DLLVM_INCLUDE_BENCHMARKS=OFF
+    -DLLVM_INCLUDE_TESTS=OFF
+    -DLLVM_BUILD_TESTS=OFF
+    -DLLVM_TOOL_LTO_BUILD=OFF
+    -DBUILD_SHARED_LIBS=OFF
+)
+
 ninja_args=()
 if [[ -n "$NINJA_JOBS" ]]; then
     ninja_args=(-j "$NINJA_JOBS")
@@ -246,6 +267,7 @@ if [[ -n "$NINJA_JOBS" ]]; then
 fi
 echo "  Link jobs:        $LINK_JOBS"
 echo "  Linker:           lld ($LLD)"
+echo "  Release sancov:   $SANCOV_TOOL_BUILD_DIR"
 echo
 
 echo "=== Instrumented tree (RelWithDebInfo + SanitizerCoverage, ninja all) ==="
@@ -255,6 +277,20 @@ echo "=== Instrumented tree (RelWithDebInfo + SanitizerCoverage, ninja all) ==="
         "$LLVM_DIR/llvm"
     ninja "${ninja_args[@]}"
 )
+
+echo "=== Release sancov tool (no SanitizerCoverage) ==="
+mkdir -p "$SANCOV_TOOL_BUILD_DIR"
+(
+    cd "$SANCOV_TOOL_BUILD_DIR"
+    cmake "${SANCOV_TOOL_CMAKE_ARGS[@]}" \
+        "$LLVM_DIR/llvm"
+    ninja "${ninja_args[@]}" sancov
+)
+if [[ ! -x "$SANCOV_TOOL_BUILD_DIR/bin/sancov" ]]; then
+    echo "Error: release sancov not found at $SANCOV_TOOL_BUILD_DIR/bin/sancov" >&2
+    exit 1
+fi
+cp -f "$SANCOV_TOOL_BUILD_DIR/bin/sancov" "$SANCOV_BUILD_DIR/bin/sancov"
 
 if [[ ! -f "$SANCOV_BUILD_DIR/test/lit.site.cfg.py" ]]; then
     echo "Error: test/lit.site.cfg.py not found under $SANCOV_BUILD_DIR" >&2
