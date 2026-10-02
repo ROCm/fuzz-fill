@@ -16,7 +16,8 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
                     fuzz-fill expects basic-block (bb) coverage; func or edge will likely break it.
   --targets <list>  Semicolon-separated LLVM_TARGETS_TO_BUILD (default: X86;AMDGPU;SPIRV)
   --enable-projects <list>
-                    Semicolon-separated LLVM_ENABLE_PROJECTS (default: clang).
+                    Semicolon-separated LLVM_ENABLE_PROJECTS (default: empty).
+                    Pass clang to build an instrumented Clang and its lit suite.
   --link-jobs <n>   Maximum concurrent link jobs (default: 8). Compile parallelism
                     stays at ninja_jobs.
   ninja_jobs        Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
@@ -35,7 +36,7 @@ BOOTSTRAP_BIN=""
 IGNORELIST=""
 INSTRUMENTATION_MODE="bb"
 TARGETS="X86;AMDGPU;SPIRV"
-ENABLE_PROJECTS="clang"
+ENABLE_PROJECTS=""
 LINK_JOBS="8"
 NINJA_JOBS=""
 

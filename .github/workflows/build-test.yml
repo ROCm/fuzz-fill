@@ -111,6 +111,7 @@ jobs:
             "${LLVM_PROJECT_DIR}" \
             "${LLVM_BUILD_DIR}" \
             --bootstrap-bin "${LLVM_RELEASE_BIN}" \
+            --enable-projects clang \
             "$(nproc)"
 
       - name: Install fuzz-fill venv

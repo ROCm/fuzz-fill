@@ -13,7 +13,7 @@ sancov_instrumentation_mode=""
 llvm_release_version="22.1.8"
 ninja_jobs=""
 llvm_targets=""
-llvm_enable_projects=""
+llvm_enable_projects="clang"
 no_cache=0
 
 usage() {
@@ -37,7 +37,7 @@ Options:
   --targets <list>               Semicolon-separated LLVM_TARGETS_TO_BUILD
                                  (default: X86;AMDGPU;SPIRV)
   --enable-projects <list>       Semicolon-separated LLVM_ENABLE_PROJECTS
-                                 (default: empty). Pass clang to enable the clang suite.
+                                 (default: clang)
   -j <n>, --jobs <n>             Parallel jobs for ninja when building LLVM (default: unconstrained)
   --no-cache                     Pass --no-cache to docker build (ignore layer cache)
 
