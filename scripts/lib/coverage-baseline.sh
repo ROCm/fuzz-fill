@@ -6,6 +6,10 @@
 #   COVERAGE_SANCOV, COVERAGE_LLVM_LIT, COVERAGE_LLC, COVERAGE_OPT
 #   LIT_ALLOW_FAILURES  — any non-empty value adds --lit-allow-failures
 #   JOBS                — parallel llvm-lit jobs (-j)
+#
+# Optional caller array:
+#   tests[]  — suite roots or subdirectories passed to llvm-lit (default: llvm/test)
+# Remaining arguments are --lit-filter regexes, applied once to every suite.
 
 : "${LIB_DIR:=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 # shellcheck source=scripts/lib/common.sh
@@ -15,6 +19,12 @@ run_coverage_baseline() {
     local output_dir="$1"
     shift
     local -a lit_filters=("$@")
+    local -a suites=()
+    if [[ -v tests ]] && [[ ${#tests[@]} -gt 0 ]]; then
+        suites=("${tests[@]}")
+    else
+        suites=(llvm/test)
+    fi
 
     local -a args=(
         python -m coverage baseline
@@ -34,7 +44,10 @@ run_coverage_baseline() {
         args+=(--opt "$COVERAGE_OPT")
     fi
 
-    local lit_filter
+    local suite lit_filter
+    for suite in "${suites[@]}"; do
+        args+=(--tests "$suite")
+    done
     for lit_filter in "${lit_filters[@]}"; do
         args+=(--lit-filter "$lit_filter")
     done

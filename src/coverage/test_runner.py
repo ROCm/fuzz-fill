@@ -24,11 +24,12 @@ from coverage.constants import (
 )
 from coverage.filepaths import Filepaths
 from coverage.lit_config import (
-    ensure_lit_sancov_env_forwarding,
+    build_lit_filter_regex,
+    ensure_lit_suites_sancov_env_forwarding,
     filter_existing_lit_priority_tests,
-    lit_test_suite_path,
+    is_llvm_lit_suite,
     resolve_lit_job_count,
-    resolved_lit_filter,
+    resolve_lit_suite_paths,
     seed_lit_priority_test_times,
 )
 from coverage.line_coverage_summary import write_line_coverage_summary_splits
@@ -123,6 +124,7 @@ class TestRunner:
         self,
         mode: str,
         filepaths: Filepaths,
+        lit_suites: list[str] | None = None,
         lit_filters: list[str] | None = None,
         jobs: int | None = None,
         lit_verbose: bool = False,
@@ -148,7 +150,13 @@ class TestRunner:
         self.filepaths.output_dir.mkdir(parents=True, exist_ok=True)
 
         if self.mode == "lit":
-            self._lit_filter = resolved_lit_filter(lit_filters)
+            if not lit_suites:
+                raise ValueError(
+                    "--tests is required (<project>/test, optionally with a subdirectory)"
+                )
+            self._lit_suites = list(lit_suites)
+            filters = [item for item in (lit_filters or []) if item.strip()]
+            self._lit_filter = build_lit_filter_regex(filters) if filters else None
             self.raw_sancov_output_dir.mkdir(parents=True, exist_ok=True)
 
         elif self.mode == "standalone":
@@ -166,7 +174,6 @@ class TestRunner:
             self.standalone_total_tests = 0
             self.standalone_tests_complete = 0
             self.standalone_tests_skipped = 0
-
     def ubsan_environ_with_coverage(self, out_dir: str | None = None) -> dict[str, str]:
         env = os.environ.copy()
 
@@ -202,15 +209,17 @@ class TestRunner:
             raise ValueError(f"Invalid mode: {self.mode!r}")
 
     def run_lit_tests(self) -> None:
-        """Run llvm-lit with SanitizerCoverage output under ``output_dir``."""
+        """Run llvm-lit once, passing every suite and one shared ``--filter``."""
 
         if any(self.raw_sancov_output_dir.glob("*.sancov")):
             print(f"Sancov files already exist in {self.raw_sancov_output_dir}, skipping lit tests")
             return
 
         llvm_lit = self.filepaths.llvm_lit
-        lit_site_cfg = ensure_lit_sancov_env_forwarding(llvm_lit)
-        if self.lit_priority_slow_tests:
+        patched_cfgs = ensure_lit_suites_sancov_env_forwarding(llvm_lit, self._lit_suites)
+        if self.lit_priority_slow_tests and any(
+            is_llvm_lit_suite(suite) for suite in self._lit_suites
+        ):
             priority_tests = filter_existing_lit_priority_tests(
                 llvm_lit,
                 BASELINE_LIT_PRIORITY_TESTS,
@@ -223,67 +232,69 @@ class TestRunner:
                     "source tree; skipping .lit_test_times.txt seeding",
                     flush=True,
                 )
-        lit_suite = lit_test_suite_path(llvm_lit)
-        if not lit_suite.is_dir():
-            raise FileNotFoundError(
-                f"LLVM lit test suite not found at {lit_suite}. "
-                "Expected an instrumented LLVM build configured with the "
-                "in-tree test suite (same layout as `ninja check-llvm`)."
-            )
 
         lit_jobs = resolve_lit_job_count(self.jobs)
         lit_report_path = self.filepaths.output_dir / DEFAULT_LIT_FAILURES_REPORT
-        argv = [
-            sys.executable,
-            str(llvm_lit),
-            str(lit_suite),
-            f"--filter={self._lit_filter}",
-            f"-j{lit_jobs}",
-            "--time-tests",
-            "-o",
-            str(lit_report_path),
-            "--report-failures-only",
-        ]
-        if self.lit_verbose:
-            argv.append("-vv")
+        suite_paths = resolve_lit_suite_paths(llvm_lit, self._lit_suites)
         cwd = llvm_lit.parent.parent
         env = self.ubsan_environ_with_coverage()
+        argv = [sys.executable, str(llvm_lit), *[str(path) for path in suite_paths]]
+        if self._lit_filter is not None:
+            argv.append(f"--filter={self._lit_filter}")
+        argv.extend(
+            [
+                f"-j{lit_jobs}",
+                "--time-tests",
+                "-o",
+                str(lit_report_path),
+                "--report-failures-only",
+            ]
+        )
+        if self.lit_verbose:
+            argv.append("-vv")
+
         if self.debug:
             print(f"\tRunning: {argv})")
             print(f"\tUBSAN_OPTIONS: {env['UBSAN_OPTIONS']}")
             print(f"\tCWD: {cwd}")
-            print(f"\tLit site config: {lit_site_cfg}")
+            print(f"\tLit site configs: {patched_cfgs}")
             print(f"\tCoverage directory: {self.raw_sancov_output_dir}")
-        else:
-            logger.debug("running %s", argv)
-            logger.debug("cwd: %s", cwd)
-            started = time.perf_counter()
-            lit_proc = subprocess.Popen(
-                argv,
-                cwd=cwd,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            assert lit_proc.stdout is not None
-            for line in lit_proc.stdout:
-                print(line, end="", flush=True)
-                if _lit_selected_no_tests(line):
-                    self._lit_selected_no_tests = True
-            returncode = lit_proc.wait()
-            logger.info(
-                "llvm-lit finished in %.2fs", time.perf_counter() - started
-            )
-            if returncode != 0:
-                if self.lit_allow_failures:
-                    print(
-                        f"warning: llvm-lit exited with code {returncode}; "
-                        "continuing baseline coverage (--lit-allow-failures)",
-                        flush=True,
-                    )
-                else:
-                    raise subprocess.CalledProcessError(returncode, argv)
+            return
+
+        logger.debug("running %s", argv)
+        logger.debug("cwd: %s", cwd)
+        started = time.perf_counter()
+        lit_proc = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        assert lit_proc.stdout is not None
+        selected_no_tests = False
+        for line in lit_proc.stdout:
+            print(line, end="", flush=True)
+            if _lit_selected_no_tests(line):
+                selected_no_tests = True
+        returncode = lit_proc.wait()
+        logger.info(
+            "llvm-lit (%s) finished in %.2fs",
+            ", ".join(self._lit_suites),
+            time.perf_counter() - started,
+        )
+        if returncode != 0:
+            if self.lit_allow_failures:
+                print(
+                    f"warning: llvm-lit exited with code {returncode}; "
+                    "continuing baseline coverage (--lit-allow-failures)",
+                    flush=True,
+                )
+            else:
+                raise subprocess.CalledProcessError(returncode, argv)
+
+        self._lit_selected_no_tests = selected_no_tests
 
     def _print_standalone_progress(self, label: str | None = None) -> None:
         remaining = (

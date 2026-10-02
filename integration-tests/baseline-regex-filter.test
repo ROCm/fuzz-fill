@@ -4,7 +4,7 @@
 # COM: filter were treated as a literal string, llvm-lit would match no tests.
 
 # RUN: rm -rf %t && mkdir -p %t/baseline
-# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter 'CodeGen/AMDGPU/loop-live-out-copy-undef-subrange[^/]*.ll' --lit-verbose --lit-allow-failures -j1 | tee %t/baseline.log
+# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --tests llvm/test/CodeGen/AMDGPU --lit-filter 'CodeGen/AMDGPU/loop-live-out-copy-undef-subrange[^/]*.ll' --lit-verbose --lit-allow-failures -j1 | tee %t/baseline.log
 
 # COM: --lit-verbose forwards -vv to llvm-lit; expect exactly one PASS line.
 # RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=REGEX_PASS

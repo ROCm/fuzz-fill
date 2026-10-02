@@ -114,6 +114,19 @@ config.substitutions.extend(
     ]
 )
 
+# Clang lit tests need an instrumented build configured with LLVM_ENABLE_PROJECTS=clang.
+# The AMDGPU allowlist does not instrument clang/lib; the suite only has to exist.
+_clang_lit_site = os.path.join(
+    os.path.dirname(_llvm_sancov_bin_dir),
+    "tools",
+    "clang",
+    "test",
+    "lit.site.cfg.py",
+)
+if os.path.isfile(_clang_lit_site):
+    config.available_features.add("clang-lit")
+    config.substitutions.append(("%clang-lit-site", shlex.quote(_clang_lit_site)))
+
 # E2E tests are opt-in: pass --param e2e=1 to enable them.
 if lit_config.params.get("e2e"):
     config.available_features.add("e2e")

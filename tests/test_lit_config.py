@@ -11,13 +11,22 @@ from coverage.constants import (
     BASELINE_LIT_PRIORITY_TESTS,
 )
 from coverage.lit_config import (
+    LitSuiteRun,
     _read_lit_test_times,
     _write_lit_test_times,
     build_lit_filter_regex,
+    ensure_lit_suites_sancov_env_forwarding,
     filter_existing_lit_priority_tests,
+    finalize_lit_suite_runs,
+    find_lit_site_config,
+    is_llvm_lit_suite,
+    lit_suite_root_name,
+    lit_suite_subdir,
+    lit_test_suite_path,
     lit_test_times_path,
     llvm_test_source_root,
-    resolved_lit_filter,
+    normalize_lit_suite_spec,
+    resolve_lit_suite_paths,
     seed_lit_priority_test_times,
 )
 
@@ -64,22 +73,134 @@ class TestBuildLitFilterRegex(unittest.TestCase):
         self.assertEqual(combined, r"(?:^|/)AMDGPU(?:/|$)")
 
 
-class TestResolvedLitFilter(unittest.TestCase):
-    def test_default(self) -> None:
-        self.assertEqual(resolved_lit_filter(None), r"(?:^|/)AMDGPU(?:/|$)")
-
-    def test_explicit_single(self) -> None:
+class TestLitSuiteSpec(unittest.TestCase):
+    def test_normalize_strips_slashes(self) -> None:
         self.assertEqual(
-            resolved_lit_filter(["CodeGen/SPIRV"]),
-            "CodeGen/SPIRV",
+            normalize_lit_suite_spec("/llvm/test/CodeGen/AMDGPU/"),
+            "llvm/test/CodeGen/AMDGPU",
         )
 
-    def test_explicit_multiple(self) -> None:
+    def test_root_and_subdir(self) -> None:
+        self.assertEqual(lit_suite_root_name("llvm/test"), "llvm/test")
+        self.assertEqual(lit_suite_subdir("llvm/test"), "")
         self.assertEqual(
-            resolved_lit_filter(["CodeGen/AMDGPU", "Transforms/InstCombine/AMDGPU"]),
-            "CodeGen/AMDGPU|Transforms/InstCombine/AMDGPU",
+            lit_suite_root_name("llvm/test/CodeGen/AMDGPU"),
+            "llvm/test",
         )
+        self.assertEqual(
+            lit_suite_subdir("llvm/test/CodeGen/AMDGPU"),
+            "CodeGen/AMDGPU",
+        )
+        self.assertEqual(
+            lit_suite_root_name("clang/test/Sema"),
+            "clang/test",
+        )
+        self.assertEqual(lit_suite_root_name("lld/test/ELF"), "lld/test")
+        self.assertEqual(lit_suite_subdir("lld/test/ELF"), "ELF")
+        self.assertTrue(is_llvm_lit_suite("llvm/test/MC/AMDGPU"))
+        self.assertFalse(is_llvm_lit_suite("clang/test"))
 
+    def test_unsupported_suite(self) -> None:
+        with self.assertRaises(ValueError):
+            lit_suite_root_name("CodeGen/AMDGPU")
+
+
+class TestResolveLitSuitePaths(unittest.TestCase):
+    def test_root_and_subdirectory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build_root = Path(tmp) / "build"
+            llvm_lit = build_root / "bin" / "llvm-lit"
+            suite_root = lit_test_suite_path(llvm_lit)
+            suite_root.mkdir(parents=True)
+            llvm_lit.parent.mkdir(parents=True)
+
+            self.assertEqual(
+                resolve_lit_suite_paths(llvm_lit, ["llvm/test"]),
+                [suite_root],
+            )
+            self.assertEqual(
+                resolve_lit_suite_paths(
+                    llvm_lit,
+                    ["llvm/test/CodeGen/AMDGPU"],
+                ),
+                [suite_root / "CodeGen" / "AMDGPU"],
+            )
+            clang_root = build_root / "tools" / "clang" / "test"
+            lld_root = build_root / "tools" / "lld" / "test"
+            clang_root.mkdir(parents=True)
+            lld_root.mkdir(parents=True)
+            self.assertEqual(
+                resolve_lit_suite_paths(llvm_lit, ["clang/test/Sema", "lld/test/ELF"]),
+                [clang_root / "Sema", lld_root / "ELF"],
+            )
+
+
+class TestLitSuiteRun(unittest.TestCase):
+    def test_unfiltered_suite(self) -> None:
+        run = LitSuiteRun(suite="llvm/test")
+        self.assertIsNone(run.lit_filter())
+
+    def test_single_filter(self) -> None:
+        run = LitSuiteRun(suite="llvm/test", filters=["CodeGen/AMDGPU"])
+        self.assertEqual(run.lit_filter(), "CodeGen/AMDGPU")
+
+    def test_multiple_filters_or(self) -> None:
+        run = LitSuiteRun(
+            suite="llvm/test",
+            filters=["CodeGen/AMDGPU", "MC/AMDGPU"],
+        )
+        self.assertEqual(run.lit_filter(), "CodeGen/AMDGPU|MC/AMDGPU")
+
+    def test_finalize_accepts_subdirectory(self) -> None:
+        runs = finalize_lit_suite_runs(
+            [LitSuiteRun(suite="llvm/test/CodeGen/AMDGPU")]
+        )
+        self.assertEqual(runs[0].suite, "llvm/test/CodeGen/AMDGPU")
+
+    def test_finalize_requires_tests(self) -> None:
+        with self.assertRaises(ValueError):
+            finalize_lit_suite_runs(None)
+        with self.assertRaises(ValueError):
+            finalize_lit_suite_runs([])
+
+    def test_finalize_rejects_unknown_suite(self) -> None:
+        with self.assertRaises(ValueError):
+            finalize_lit_suite_runs([LitSuiteRun(suite="CodeGen/AMDGPU")])
+
+
+class TestLitSiteConfigDiscovery(unittest.TestCase):
+    def test_walks_up_to_suite_site_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build_root = Path(tmp) / "build"
+            llvm_lit = build_root / "bin" / "llvm-lit"
+            llvm_lit.parent.mkdir(parents=True)
+            for relative in (
+                Path("test") / "lit.site.cfg.py",
+                Path("tools") / "lld" / "test" / "lit.site.cfg.py",
+            ):
+                path = build_root / relative
+                path.parent.mkdir(parents=True)
+                path.write_text("config.test_exec_root = path(r'.')\n", encoding="utf-8")
+
+            lld_case = build_root / "tools" / "lld" / "test" / "ELF"
+            self.assertEqual(
+                find_lit_site_config(lld_case, build_root),
+                build_root / "tools" / "lld" / "test" / "lit.site.cfg.py",
+            )
+
+            patched = ensure_lit_suites_sancov_env_forwarding(
+                llvm_lit,
+                ["llvm/test/CodeGen/AMDGPU", "lld/test/ELF", "llvm/test/MC/AMDGPU"],
+            )
+            self.assertEqual(
+                patched,
+                [
+                    build_root / "test" / "lit.site.cfg.py",
+                    build_root / "tools" / "lld" / "test" / "lit.site.cfg.py",
+                ],
+            )
+            for path in patched:
+                self.assertIn("fuzz-fill: SanitizerCoverage env forwarding", path.read_text())
 
 class LitTestTimesIOTest(unittest.TestCase):
     def test_read_skips_malformed_lines(self) -> None:
