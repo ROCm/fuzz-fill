@@ -2,10 +2,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Default LIT --filter= regex (AMDGPU path component; see scripts/lit-filters-amdgpu.sh).
-DEFAULT_LIT_FILTER_DIRS = [r"(?:^|/)AMDGPU(?:/|$)"]
 # Default symcov source-path regex for incremental gap scoping (--source-filter).
-DEFAULT_SOURCE_CODE_FILTER = r"(?:^|/)llvm/lib/"
+# Matches llvm/lib and clang/lib path components at the same time.
+DEFAULT_SOURCE_CODE_FILTER = r"(?:^|/)(?:llvm|clang)/lib/"
 
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "coverage_output" / f"cov_<timestamp>"
 

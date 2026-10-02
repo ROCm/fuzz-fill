@@ -1,14 +1,21 @@
 # REQUIRES: e2e, e2e-bootstrap, gh-token
 # COM: End-to-end PR gap finding for llvm/llvm-project#214457.
-# COM: Clones llvm-project, builds SanitizerCoverage, runs the full amdgpu
-# COM: baseline slice, and checks that the PR's added line in SIFoldOperands.cpp
+# COM: Clones llvm-project, classifies scope with --auto, builds SanitizerCoverage,
+# COM: runs gap finding, and checks that the PR's added line in SIFoldOperands.cpp
 # COM: is reported as uncovered.
 
 # RUN: rm -rf %t && mkdir -p %t
 # RUN: %if e2e-llvm-mirror %{ %repo-root/scripts/prepare-pr-llvm.sh --pr-id 214457 --dest %t/llvm-project --reference %e2e-llvm-mirror --partial-reference --no-self-contained --squash-commit-file %t/squash-commit %} %else %{ %repo-root/scripts/prepare-pr-llvm.sh --pr-id 214457 --dest %t/llvm-project --plain-clone --squash-commit-file %t/squash-commit %}
-# RUN: test -x %t/build-sancov/bin/llvm-lit || %repo-root/scripts/build-llvm-sancov.sh %repo-root/scripts/allowlist-amdgpu.txt %t/llvm-project %t/build-sancov --bootstrap-bin %e2e-bootstrap-bin
-# RUN: bash -c '%repo-root/scripts/gap-finding-pr.sh --output-dir %t/out --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --commit "$(cat %t/squash-commit)" --backend-tests amdgpu'
-# RUN: %repo-root/scripts/gap-finding-baseline.sh --output-dir %t/out-direct --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --backend-tests amdgpu
+# RUN: bash -c '%gap-scope --llvm-repo %t/llvm-project --commit "$(cat %t/squash-commit)" > %t/scope.txt'
+# RUN: %FileCheck %s --input-file=%t/scope.txt --check-prefix=SCOPE
+# SCOPE: action=run
+# SCOPE: rule=1
+# SCOPE: backends=X86;AMDGPU
+# SCOPE: tests=llvm/test
+# SCOPE: allowlist={{.*}}allowlist-llvm.txt
+# RUN: bash -c 'eval "$(sed -n "s/^backends=/export BACKENDS=/p;s/^allowlist=/export ALLOWLIST=/p;s/^tests=/export TESTS=/p" %t/scope.txt)"; REPO_ROOT=%repo-root; source "$REPO_ROOT/scripts/lib/gap-scope.sh"; test -x %t/build-sancov/bin/llvm-lit || { projects="$(gap_scope_enable_projects_for_allowlist "$ALLOWLIST")"; build_args=("$REPO_ROOT/scripts/build-llvm-sancov.sh" "$ALLOWLIST" %t/llvm-project %t/build-sancov --bootstrap-bin %e2e-bootstrap-bin --targets "$BACKENDS"); if [[ -n "$projects" ]]; then build_args+=(--enable-projects "$projects"); fi; "${build_args[@]}"; }'
+# RUN: bash -c '%repo-root/scripts/gap-finding-pr.sh --output-dir %t/out --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --commit "$(cat %t/squash-commit)" --auto'
+# RUN: bash -c 'eval "$(sed -n "s/^tests=/export TESTS=/p" %t/scope.txt)"; suites=(); IFS=","; for s in $TESTS; do suites+=(--tests "$s"); done; %repo-root/scripts/gap-finding-baseline.sh --output-dir %t/out-direct --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin "${suites[@]}"'
 
 # RUN: test -f %t/out/baseline/line_coverage_uncovered.csv
 # RUN: test -f %t/out/baseline/line_coverage_uncovered_pruned.csv
@@ -51,7 +58,7 @@
 # TARGET_PRUNED: {{.*}}SIFoldOperands.cpp,1712,
 
 # COM: Gap filling (baseline gaps): pinned candidate from integration-tests/e2e/fixtures/.
-# COM: Recalibrate GAP_FILL_* FileCheck lines if the fixture .bc or amdgpu baseline changes:
+# COM: Recalibrate GAP_FILL_* FileCheck lines if the fixture .bc or auto-scoped baseline changes:
 # COM: run gap-filling.sh against this test's gap-finding artifacts and update the prefixes below.
 # RUN: %repo-root/scripts/gap-filling.sh --output-dir %t/gap-fill-baseline --line-coverage-uncovered-csv %t/out/baseline/line_coverage_uncovered_pruned.csv --llc-address-line-map-csv %t/out/baseline/llc_address_line_map.csv --candidate-tests-dir %S/../fixtures/candidate-tests --settings-csv %S/../fixtures/candidate-test-settings-e2e.csv -n 1 --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin -j 2
 # RUN: test -f %t/gap-fill-baseline/candidate_tests/candidate_test_manifest.csv

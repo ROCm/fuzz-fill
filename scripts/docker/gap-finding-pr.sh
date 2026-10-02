@@ -15,6 +15,9 @@ if [[ "${IN_CONTAINER:-}" == 1 ]]; then
     commit="${COMMIT_REV:-$(git -C /work/llvm-project rev-parse HEAD)}"
 
     mapfile -t lit_filters < /mounted-output/.lit-filters
+    if [[ -s /mounted-output/.gap-test-suites ]]; then
+        mapfile -t tests < /mounted-output/.gap-test-suites
+    fi
 
     export LIT_ALLOW_FAILURES=1
 
@@ -60,7 +63,8 @@ Required:
 
 Options:
 $(docker_gap_finding_usage_image_build_options)
-  --lit-filter <dir>       LIT regex prefix; repeat for multiple (default values available in: scripts/lit-filters-amdgpu.sh for amdgpu, scripts/lit-filters-spirv.sh for spirv)
+  --tests <suite>          Lit suite (<project>/test or a subdirectory; default: image suites)
+  --lit-filter <regex>     llvm-lit --filter= regex for every suite; repeatable
   --commit <rev>           Revision for added_lines (default: HEAD in image llvm-project)
   --bind-repo              Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
   -j <n>, --jobs <n>       Parallel jobs for llvm-lit; with --build-image, also for ninja
@@ -68,10 +72,10 @@ $(docker_gap_finding_usage_image_build_options)
 
 Examples:
   $(basename "$0") --build-image --llvm-repo /path/llvm-project --pr-id 203468 \\
-      --backend-tests amdgpu --output-dir ./data/gap-finding-pr-203468 -j "\$(nproc)"
+      --auto --output-dir ./data/gap-finding-pr-203468 -j "\$(nproc)"
   $(basename "$0") --pr-id 203468 --output-dir ./data/gap-finding-pr-203468
   $(basename "$0") --pr-id 203468 --output-dir ./data/gap-finding-pr-203468 \\
-      --lit-filter CodeGen/AMDGPU -j "\$(nproc)"
+      --tests llvm/test --lit-filter CodeGen/AMDGPU -j "\$(nproc)"
 EOF
 }
 
@@ -90,13 +94,13 @@ if ! docker_gap_finding_validate_host_prerequisites; then
     exit 1
 fi
 
-DOCKER_IMAGE_MISSING_HINT="pass --build-image with --llvm-repo and --backend-tests to build it first"
+DOCKER_IMAGE_MISSING_HINT="pass --build-image with --llvm-repo and --auto (or --backends/--tests/--allowlist) to build it first"
 docker_image_cli_prepare
 
-docker_gap_default_lit_filters_from_image
+docker_gap_default_lit_suites_from_image
 
 docker_gap_finding_prepare_output_dir
-docker_gap_finding_write_lit_filters_file
+docker_gap_finding_write_scope_files
 
 docker_env=(-e "IN_CONTAINER=1")
 if [[ -n "$commit_rev" ]]; then
@@ -107,6 +111,9 @@ docker_gap_finding_prepare_and_run docker_env
 report="${output_dir}/commit_lines_report/target_lines_uncovered.csv"
 echo "Wrote ${report}"
 echo "Image: ${image_ref}"
-echo "LIT filters: ${lit_filters[*]}"
+echo "LIT suites: ${tests[*]}"
+if [[ ${#lit_filters[@]} -gt 0 ]]; then
+    echo "LIT filters: ${lit_filters[*]}"
+fi
 
 emit_lit_failures_warning "$output_dir" "target_lines_uncovered.csv"
