@@ -14,6 +14,7 @@ from coverage.line_rules import (
 )
 
 FILE = "/build/llvm/llvm/lib/Foo.cpp"
+CLANG_FILE = "/src/clang/lib/Sema/Sema.cpp"
 OTHER_FILE = "/build/llvm/llvm/include/Bar.h"
 LIBEXTRA_FILE = "/build/llvm/llvm/libextra/Baz.cpp"
 
@@ -54,9 +55,13 @@ class FilterUncoveredLinesTest(unittest.TestCase):
         self.assertEqual(filter_uncovered_lines(uncovered, ""), uncovered)
 
     def test_default_filter_keeps_matching_files_only(self) -> None:
-        uncovered = frozenset({(FILE, 10), (OTHER_FILE, 20), (FILE, 30)})
+        uncovered = frozenset(
+            {(FILE, 10), (CLANG_FILE, 15), (OTHER_FILE, 20), (FILE, 30)}
+        )
         filtered = filter_uncovered_lines(uncovered, DEFAULT_SOURCE_CODE_FILTER)
-        self.assertEqual(filtered, frozenset({(FILE, 10), (FILE, 30)}))
+        self.assertEqual(
+            filtered, frozenset({(FILE, 10), (CLANG_FILE, 15), (FILE, 30)})
+        )
 
     def test_default_filter_excludes_libextra_paths(self) -> None:
         uncovered = frozenset({(LIBEXTRA_FILE, 10), (FILE, 20)})

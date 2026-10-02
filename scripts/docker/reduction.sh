@@ -62,7 +62,10 @@ Image build (optional; reuses existing image when omitted):
   --force-build                 Rebuild PR image even when the tag already exists
   --keep-image                  Keep PR image after run (default: remove when --build-image)
   --llvm-repo <path>            Local llvm-project clone (required with --build-image)
-  --backend-tests <target>      amdgpu or spirv (required with --build-image)
+  --auto                        Derive backends, tests, and allowlist from the PR
+  --backends <list>             LLVM_TARGETS_TO_BUILD for --build-image
+  --tests <suite>               Lit suite for --build-image (repeatable)
+  --allowlist <path|preset>     Allowlist for --build-image
   --github-repo <owner/repo>    GitHub repo hosting the PR (default: llvm/llvm-project)
   --image-name <name>           Image name when using --pr-id (default: fuzz-fill-test)
 
@@ -162,7 +165,7 @@ fi
 
 validate_jobs "$jobs"
 
-DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --backend-tests"
+DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --auto (or --backends/--tests/--allowlist)"
 docker_image_cli_prepare
 
 echo "Using gap-fill output:"

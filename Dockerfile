@@ -77,6 +77,9 @@ RUN --mount=type=bind,from=llvm,source=.,target=/llvm-src,ro \
 COPY scripts/build-llvm-sancov.sh /usr/local/bin/
 COPY scripts/allowlist-amdgpu.txt /work/allowlist-amdgpu.txt
 COPY scripts/allowlist-spirv.txt /work/allowlist-spirv.txt
+COPY scripts/allowlist-llvm.txt /work/allowlist-llvm.txt
+COPY scripts/allowlist-clang.txt /work/allowlist-clang.txt
+COPY scripts/allowlist-llvm-clang.txt /work/allowlist-llvm-clang.txt
 RUN chmod +x /usr/local/bin/build-llvm-sancov.sh
 
 ARG SANCOV_ALLOWLIST=amdgpu
@@ -84,6 +87,7 @@ ARG SANCOV_INSTRUMENTATION_MODE=bb
 ARG NINJA_JOBS=""
 ARG LLVM_TARGETS_TO_BUILD="X86;AMDGPU;SPIRV"
 ARG LLVM_ENABLE_PROJECTS=""
+ARG GAP_TEST_SUITES="llvm/test"
 RUN case "${SANCOV_INSTRUMENTATION_MODE:-bb}" in \
         func|bb|edge) sancov_mode="${SANCOV_INSTRUMENTATION_MODE:-bb}" ;; \
         *) echo "error: SANCOV_INSTRUMENTATION_MODE must be func, bb, or edge: ${SANCOV_INSTRUMENTATION_MODE:-<unset>}" >&2; exit 1 ;; \
@@ -91,16 +95,21 @@ RUN case "${SANCOV_INSTRUMENTATION_MODE:-bb}" in \
  && case "${SANCOV_ALLOWLIST}" in \
         amdgpu) allowlist=/work/allowlist-amdgpu.txt ;; \
         spirv) allowlist=/work/allowlist-spirv.txt ;; \
-        *) echo "error: unsupported SANCOV_ALLOWLIST: ${SANCOV_ALLOWLIST} (expected amdgpu or spirv)" >&2; exit 1 ;; \
+        llvm) allowlist=/work/allowlist-llvm.txt ;; \
+        clang) allowlist=/work/allowlist-clang.txt ;; \
+        llvm-clang) allowlist=/work/allowlist-llvm-clang.txt ;; \
+        *) echo "error: unsupported SANCOV_ALLOWLIST: ${SANCOV_ALLOWLIST} (expected amdgpu, spirv, llvm, clang, or llvm-clang)" >&2; exit 1 ;; \
     esac \
  && echo "${SANCOV_ALLOWLIST}" > /work/.sancov-allowlist \
  && echo "${sancov_mode}" > /work/.sancov-instrumentation-mode \
  && echo "${LLVM_TARGETS_TO_BUILD}" > /work/.llvm-targets \
  && echo "${LLVM_ENABLE_PROJECTS}" > /work/.llvm-enable-projects \
+ && printf '%s\n' ${GAP_TEST_SUITES} > /work/.gap-test-suites \
  && echo "=== fuzz-fill: SanitizerCoverage allowlist = ${SANCOV_ALLOWLIST} ===" \
  && echo "=== fuzz-fill: SanitizerCoverage instrumentation mode = ${sancov_mode} (default: bb) ===" \
  && echo "=== fuzz-fill: LLVM_TARGETS_TO_BUILD = ${LLVM_TARGETS_TO_BUILD} ===" \
  && echo "=== fuzz-fill: LLVM_ENABLE_PROJECTS = ${LLVM_ENABLE_PROJECTS:-<none>} ===" \
+ && echo "=== fuzz-fill: gap test suites = ${GAP_TEST_SUITES} ===" \
  && llvm_build_start=$(date +%s) \
  && /usr/local/bin/build-llvm-sancov.sh \
         "${allowlist}" \
@@ -133,6 +142,7 @@ COPY --chown=${UID}:${GID} --from=llvm-builder /work/.sancov-allowlist /work/.sa
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.sancov-instrumentation-mode /work/.sancov-instrumentation-mode
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.llvm-targets /work/.llvm-targets
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.llvm-enable-projects /work/.llvm-enable-projects
+COPY --chown=${UID}:${GID} --from=llvm-builder /work/.gap-test-suites /work/.gap-test-suites
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.llvm-build-time /work/.llvm-build-time
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-project /work/llvm-project
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-build-sancov /work/llvm-build-sancov
@@ -148,6 +158,7 @@ RUN echo "=== fuzz-fill image LLVM source: $(cat /work/.llvm-source) ===" \
  && echo "=== fuzz-fill image SanitizerCoverage instrumentation mode: $(cat /work/.sancov-instrumentation-mode) ===" \
  && echo "=== fuzz-fill image LLVM_TARGETS_TO_BUILD: $(cat /work/.llvm-targets) ===" \
  && echo "=== fuzz-fill image LLVM_ENABLE_PROJECTS: $(cat /work/.llvm-enable-projects) ===" \
+ && echo "=== fuzz-fill image gap test suites: $(tr '\n' ' ' < /work/.gap-test-suites) ===" \
  && echo "=== fuzz-fill image LLVM build wall time: $(cat /work/.llvm-build-time)s ==="
 
 USER "${UID}"
