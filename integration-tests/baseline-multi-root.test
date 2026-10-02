@@ -1,0 +1,36 @@
+# COM: Run one llvm-lit process over two suite roots: an AMDGPU codegen
+# COM: directory and a Clang Sema directory. The AMDGPU allowlist does not
+# COM: instrument clang/lib, so coverage must still come from the AMDGPU test.
+# REQUIRES: clang-lit
+
+# RUN: rm -rf %t && mkdir -p %t/baseline
+# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --tests llvm/test/CodeGen/AMDGPU --tests clang/test/Sema --lit-filter 'CodeGen/AMDGPU/loop-live-out-copy-undef-subrange\.ll$' --lit-filter 'Sema/warn-unused-variables\.c$' --lit-verbose --lit-allow-failures -j1 | tee %t/baseline.log
+
+# COM: Both roots ran in the one llvm-lit invocation.
+# RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=BOTH
+# BOTH-DAG: CodeGen/AMDGPU/loop-live-out-copy-undef-subrange.ll
+# BOTH-DAG: Sema/warn-unused-variables.c
+# RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=PASS_COUNT
+# PASS_COUNT-COUNT-2: PASS:
+# RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=ALLOW_OK
+# ALLOW_OK-NOT: warning: llvm-lit exited with code
+
+# COM: The Clang suite config was found by walking up from clang/test/Sema.
+# RUN: %FileCheck %s --input-file=$(dirname $(dirname %llvm-lit))/tools/clang/test/lit.site.cfg.py --check-prefix=CLANG_SITE
+# CLANG_SITE: fuzz-fill: SanitizerCoverage env forwarding
+
+# RUN: test -f %t/baseline/line_coverage_summary.csv
+# RUN: test -f %t/baseline/line_coverage_uncovered.csv
+# RUN: test -f %t/baseline/llc_address_line_map.csv
+# RUN: test -f %t/baseline/lit_failures.json
+
+# RUN: %FileCheck %s --input-file=%t/baseline/lit_failures.json --check-prefix=LIT_FAILURES
+# LIT_FAILURES: "tests": []
+# LIT_FAILURES-NOT: "code":
+
+# COM: AMDGPU code was executed. clang/lib was not instrumented.
+# RUN: %FileCheck %s --input-file=%t/baseline/llc_address_line_map.csv --check-prefix=COVERAGE
+# COVERAGE: file,line,point
+# COVERAGE: {{.*}}/AMDGPU/{{.*}}.cpp,{{[0-9]+}},0x{{[0-9a-f]+}}
+# RUN: %FileCheck %s --input-file=%t/baseline/line_coverage_summary.csv --check-prefix=NO_CLANG
+# NO_CLANG-NOT: clang/lib/

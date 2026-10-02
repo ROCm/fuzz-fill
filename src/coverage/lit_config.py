@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from coverage.constants import (
     BASELINE_LIT_PRIORITY_ELAPSED,
-    DEFAULT_LIT_FILTER_DIRS,
     MAX_LIT_JOBS,
 )
 
 LIT_SITE_CONFIG_REL = Path("test/lit.site.cfg.py")
+LIT_SITE_CONFIG_NAME = "lit.site.cfg.py"
 LIT_TEST_TIMES_NAME = ".lit_test_times.txt"
+_LIT_SUITE_SPEC_RE = re.compile(
+    r"^(?P<project>[^/]+)/test(?:/(?P<subdir>.+))?$"
+)
 PATCH_MARKER = "# fuzz-fill: SanitizerCoverage env forwarding"
 _LLVM_SRC_ROOT_RE = re.compile(
     r"""config\.llvm_src_root\s*=\s*path\(r(?P<quote>["'])(?P<path>.+?)(?P=quote)\)"""
@@ -43,8 +47,101 @@ def lit_site_config_path(llvm_lit: Path) -> Path:
 
 
 def lit_test_suite_path(llvm_lit: Path) -> Path:
-    """Build-tree test suite entry point (same path ``check-llvm`` passes to llvm-lit)."""
+    """Build-tree llvm test suite entry point (same path ``check-llvm`` passes to llvm-lit)."""
     return llvm_build_root(llvm_lit) / "test"
+
+
+def lit_suite_build_root(llvm_lit: Path, suite: str) -> Path:
+    """Build-tree directory for a ``<project>/test`` suite.
+
+    ``llvm/test`` is ``<build>/test``. Every other in-tree project is
+    ``<build>/tools/<project>/test``.
+    """
+    project = lit_suite_root_name(suite).split("/", 1)[0]
+    build = llvm_build_root(llvm_lit)
+    if project == "llvm":
+        return build / "test"
+    return build / "tools" / project / "test"
+
+
+def normalize_lit_suite_spec(suite: str) -> str:
+    """Strip surrounding whitespace and slashes from a ``--tests`` value."""
+    return suite.strip().strip("/")
+
+
+def lit_suite_root_name(suite: str) -> str:
+    """Return ``<project>/test`` for a suite root or subdirectory.
+
+    Accepts ``llvm/test``, ``clang/test``, ``lld/test``, and paths under those
+    roots such as ``llvm/test/CodeGen/AMDGPU``.
+    """
+    name = normalize_lit_suite_spec(suite)
+    match = _LIT_SUITE_SPEC_RE.fullmatch(name)
+    if match is None:
+        raise ValueError(
+            f"unsupported lit suite {suite!r}; expected <project>/test "
+            "(optionally with a subdirectory)"
+        )
+    return f"{match.group('project')}/test"
+
+
+def lit_suite_subdir(suite: str) -> str:
+    """Suite-relative subdirectory under the lit root, or ``\"\"`` for the root."""
+    name = normalize_lit_suite_spec(suite)
+    root = lit_suite_root_name(name)
+    if name == root:
+        return ""
+    return name[len(root) + 1 :]
+
+
+def is_llvm_lit_suite(suite: str) -> bool:
+    """True when *suite* is under the llvm lit test tree."""
+    return lit_suite_root_name(suite) == "llvm/test"
+
+
+def resolve_lit_suite_paths(llvm_lit: Path, suites: list[str]) -> list[Path]:
+    """Map ``--tests`` specs to build-tree llvm-lit input paths.
+
+    The suite root (``<project>/test``) must exist in the build tree.
+    Subdirectories (``llvm/test/CodeGen/AMDGPU``) need not: lit walks up to the
+    suite ``lit.site.cfg.py`` and maps the rest through ``test_source_root``.
+    """
+    resolved: list[Path] = []
+    for suite in suites:
+        base = lit_suite_build_root(llvm_lit, suite)
+        if not base.is_dir():
+            raise FileNotFoundError(
+                f"Lit test suite not found at {base} for {suite!r}. "
+                "Expected an instrumented LLVM build that includes this suite."
+            )
+        subdir = lit_suite_subdir(suite)
+        resolved.append(base / subdir if subdir else base)
+    if not resolved:
+        raise ValueError("lit suites must not be empty")
+    return resolved
+
+
+def find_lit_site_config(suite_path: Path, build_root: Path) -> Path:
+    """Walk up from *suite_path* to the nearest ``lit.site.cfg.py`` in the build."""
+    build_root = build_root.resolve()
+    current = suite_path
+    while True:
+        try:
+            current.resolve().relative_to(build_root)
+        except ValueError:
+            break
+        candidate = current / LIT_SITE_CONFIG_NAME
+        if candidate.is_file():
+            return candidate
+        if current.resolve() == build_root:
+            break
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    raise FileNotFoundError(
+        f"lit.site.cfg.py not found at or above {suite_path} within {build_root}."
+    )
 
 
 def lit_test_times_path(llvm_lit: Path) -> Path:
@@ -158,17 +255,22 @@ def seed_lit_priority_test_times(
     return path
 
 
-def ensure_lit_sancov_env_forwarding(llvm_lit: Path) -> Path:
-    """Append fuzz-fill's lit env forwarding hook to the build site config.
+def ensure_lit_sancov_env_forwarding(
+    llvm_lit: Path,
+    *,
+    site_cfg: Path | None = None,
+) -> Path:
+    """Append fuzz-fill's lit env forwarding hook to a build site config.
 
     The patch is idempotent and is re-applied if CMake regenerates the file.
+    Defaults to the llvm ``test/lit.site.cfg.py``.
     """
-    path = lit_site_config_path(llvm_lit)
+    path = site_cfg if site_cfg is not None else lit_site_config_path(llvm_lit)
     if not path.is_file():
         raise FileNotFoundError(
             f"LLVM lit site config not found at {path}. "
             "Expected an instrumented LLVM build containing "
-            f"{LIT_SITE_CONFIG_REL} (--llvm-lit={llvm_lit})."
+            f"{path.relative_to(llvm_build_root(llvm_lit))} (--llvm-lit={llvm_lit})."
         )
 
     text = path.read_text(encoding="utf-8")
@@ -179,6 +281,25 @@ def ensure_lit_sancov_env_forwarding(llvm_lit: Path) -> Path:
         text += "\n"
     path.write_text(text + PATCH_SNIPPET, encoding="utf-8")
     return path
+
+
+def ensure_lit_suites_sancov_env_forwarding(
+    llvm_lit: Path,
+    suites: list[str],
+) -> list[Path]:
+    """Patch the ``lit.site.cfg.py`` discovered above each selected suite path."""
+    patched: list[Path] = []
+    seen: set[Path] = set()
+    build_root = llvm_build_root(llvm_lit)
+    for suite_path in resolve_lit_suite_paths(llvm_lit, suites):
+        site_cfg = find_lit_site_config(suite_path, build_root).resolve()
+        if site_cfg in seen:
+            continue
+        seen.add(site_cfg)
+        patched.append(
+            ensure_lit_sancov_env_forwarding(llvm_lit, site_cfg=site_cfg)
+        )
+    return patched
 
 
 def default_lit_job_count() -> int:
@@ -213,6 +334,26 @@ def build_lit_filter_regex(lit_filters: list[str]) -> str:
     return "|".join(normalized)
 
 
-def resolved_lit_filter(lit_filters: list[str] | None) -> str:
-    filters = lit_filters if lit_filters else DEFAULT_LIT_FILTER_DIRS
-    return build_lit_filter_regex(filters)
+@dataclass
+class LitSuiteRun:
+    """One lit suite invocation with an optional ``--filter=`` regex."""
+
+    suite: str
+    filters: list[str] = field(default_factory=list)
+
+    def lit_filter(self) -> str | None:
+        """Combined ``--filter=`` value, or ``None`` to run the suite unfiltered."""
+        if not self.filters:
+            return None
+        return build_lit_filter_regex(self.filters)
+
+
+def finalize_lit_suite_runs(runs: list[LitSuiteRun] | None) -> list[LitSuiteRun]:
+    """Validate and return suite/filter pairs for a baseline run."""
+    if not runs:
+        raise ValueError(
+            "--tests is required (<project>/test, optionally with a subdirectory)"
+        )
+    for run in runs:
+        lit_suite_root_name(run.suite)
+    return list(runs)

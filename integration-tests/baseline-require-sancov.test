@@ -4,13 +4,13 @@
 # COM: aggregation runs and the sancov check can fire.
 
 # RUN: rm -rf %t && mkdir -p %t/baseline-fail
-# RUN: %not %coverage baseline --output-dir %t/baseline-fail --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter 'CodeGen/AMDGPU/fuzz-fill-no-tests' --lit-allow-failures -j1 2>&1 | tee %t/fail.log
+# RUN: %not %coverage baseline --output-dir %t/baseline-fail --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --tests llvm/test/CodeGen/AMDGPU --lit-filter 'CodeGen/AMDGPU/fuzz-fill-no-tests' --lit-allow-failures -j1 2>&1 | tee %t/fail.log
 # RUN: %FileCheck %s --input-file=%t/fail.log --check-prefix=REQUIRE_ERR
 # REQUIRE_ERR: error: no sancov files found
 
 # COM: ``--no-require-sancov`` restores the previous empty-baseline behavior.
 # RUN: rm -rf %t/baseline-ok && mkdir -p %t/baseline-ok
-# RUN: %coverage baseline --output-dir %t/baseline-ok --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter 'CodeGen/AMDGPU/fuzz-fill-no-tests' --lit-allow-failures --no-require-sancov -j1 2>&1 | tee %t/ok.log
+# RUN: %coverage baseline --output-dir %t/baseline-ok --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --tests llvm/test/CodeGen/AMDGPU --lit-filter 'CodeGen/AMDGPU/fuzz-fill-no-tests' --lit-allow-failures --no-require-sancov -j1 2>&1 | tee %t/ok.log
 # RUN: test -f %t/baseline-ok/line_coverage_summary.csv
 # RUN: test -f %t/baseline-ok/line_coverage_covered.csv
 # RUN: test -f %t/baseline-ok/line_coverage_partially.csv

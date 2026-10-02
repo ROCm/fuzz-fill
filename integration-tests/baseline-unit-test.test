@@ -4,7 +4,7 @@
 # COM: and produces covered lines in the joint summary.
 
 # RUN: rm -rf %t && mkdir -p %t/baseline
-# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --lit-filter 'MC/AMDGPU/\./AMDGPUMCTests/0/' --lit-verbose --lit-allow-failures -j1 | tee %t/baseline.log
+# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --tests llvm/test --lit-filter 'MC/AMDGPU/\./AMDGPUMCTests/0/' --lit-verbose --lit-allow-failures -j1 | tee %t/baseline.log
 
 # RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=PASS
 # PASS-COUNT-1: PASS:

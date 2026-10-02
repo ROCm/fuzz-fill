@@ -5,6 +5,7 @@ from pathlib import Path
 
 from coverage.candidate_test_settings import load_llc_flag_variants
 from coverage.filepaths import Filepaths
+from coverage.lit_config import lit_suite_root_name, normalize_lit_suite_spec
 from coverage.test_runner import TestRunner
 from coverage.constants import (
     DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
@@ -48,6 +49,29 @@ from fuzz_fill.log import (
 )
 
 logger = get_logger("coverage")
+
+
+class _AppendLitSuiteAction(argparse.Action):
+    """Append one ``--tests`` suite after checking it is ``<project>/test``."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | list[str] | None,
+        option_string: str | None = None,
+    ) -> None:
+        assert isinstance(values, str)
+        try:
+            lit_suite_root_name(values)
+        except ValueError as exc:
+            parser.error(str(exc))
+        suites: list[str] | None = getattr(namespace, self.dest, None)
+        if suites is None:
+            suites = []
+            setattr(namespace, self.dest, suites)
+        suites.append(normalize_lit_suite_spec(values))
+
 
 def main():
 
@@ -107,14 +131,28 @@ def main():
         help=f"Path to the instrumented opt executable (or set {FUZZ_FILL_OPT}).",
     )
     p_baseline.add_argument(
+        "--tests",
+        action=_AppendLitSuiteAction,
+        dest="lit_suites",
+        default=None,
+        metavar="SUITE",
+        help=(
+            "Lit suite root or subdirectory to pass to llvm-lit, as "
+            "<project>/test or a path under it (for example "
+            "llvm/test/CodeGen/AMDGPU or lld/test/ELF). Repeatable and required. "
+            "Every suite is passed to one llvm-lit process."
+        ),
+    )
+    p_baseline.add_argument(
         "--lit-filter",
         action="append",
         dest="lit_filters",
-        default=None,
+        default=[],
         metavar="REGEX",
         help=(
-            "llvm-lit --filter= regex; repeat for multiple fragments "
-            "(OR'd into one --filter= value)."
+            "llvm-lit --filter= regex applied to every --tests suite. "
+            "Repeat to OR multiple fragments into that one filter. "
+            "Omit to run the suites unfiltered."
         ),
     )
     p_baseline.add_argument("-j", "--jobs", type=int, default=None,
@@ -312,6 +350,10 @@ def main():
         logger.debug("debug mode enabled")
 
     if args.subcmd == "baseline":
+        if not args.lit_suites:
+            parser.error(
+                "--tests is required (<project>/test, optionally with a subdirectory)"
+            )
         tools = baseline_tools_from_args(
             sancov=args.sancov,
             llvm_lit=args.llvm_lit,
@@ -325,6 +367,7 @@ def main():
                 test_runner = TestRunner(
                     mode="lit",
                     filepaths=filepaths,
+                    lit_suites=args.lit_suites,
                     lit_filters=args.lit_filters,
                     jobs=args.jobs,
                     lit_verbose=args.lit_verbose,
