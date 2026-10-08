@@ -69,6 +69,16 @@ def _find_unittests_executables(unittests_root: Path, tool: str) -> list[Path]:
     return matches
 
 
+def _is_lit_temporary_tool(tool: str) -> bool:
+    """True for a lit ``%t`` copy such as ``exec-options.ll.tmp.bin--``.
+
+    Lit names ``%t`` ``<test>.tmp``. Tests that copy an instrumented tool onto
+    that path emit sancov dumps under the copy's basename. Those copies are not
+    build products, so they are skipped. Any other missing binary still fails.
+    """
+    return ".tmp." in tool
+
+
 def _resolve_symbolize_target(bin_dir: Path, build_root: Path, tool: str) -> Path:
     """Locate the binary that produced ``<tool>.*.sancov`` dumps.
 
@@ -432,7 +442,16 @@ class TestRunner:
                         f"{removed} sancov dump(s); llvm-lit selected no tests",
                         flush=True,
                     )
-            tools = Sancov.discover_tools(self.raw_sancov_output_dir)
+            discovered = Sancov.discover_tools(self.raw_sancov_output_dir)
+            tools: list[str] = []
+            for tool in discovered:
+                if _is_lit_temporary_tool(tool):
+                    print(
+                        f"warning: skipping lit temporary coverage for {tool!r}",
+                        flush=True,
+                    )
+                    continue
+                tools.append(tool)
             if not tools:
                 if self.require_sancov:
                     raise SystemExit(
