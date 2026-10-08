@@ -15,7 +15,7 @@ after_tmp=$(mktemp)
 trap 'rm -f "$before_tmp" "$after_tmp"; rm -rf "$covdir"' EXIT
 find "$covdir" -maxdepth 1 -name 'llc.*.sancov' -type f 2>/dev/null | sort >"$before_tmp"
 
-UBSAN_OPTIONS="coverage=1:coverage_dir=$covdir" $LLC "$1"
+UBSAN_OPTIONS="coverage=1:coverage_dir=$covdir:print_coverage_summary=0" $LLC "$1"
 
 find "$covdir" -maxdepth 1 -name 'llc.*.sancov' -type f 2>/dev/null | sort >"$after_tmp"
 

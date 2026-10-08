@@ -193,7 +193,7 @@ class TestRunner:
         if not out_dir.exists():
             out_dir.mkdir(parents=True, exist_ok=True)
 
-        cov_opts = f"coverage=1:coverage_dir={out_dir}"
+        cov_opts = f"coverage=1:coverage_dir={out_dir}:print_coverage_summary=0"
         
         prev = env.get("UBSAN_OPTIONS", "").strip()
         env["UBSAN_OPTIONS"] = f"{cov_opts}:{prev}" if prev else cov_opts

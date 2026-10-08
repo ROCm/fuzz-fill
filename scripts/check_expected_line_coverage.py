@@ -45,7 +45,9 @@ def run_one_test(
     """Run a single llc test with ASan coverage enabled."""
     cmd = [str(llc_bin)] + test_cmd.split()[1:]
     env = os.environ.copy()
-    env['UBSAN_OPTIONS'] = f'coverage=1:coverage_dir={coverage_dir}'
+    env['UBSAN_OPTIONS'] = (
+        f'coverage=1:coverage_dir={coverage_dir}:print_coverage_summary=0'
+    )
     return subprocess.run(cmd, cwd=fuzzer_test_dir, capture_output=True, text=True, env=env)
 
 
