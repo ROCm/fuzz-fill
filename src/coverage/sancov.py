@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import re
 import shutil
 import subprocess
@@ -16,6 +17,17 @@ from fuzz_fill.log import get_logger, log_timing, run_subprocess
 logger = get_logger("coverage.sancov")
 
 _RAW_SANCOV_NAME = re.compile(r"^(?P<tool>.+)\.(?P<pid>\d+)\.sancov$")
+
+
+def _coverage_df_from_symcov_path(task: tuple[str, str]) -> pd.DataFrame:
+    """Load one merged symcov in a worker process."""
+    symcov_path, source_code_filter = task
+    try:
+        with open(symcov_path, encoding="utf-8") as handle:
+            symcov = json.load(handle)
+        return Sancov.get_coverage_df(symcov, source_code_filter)
+    except Exception as exc:
+        raise RuntimeError(f"failed to load symcov {symcov_path}") from exc
 
 
 class Sancov:
@@ -342,14 +354,30 @@ class Sancov:
     def load_coverage_dfs_from_sancovs(
         sancovs: list[Sancov],
         source_code_filter: str | None = None,
+        jobs: int | None = None,
     ) -> list[pd.DataFrame]:
-        """Load per-tool coverage frames from merged symcov paths on each Sancov."""
+        """Load per-tool coverage frames from merged symcov paths on each Sancov.
+
+        One process per tool, capped by ``jobs`` when it is set. Threads do not
+        overlap this walk: ``json`` and the pandas steps hold the GIL. Result
+        order matches ``sancovs``.
+        """
         if source_code_filter is None:
             source_code_filter = ""
-        return Sancov.load_coverage_dfs(
-            [s.get_merged_symcov_path() for s in sancovs],
-            source_code_filter,
-        )
+        paths = [s.get_merged_symcov_path() for s in sancovs]
+        if len(paths) <= 1:
+            return Sancov.load_coverage_dfs(paths, source_code_filter)
+
+        workers = len(paths)
+        if jobs is not None:
+            workers = min(jobs, workers)
+        if workers <= 1:
+            return Sancov.load_coverage_dfs(paths, source_code_filter)
+
+        tasks = [(str(path), source_code_filter) for path in paths]
+        with log_timing(logger, "symcov load"):
+            with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as pool:
+                return list(pool.map(_coverage_df_from_symcov_path, tasks, chunksize=1))
 
     def get_merged_sancov_path(self) -> Path:
         return self.output_dir / f"{self.suffix}.0.sancov"

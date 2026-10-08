@@ -36,8 +36,8 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: aws-linux-scale-rocm-medium-dev
-    timeout-minutes: 45
+    runs-on: aws-linux-scale-rocm-medium
+    timeout-minutes: 90
     permissions:
       contents: read
       actions: write

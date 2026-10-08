@@ -1,14 +1,25 @@
 # REQUIRES: e2e, e2e-bootstrap, gh-token
 # COM: End-to-end PR gap finding for llvm/llvm-project#214457.
-# COM: Clones llvm-project, builds SanitizerCoverage, runs the full amdgpu
-# COM: baseline slice, and checks that the PR's added line in SIFoldOperands.cpp
+# COM: Clones llvm-project, classifies scope with --auto, builds SanitizerCoverage,
+# COM: runs gap finding, and checks that the PR's added line in SIFoldOperands.cpp
 # COM: is reported as uncovered.
 
 # RUN: rm -rf %t && mkdir -p %t
 # RUN: %if e2e-llvm-mirror %{ %repo-root/scripts/prepare-pr-llvm.sh --pr-id 214457 --dest %t/llvm-project --reference %e2e-llvm-mirror --partial-reference --no-self-contained --squash-commit-file %t/squash-commit %} %else %{ %repo-root/scripts/prepare-pr-llvm.sh --pr-id 214457 --dest %t/llvm-project --plain-clone --squash-commit-file %t/squash-commit %}
-# RUN: test -x %t/build-sancov/bin/llvm-lit || %repo-root/scripts/build-llvm-sancov.sh %repo-root/scripts/allowlist-amdgpu.txt %t/llvm-project %t/build-sancov --bootstrap-bin %e2e-bootstrap-bin
-# RUN: bash -c '%repo-root/scripts/gap-finding-pr.sh --output-dir %t/out --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --commit "$(cat %t/squash-commit)" --backend-tests amdgpu'
-# RUN: %repo-root/scripts/gap-finding-baseline.sh --output-dir %t/out-direct --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --backend-tests amdgpu
+# RUN: bash -c '%gap-scope --llvm-repo %t/llvm-project --commit "$(cat %t/squash-commit)" > %t/scope.txt'
+# RUN: %FileCheck %s --input-file=%t/scope.txt --check-prefix=SCOPE
+# SCOPE: action=run
+# SCOPE: rule=1
+# SCOPE: backends=X86;AMDGPU
+# SCOPE: tests=llvm/test
+# SCOPE: allowlist={{.*}}allowlist-llvm.txt
+# COM: Read backends with command substitution. eval splits X86;AMDGPU on the semicolon.
+# RUN: bash -c 'BACKENDS=$(sed -n "s/^backends=//p" %t/scope.txt); ALLOWLIST=$(sed -n "s/^allowlist=//p" %t/scope.txt); REPO_ROOT=%repo-root; source "$REPO_ROOT/scripts/lib/gap-scope.sh"; test -x %t/build-sancov/bin/llvm-lit || { projects="$(gap_scope_enable_projects_for_allowlist "$ALLOWLIST")"; build_args=("$REPO_ROOT/scripts/build-llvm-sancov.sh" "$ALLOWLIST" %t/llvm-project %t/build-sancov --bootstrap-bin %e2e-bootstrap-bin --targets "$BACKENDS"); if [[ -n "$projects" ]]; then build_args+=(--enable-projects "$projects"); fi; "${build_args[@]}"; }'
+# RUN: grep '^LLVM_TARGETS_TO_BUILD:' %t/build-sancov/CMakeCache.txt | %FileCheck %s --check-prefix=TARGETS
+# TARGETS: LLVM_TARGETS_TO_BUILD:STRING=X86;AMDGPU
+# COM: setarch -R: GlobalISel CSE hashes block pointers, so coverage bits change with ASLR.
+# RUN: setarch x86_64 -R bash -c '%repo-root/scripts/gap-finding-pr.sh --output-dir %t/out --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --commit "$(cat %t/squash-commit)" --auto'
+# RUN: setarch x86_64 -R bash -c 'TESTS=$(sed -n "s/^tests=//p" %t/scope.txt); suites=(); IFS=","; for s in $TESTS; do suites+=(--tests "$s"); done; %repo-root/scripts/gap-finding-baseline.sh --output-dir %t/out-direct --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin "${suites[@]}"'
 
 # RUN: test -f %t/out/baseline/line_coverage_uncovered.csv
 # RUN: test -f %t/out/baseline/line_coverage_uncovered_pruned.csv
@@ -51,16 +62,16 @@
 # TARGET_PRUNED: {{.*}}SIFoldOperands.cpp,1712,
 
 # COM: Gap filling (baseline gaps): pinned candidate from integration-tests/e2e/fixtures/.
-# COM: Recalibrate GAP_FILL_* FileCheck lines if the fixture .bc or amdgpu baseline changes:
+# COM: Recalibrate GAP_FILL_* FileCheck lines if the fixture .bc or auto-scoped baseline changes:
 # COM: run gap-filling.sh against this test's gap-finding artifacts and update the prefixes below.
-# RUN: %repo-root/scripts/gap-filling.sh --output-dir %t/gap-fill-baseline --line-coverage-uncovered-csv %t/out/baseline/line_coverage_uncovered_pruned.csv --llc-address-line-map-csv %t/out/baseline/llc_address_line_map.csv --candidate-tests-dir %S/../fixtures/candidate-tests --settings-csv %S/../fixtures/candidate-test-settings-e2e.csv -n 1 --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin -j 2
+# RUN: setarch x86_64 -R %repo-root/scripts/gap-filling.sh --output-dir %t/gap-fill-baseline --line-coverage-uncovered-csv %t/out/baseline/line_coverage_uncovered_pruned.csv --llc-address-line-map-csv %t/out/baseline/llc_address_line_map.csv --candidate-tests-dir %S/../fixtures/candidate-tests --settings-csv %S/../fixtures/candidate-test-settings-e2e.csv -n 1 --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin -j 2
 # RUN: test -f %t/gap-fill-baseline/candidate_tests/candidate_test_manifest.csv
 # RUN: test -f %t/gap-fill-baseline/incremental/new_coverage.csv
 # RUN: %FileCheck %s --input-file=%t/gap-fill-baseline/incremental/new_coverage.csv --check-prefix=GAP_FILL_BASELINE
 # GAP_FILL_BASELINE: test_0_0000a5c12a4ab6566d1f8bf7495ff7fa30d9c93f326071d7e75cea0a1172a0c5.bc,{{.*}}/SIInstrInfo.cpp,1984,
 
 # COM: Gap filling (PR gaps): PR-added uncovered lines; fuzz input must not fill SIFoldOperands.cpp:1712.
-# RUN: %repo-root/scripts/gap-filling.sh --output-dir %t/gap-fill-pr --line-coverage-uncovered-csv %t/out/commit_lines_report/target_lines_uncovered_pruned.csv --llc-address-line-map-csv %t/out/baseline/llc_address_line_map.csv --candidate-tests-dir %S/../fixtures/candidate-tests --settings-csv %S/../fixtures/candidate-test-settings-e2e.csv -n 1 --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin -j 2
+# RUN: setarch x86_64 -R %repo-root/scripts/gap-filling.sh --output-dir %t/gap-fill-pr --line-coverage-uncovered-csv %t/out/commit_lines_report/target_lines_uncovered_pruned.csv --llc-address-line-map-csv %t/out/baseline/llc_address_line_map.csv --candidate-tests-dir %S/../fixtures/candidate-tests --settings-csv %S/../fixtures/candidate-test-settings-e2e.csv -n 1 --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin -j 2
 # RUN: test -f %t/gap-fill-pr/incremental/new_coverage.csv
 # RUN: %FileCheck %s --input-file=%t/gap-fill-pr/incremental/new_coverage.csv --check-prefix=GAP_FILL_PR_HDR
 # GAP_FILL_PR_HDR: test_name,file,line,covered-points
@@ -69,10 +80,10 @@
 
 # COM: Reduction: full llvm-reduce on the first baseline gap-fill hit.
 # COM: Assert reduced.ll exists, is smaller than disassembled input, and preserves COVERED.
-# RUN: %repo-root/scripts/reduction.sh --gap-fill-dir %t/gap-fill-baseline --corpus-dir %S/../fixtures/candidate-tests --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin -n 1 --pipeline llvm_reduce_ir
+# RUN: setarch x86_64 -R %repo-root/scripts/reduction.sh --gap-fill-dir %t/gap-fill-baseline --corpus-dir %S/../fixtures/candidate-tests --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin -n 1 --pipeline llvm_reduce_ir
 # RUN: test -f %t/gap-fill-baseline/reduced/t-00001-test_0_0/reduced/reduced.ll
 # RUN: bash -c 'd=%t/gap-fill-baseline/reduced/t-00001-test_0_0; input="$d/test_0_0000a5c12a4ab6566d1f8bf7495ff7fa30d9c93f326071d7e75cea0a1172a0c5.bc"; reduced="$d/reduced/reduced.ll"; bl=$(mktemp); %t/build-sancov/bin/llvm-dis -o "$bl" "$input"; test $(stat -c%s "$reduced") -lt $(stat -c%s "$bl"); rm -f "$bl"'
-# RUN: %t/gap-fill-baseline/reduced/t-00001-test_0_0/interesting_ir.sh %t/gap-fill-baseline/reduced/t-00001-test_0_0/reduced/reduced.ll 2>&1 | %FileCheck %s --check-prefix=REDUCED_COVERAGE
+# RUN: setarch x86_64 -R %t/gap-fill-baseline/reduced/t-00001-test_0_0/interesting_ir.sh %t/gap-fill-baseline/reduced/t-00001-test_0_0/reduced/reduced.ll 2>&1 | %FileCheck %s --check-prefix=REDUCED_COVERAGE
 # REDUCED_COVERAGE: COVERED (0x{{[0-9a-fA-F]+}}) is present in sancov --print output
 
 # COM: Drop the llvm-project clone and sancov build after coverage runs to save disk space.

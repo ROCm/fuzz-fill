@@ -69,6 +69,16 @@ def _find_unittests_executables(unittests_root: Path, tool: str) -> list[Path]:
     return matches
 
 
+def _is_lit_temporary_tool(tool: str) -> bool:
+    """True for a lit ``%t`` copy such as ``exec-options.ll.tmp.bin--``.
+
+    Lit names ``%t`` ``<test>.tmp``. Tests that copy an instrumented tool onto
+    that path emit sancov dumps under the copy's basename. Those copies are not
+    build products, so they are skipped. Any other missing binary still fails.
+    """
+    return ".tmp." in tool
+
+
 def _resolve_symbolize_target(bin_dir: Path, build_root: Path, tool: str) -> Path:
     """Locate the binary that produced ``<tool>.*.sancov`` dumps.
 
@@ -183,7 +193,7 @@ class TestRunner:
         if not out_dir.exists():
             out_dir.mkdir(parents=True, exist_ok=True)
 
-        cov_opts = f"coverage=1:coverage_dir={out_dir}"
+        cov_opts = f"coverage=1:coverage_dir={out_dir}:print_coverage_summary=0"
         
         prev = env.get("UBSAN_OPTIONS", "").strip()
         env["UBSAN_OPTIONS"] = f"{cov_opts}:{prev}" if prev else cov_opts
@@ -432,7 +442,16 @@ class TestRunner:
                         f"{removed} sancov dump(s); llvm-lit selected no tests",
                         flush=True,
                     )
-            tools = Sancov.discover_tools(self.raw_sancov_output_dir)
+            discovered = Sancov.discover_tools(self.raw_sancov_output_dir)
+            tools: list[str] = []
+            for tool in discovered:
+                if _is_lit_temporary_tool(tool):
+                    print(
+                        f"warning: skipping lit temporary coverage for {tool!r}",
+                        flush=True,
+                    )
+                    continue
+                tools.append(tool)
             if not tools:
                 if self.require_sancov:
                     raise SystemExit(
@@ -481,7 +500,7 @@ class TestRunner:
                 for future in concurrent.futures.as_completed(futures):
                     future.result()
 
-        coverage_dfs = Sancov.load_coverage_dfs_from_sancovs(sancovs)
+        coverage_dfs = Sancov.load_coverage_dfs_from_sancovs(sancovs, jobs=workers)
         address_line_maps, line_point_summaries, coverage = Sancov.get_joint_coverage(
             coverage_dfs
         )
