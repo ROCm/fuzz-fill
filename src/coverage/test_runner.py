@@ -500,7 +500,7 @@ class TestRunner:
                 for future in concurrent.futures.as_completed(futures):
                     future.result()
 
-        coverage_dfs = Sancov.load_coverage_dfs_from_sancovs(sancovs)
+        coverage_dfs = Sancov.load_coverage_dfs_from_sancovs(sancovs, jobs=workers)
         address_line_maps, line_point_summaries, coverage = Sancov.get_joint_coverage(
             coverage_dfs
         )
