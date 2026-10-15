@@ -12,6 +12,7 @@ license = { file = "LICENCE.txt" }
 dependencies = [
     "pandas>=2.0",
     "lit",
+    "orjson>=3.10",
 ]
 
 [project.scripts]
