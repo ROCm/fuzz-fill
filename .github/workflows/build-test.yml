@@ -63,6 +63,8 @@ jobs:
       FUZZ_FILL_LLVM_DIS: /work/llvm-build-sancov/bin/llvm-dis
       LLVM_MIRROR_DIR: /work/llvm-mirror
       FUZZ_FILL_LLVM_REPO: /work/llvm-project
+      # nproc inside this container can be the host CPU count.
+      FUZZ_FILL_E2E_JOBS: "32"
 
     steps:
       - name: Checkout
@@ -112,7 +114,7 @@ jobs:
             "${LLVM_BUILD_DIR}" \
             --bootstrap-bin "${LLVM_RELEASE_BIN}" \
             --enable-projects clang \
-            "$(nproc)"
+            "${FUZZ_FILL_E2E_JOBS}"
 
       - name: Install fuzz-fill venv
         run: |
@@ -176,6 +178,7 @@ jobs:
           FUZZ_FILL_E2E_BOOTSTRAP_BIN: ${{ env.LLVM_RELEASE_BIN }}
           FUZZ_FILL_E2E_LLVM_MIRROR: ${{ env.LLVM_MIRROR_DIR }}
         run: |
+          echo "nproc=$(nproc) nproc_all=$(nproc --all)"
           source "${VENV_DIR}/bin/activate"
           if ! command -v gh >/dev/null 2>&1; then
             apt-get update
