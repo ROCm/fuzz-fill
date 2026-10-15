@@ -522,9 +522,10 @@ class TestRunner:
                 instrumented_bin,
                 build_root,
             )
-            workers = len(sancovs)
-            if self.jobs is not None:
-                workers = min(self.jobs, workers)
+            # Same resolution as lit: honor -j when set, else core count, capped
+            # at MAX_LIT_JOBS. Previously, jobs=None meant one worker per tool
+            # with no cap, which OOMs on high-core Docker hosts.
+            workers = min(resolve_lit_job_count(self.jobs), len(sancovs))
             _merge_and_symbolize_sancovs(sancovs, workers)
 
         coverage_dfs = []
