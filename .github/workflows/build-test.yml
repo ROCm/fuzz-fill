@@ -145,9 +145,7 @@ jobs:
           curl -fsSL "https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-${LLVM_RELEASE_VERSION}.tar.gz" \
             | tar -xz --strip-components=1 -C "${LLVM_PROJECT_DIR}"
 
-      # Debug: the e2e test builds its own SanitizerCoverage tree.
       - name: Build sancov LLVM
-        if: false
         run: |
           ./scripts/build-llvm-sancov.sh \
             "${SANCOV_ALLOWLIST}" \
@@ -168,7 +166,6 @@ jobs:
           python -m unittest discover -s tests -v
 
       - name: Run integration tests
-        if: false
         run: |
           source "${VENV_DIR}/bin/activate"
           ./integration-tests/test.sh \
@@ -231,32 +228,11 @@ jobs:
           : > "$e2e_log"
           tail -f "$e2e_log" &
           tail_pid=$!
-          # test.sh patches this before lit. The release tarball has no build tree.
-          mkdir -p "${LLVM_RELEASE_DIR}/test"
-          : > "${LLVM_RELEASE_DIR}/test/lit.site.cfg.py"
-          # The release tarball also has no FileCheck. The skipped LLVM build was
-          # what used to provide it for the outer lit.
-          if [[ ! -x "${LLVM_RELEASE_BIN}/FileCheck" ]]; then
-            apt-get update
-            apt-get install -y llvm
-            filecheck=""
-            for candidate in /usr/bin/FileCheck /usr/lib/llvm-*/bin/FileCheck; do
-              if [[ -x "$candidate" ]]; then
-                filecheck="$candidate"
-                break
-              fi
-            done
-            if [[ -z "$filecheck" ]]; then
-              echo "error: FileCheck not found after installing llvm" >&2
-              exit 1
-            fi
-            ln -sfn "$filecheck" "${LLVM_RELEASE_BIN}/FileCheck"
-          fi
           set +e
           ./integration-tests/test.sh \
             --venv "${VENV_DIR}" \
-            --llvm-build "${LLVM_RELEASE_BIN}" \
-            --llvm-sancov-build "${LLVM_RELEASE_BIN}" \
+            --llvm-build "${LLVM_BUILD_BIN}" \
+            --llvm-sancov-build "${LLVM_BUILD_BIN}" \
             --llvm-src "${LLVM_PROJECT_DIR}" \
             --param e2e=1 \
             -j 1 \
