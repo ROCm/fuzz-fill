@@ -52,6 +52,37 @@ def _merge_and_symbolize_sancov(sancov: Sancov) -> None:
     )
 
 
+def _sancovs_for_tools(
+    tools: list[str],
+    sancov_bin: Path,
+    raw_sancov_dir: Path,
+    instrumented_bin: Path,
+    build_root: Path,
+) -> list[Sancov]:
+    """One ``Sancov`` per tool, aimed at the binary that emitted its dumps."""
+    sancovs: list[Sancov] = []
+    for tool in tools:
+        symbolize_target = _resolve_symbolize_target(
+            instrumented_bin, build_root, tool
+        )
+        sancovs.append(
+            Sancov(sancov_bin, symbolize_target, raw_sancov_dir, tool)
+        )
+    return sancovs
+
+
+def _merge_and_symbolize_sancovs(sancovs: list[Sancov], workers: int) -> None:
+    """Merge each tool's raw dumps, then symbolize the merged file.
+
+    *workers* is the cap shared with the later symcov load. Threads only wait
+    on the ``sancov`` subprocesses.
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_merge_and_symbolize_sancov, s) for s in sancovs]
+        for future in concurrent.futures.as_completed(futures):
+            future.result()
+
+
 def _find_unittests_executables(unittests_root: Path, tool: str) -> list[Path]:
     """Executable paths under ``unittests/`` whose basename matches *tool*."""
     if not unittests_root.is_dir():
@@ -478,34 +509,23 @@ class TestRunner:
                 raise SystemExit(
                     "error: --llc is required to locate the instrumented bin directory"
                 )
-            if self.filepaths.sancov is None:
+            sancov_bin = self.filepaths.sancov
+            if sancov_bin is None:
                 raise SystemExit("error: --sancov is required to merge and symbolize coverage")
 
             instrumented_bin = self.filepaths.llc.parent
             build_root = instrumented_bin.parent
-            sancovs: list[Sancov] = []
-            for tool in tools:
-                symbolize_target = _resolve_symbolize_target(
-                    instrumented_bin, build_root, tool
-                )
-                sancovs.append(
-                    Sancov(
-                        self.filepaths.sancov,
-                        symbolize_target,
-                        self.raw_sancov_output_dir,
-                        tool,
-                    )
-                )
-
+            sancovs = _sancovs_for_tools(
+                tools,
+                sancov_bin,
+                self.raw_sancov_output_dir,
+                instrumented_bin,
+                build_root,
+            )
             workers = len(sancovs)
             if self.jobs is not None:
                 workers = min(self.jobs, workers)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = [
-                    pool.submit(_merge_and_symbolize_sancov, s) for s in sancovs
-                ]
-                for future in concurrent.futures.as_completed(futures):
-                    future.result()
+            _merge_and_symbolize_sancovs(sancovs, workers)
 
         coverage_dfs = Sancov.load_coverage_dfs_from_sancovs(sancovs, jobs=workers)
         address_line_maps, line_point_summaries, coverage = Sancov.get_joint_coverage(
