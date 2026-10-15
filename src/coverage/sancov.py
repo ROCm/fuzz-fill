@@ -92,9 +92,13 @@ class Sancov:
                 for addr, line_col in addr_to_line.items():
                     files.append(file)
                     addrs.append(addr)
-                    lines.append(line_col.partition(":")[0])
+                    lines.append(int(line_col.partition(":")[0]))
 
-        out = pd.DataFrame({"file": files, "point": addrs, "line": lines}, dtype=object)
+        out = pd.DataFrame({
+            "file": pd.Series(files, dtype=object),
+            "point": pd.Series(addrs, dtype=object),
+            "line": np.array(lines, dtype=np.int32),
+        })
         if not out.empty:
             out["point"] = out["point"].map(Sancov.format_hex_address)
 
