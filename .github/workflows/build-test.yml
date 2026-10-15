@@ -67,6 +67,19 @@ jobs:
       FUZZ_FILL_E2E_JOBS: "32"
 
     steps:
+      - name: Report container resources
+        run: |
+          echo "nproc=$(nproc) nproc_all=$(nproc --all)"
+          awk '/MemTotal/ {printf "mem_total_gib=%.1f\n", $2/1024/1024}' /proc/meminfo
+          if [[ -r /sys/fs/cgroup/memory.max ]]; then
+            max="$(cat /sys/fs/cgroup/memory.max)"
+            if [[ "$max" == "max" ]]; then
+              echo "cgroup_memory_max=unlimited"
+            else
+              awk -v b="$max" 'BEGIN {printf "cgroup_memory_max_gib=%.1f\n", b/1024/1024/1024}'
+            fi
+          fi
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -178,7 +191,6 @@ jobs:
           FUZZ_FILL_E2E_BOOTSTRAP_BIN: ${{ env.LLVM_RELEASE_BIN }}
           FUZZ_FILL_E2E_LLVM_MIRROR: ${{ env.LLVM_MIRROR_DIR }}
         run: |
-          echo "nproc=$(nproc) nproc_all=$(nproc --all)"
           source "${VENV_DIR}/bin/activate"
           if ! command -v gh >/dev/null 2>&1; then
             apt-get update
