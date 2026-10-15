@@ -14,7 +14,7 @@ import pandas as pd
 from coverage.constants import DEFAULT_LINE_COVERAGE_SUMMARY_FILE
 from coverage.filepaths import Filepaths
 from coverage.sancov import Sancov
-from coverage.test_runner import TestRunner
+from coverage.test_runner import TestRunner, _resolve_symbolize_target
 
 
 def _runner(root: Path) -> TestRunner:
@@ -91,3 +91,19 @@ class AggregateLitTemporaryCoverageTest(unittest.TestCase):
             self.assertIn("not-a-real-tool", message)
             self.assertNotIn("exec-options.ll.tmp.bin--", message)
             self.assertIn("exec-options.ll.tmp.bin--", stdout.getvalue())
+
+    def test_resolves_clang_unittest_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bin_dir = root / "build-sancov" / "bin"
+            bin_dir.mkdir(parents=True)
+            clang_ut = (
+                root / "build-sancov" / "tools" / "clang" / "unittests" / "AllClangUnitTests"
+            )
+            clang_ut.parent.mkdir(parents=True)
+            clang_ut.write_text("", encoding="utf-8")
+            clang_ut.chmod(0o755)
+            resolved = _resolve_symbolize_target(
+                bin_dir, root / "build-sancov", "AllClangUnitTests"
+            )
+            self.assertEqual(resolved, clang_ut)

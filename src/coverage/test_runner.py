@@ -82,26 +82,33 @@ def _is_lit_temporary_tool(tool: str) -> bool:
 def _resolve_symbolize_target(bin_dir: Path, build_root: Path, tool: str) -> Path:
     """Locate the binary that produced ``<tool>.*.sancov`` dumps.
 
-    Tools normally live in ``bin/``. Backend lit filters can also select
-    LLVM-Unit shards whose binaries live under ``unittests/`` (for example
-    ``unittests/MC/AMDGPU/AMDGPUMCTests``).
+    Tools normally live in ``bin/``. Lit unit suites also select gtest binaries
+    under ``unittests/`` (LLVM-Unit, e.g. ``unittests/MC/AMDGPU/AMDGPUMCTests``)
+    and under ``tools/clang/unittests/`` (Clang-Unit, e.g.
+    ``tools/clang/unittests/AllClangUnitTests``).
     """
     candidate = bin_dir / tool
     if candidate.is_file():
         return candidate
 
-    matches = _find_unittests_executables(build_root / "unittests", tool)
+    search_roots = (
+        build_root / "unittests",
+        build_root / "tools" / "clang" / "unittests",
+    )
+    matches: list[Path] = []
+    for root in search_roots:
+        matches.extend(_find_unittests_executables(root, tool))
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
         listed = "\n".join(f"  {path}" for path in matches)
         raise SystemExit(
             f"error: multiple instrumented binaries named {tool!r} under "
-            f"{build_root / 'unittests'}:\n{listed}"
+            f"{' or '.join(str(root) for root in search_roots)}:\n{listed}"
         )
     raise SystemExit(
         f"error: instrumented binary for {tool!r} not found: {candidate} "
-        f"(also searched under {build_root / 'unittests'})"
+        f"(also searched under {' and '.join(str(root) for root in search_roots)})"
     )
 
 
