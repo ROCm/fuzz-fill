@@ -527,24 +527,27 @@ class TestRunner:
                 workers = min(self.jobs, workers)
             _merge_and_symbolize_sancovs(sancovs, workers)
 
-        coverage_dfs = Sancov.load_coverage_dfs_from_sancovs(sancovs, jobs=workers)
-        address_line_maps, line_point_summaries, coverage = Sancov.get_joint_coverage(
-            coverage_dfs
-        )
+        coverage_dfs = []
+        for tool, sancov in zip(tools, sancovs):
+            df = Sancov.load_coverage_dfs([sancov.get_merged_symcov_path()], "")[0]
+            coverage_dfs.append(df)
 
-        for tool, address_line_map, line_point_summary in zip(
-            tools, address_line_maps, line_point_summaries
-        ):
+            address_line_map = Sancov.build_address_line_map(df)
+            line_point_summary = Sancov.build_line_point_summary(address_line_map)
             address_line_map.to_csv(
                 self.filepaths.output_dir
                 / Sancov.tool_address_line_map_filename(tool),
                 index=False,
             )
+            del address_line_map
             line_point_summary.to_csv(
                 self.filepaths.output_dir
                 / Sancov.tool_line_point_summary_filename(tool),
                 index=False,
             )
+            del line_point_summary
+
+        coverage = Sancov.build_coverage_summary(coverage_dfs)
         coverage.to_csv(
             self.filepaths.output_dir / self.filepaths.line_coverage_summary_file,
             index=False,
