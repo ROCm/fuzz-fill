@@ -121,6 +121,9 @@ jobs:
 
       - name: Build sancov LLVM
         run: |
+          bash ./scripts/ci-cgroup-memstat.sh 30 &
+          memstat_pid=$!
+          trap 'kill "$memstat_pid" 2>/dev/null || true' EXIT
           ./scripts/build-llvm-sancov.sh \
             "${SANCOV_ALLOWLIST}" \
             "${LLVM_PROJECT_DIR}" \
@@ -141,6 +144,9 @@ jobs:
 
       - name: Run integration tests
         run: |
+          bash ./scripts/ci-cgroup-memstat.sh 30 &
+          memstat_pid=$!
+          trap 'kill "$memstat_pid" 2>/dev/null || true' EXIT
           source "${VENV_DIR}/bin/activate"
           ./integration-tests/test.sh \
             --venv "${VENV_DIR}" \
@@ -202,6 +208,8 @@ jobs:
           : > "$e2e_log"
           tail -f "$e2e_log" &
           tail_pid=$!
+          bash ./scripts/ci-cgroup-memstat.sh 30 &
+          memstat_pid=$!
           set +e
           ./integration-tests/test.sh \
             --venv "${VENV_DIR}" \
@@ -212,6 +220,6 @@ jobs:
             -j 1 \
             -v integration-tests/e2e/
           status=$?
-          kill "$tail_pid"
-          wait "$tail_pid" 2>/dev/null || true
+          kill "$tail_pid" "$memstat_pid" 2>/dev/null || true
+          wait "$tail_pid" "$memstat_pid" 2>/dev/null || true
           exit "$status"
