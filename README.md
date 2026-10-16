@@ -48,12 +48,12 @@ cd fuzz-fill
   --build-image \
   --llvm-repo /path/to/llvm-project \
   --pr-id 203468 \
-  --backend-tests amdgpu \
+  --auto \
   --output-dir ./data/gap-finding-pr-203468 \
   -j "$(nproc)"
 ```
 
-Use `spirv` instead of `amdgpu` for SPIR-V backend tests.
+`--auto` classifies the PR's changed files and chooses backends, lit suites, and the SanitizerCoverage allowlist. Pass `--backends`, `--tests`, and `--allowlist` instead when you want a fixed scope.
 
 **Local commit** — build from your `llvm-project` checkout (the local checkout remains unchanged). This command only finds gaps in lines changed in a single commit rather than a full PR. Replace `HEAD` with a hash, branch, or `main~3` as needed:
 
@@ -118,7 +118,17 @@ You need an official **LLVM GitHub release** as bootstrap and one **SanitizerCov
 
 `build-llvm-sancov.sh` builds one instrumented RelWithDebInfo tree (`ninja all`). Bootstrap supplies **clang/clang++ only**.
 
-AMDGPU builds use [`scripts/allowlist-amdgpu.txt`](scripts/allowlist-amdgpu.txt) (`src:*/lib/Target/AMDGPU/*`); SPIRV uses [`scripts/allowlist-spirv.txt`](scripts/allowlist-spirv.txt).
+Allowlist presets:
+
+| Preset | File | What it instruments |
+|--------|------|---------------------|
+| `amdgpu` | [`scripts/allowlist-amdgpu.txt`](scripts/allowlist-amdgpu.txt) | `lib/Target/AMDGPU` |
+| `spirv` | [`scripts/allowlist-spirv.txt`](scripts/allowlist-spirv.txt) | `lib/Target/SPIRV` |
+| `llvm` | [`scripts/allowlist-llvm.txt`](scripts/allowlist-llvm.txt) | `llvm/lib` |
+| `clang` | [`scripts/allowlist-clang.txt`](scripts/allowlist-clang.txt) | `clang/lib` |
+| `llvm-clang` | [`scripts/allowlist-llvm-clang.txt`](scripts/allowlist-llvm-clang.txt) | `llvm/lib` and `clang/lib` |
+
+`python -m gap_scope` (or `--auto` on the gap-finding scripts) picks one of `llvm`, `clang`, or `llvm-clang` from the commit. Clang is built only for the `clang` and `llvm-clang` presets. A backend-only change under `llvm/lib/Target/<Backend>/` uses the `llvm` allowlist and does not build Clang.
 
 **`python -m coverage baseline`** patches **`<instrumented-build>/test/lit.site.cfg.py`** so LIT forwards **`UBSAN_OPTIONS`** to every test subprocess. The patch is idempotent and is re-applied if CMake regenerates that file.
 
@@ -147,7 +157,7 @@ baseline  →  line_coverage_uncovered.csv
 
 ### Configure and run
 
-Required flags mirror the [Docker gap-finding runners](#gap-finding-baseline-in-docker): `--output-dir`, LIT filters via `--lit-filter` or `--backend-tests`, plus explicit LLVM paths for local builds.
+Required flags: `--output-dir` and the LLVM paths. Omit `--tests` to run `llvm/test` and `clang/test`.
 
 | Flag | Meaning |
 |------|---------|
@@ -155,8 +165,8 @@ Required flags mirror the [Docker gap-finding runners](#gap-finding-baseline-in-
 | `--llvm-repo` | Path to your `llvm-project` checkout |
 | `--llvm-bin` | Uninstrumented `bin` directory (`sancov`) |
 | `--instrumented-bin-dir` | SanitizerCoverage `bin` directory (`llvm-lit`, `llc`, `opt`) |
-| `--lit-filter` | LIT `--filter=` regex; repeat for multiple |
-| `--backend-tests` | `amdgpu` or `spirv` — default LIT filter when `--lit-filter` is omitted |
+| `--tests` | Lit suite root or subdirectory (`llvm/test`, `clang/test/Sema`, …); repeatable |
+| `--lit-filter` | llvm-lit `--filter=` regex applied to every `--tests` suite; repeatable |
 | `-j`, `--jobs` | Parallel jobs for llvm-lit |
 
 ```bash
@@ -165,7 +175,7 @@ Required flags mirror the [Docker gap-finding runners](#gap-finding-baseline-in-
   --llvm-repo /path/llvm-project \
   --llvm-bin /path/llvm-project/build/bin \
   --instrumented-bin-dir /path/llvm-project/build-sancov/bin \
-  --backend-tests amdgpu \
+  --tests llvm/test/CodeGen/AMDGPU \
   -j "$(nproc)"
 ```
 
@@ -214,7 +224,9 @@ Step 3 does **not** re-run LIT; you can repeat it with different `added-lines.cs
 | `--github-repo` | With `--pr-id` (default: `llvm/llvm-project`) |
 | `--llvm-repo` | `llvm-project` checkout (`added-lines` tree; with `--pr-id`, used as clone reference) |
 | `--llvm-bin` / `--instrumented-bin-dir` | Same as [baseline gap finding](#gap-finding-baseline) |
-| `--lit-filter` / `--backend-tests` | LIT filters for the baseline step |
+| `--auto` | Choose lit suites from `--commit` or `--pr-id` |
+| `--tests` | Lit suites (cannot be combined with `--auto`) |
+| `--lit-filter` | llvm-lit `--filter=` regex for every suite |
 | `-j`, `--jobs` | Parallel jobs for llvm-lit |
 
 PR gap finding squashes all PR commits onto the merge-base in a self-contained worktree (same as the Docker PR image build). Use [`scripts/prepare-pr-llvm.sh`](scripts/prepare-pr-llvm.sh) directly if you only need the squashed tree:
@@ -234,7 +246,7 @@ PR gap finding squashes all PR commits onto the merge-base in a self-contained w
   --llvm-bin /path/llvm-project/build/bin \
   --instrumented-bin-dir /path/llvm-project/build-sancov/bin \
   --commit HEAD \
-  --backend-tests amdgpu \
+  --auto \
   -j "$(nproc)"
 ```
 
@@ -247,7 +259,7 @@ GitHub pull request (squash + gap finding):
   --llvm-bin ./.fuzz-fill-llvm-pr-worktrees/pr-214457/llvm-project/build-sancov/bin \
   --instrumented-bin-dir ./.fuzz-fill-llvm-pr-worktrees/pr-214457/llvm-project/build-sancov/bin \
   --pr-id 214457 \
-  --backend-tests amdgpu \
+  --auto \
   -j "$(nproc)"
 ```
 
@@ -409,11 +421,12 @@ PR gap finding input to `target-lines` remains `added-lines.csv` (`path`, `line_
 
 | Flag | Meaning |
 |------|---------|
-| `--lit-filter DIR` | LIT `--filter=` regex; **repeat** for multiple (OR'd) |
+| `--tests` | Lit suite root or subdirectory; **repeat** for multiple. Required. |
+| `--lit-filter DIR` | llvm-lit `--filter=` regex applied to every suite; **repeat** for multiple (OR'd) |
 
-Default when omitted: `(?:^|/)AMDGPU(?:/|$)`. `--backend-tests amdgpu|spirv` selects the matching AMDGPU or SPIRV pattern.
+There is no default lit filter. Narrow a suite with `--tests llvm/test/CodeGen/AMDGPU` or with `--lit-filter`.
 
-Baseline symcov CSVs include **all** instrumented source paths from the LIT run. Use `--source-filter` on `coverage incremental` to scope gap finding (default: `(?:^|/)llvm/lib/`; see `DEFAULT_SOURCE_CODE_FILTER` in [`src/coverage/constants.py`](src/coverage/constants.py)).
+Baseline symcov CSVs include **all** instrumented source paths from the LIT run. Use `--source-filter` on `coverage incremental` to scope gap finding (default: `(?:^|/)(?:llvm|clang)/lib/`; see `DEFAULT_SOURCE_CODE_FILTER` in [`src/coverage/constants.py`](src/coverage/constants.py)).
 
 ### `coverage target-lines` consistency checks
 
@@ -531,7 +544,9 @@ By default the image is tagged `fuzz-fill-test:latest`. LLVM source is downloade
 | `--llvm-dir <path>` | Use a local `llvm-project` checkout instead of downloading tagged source |
 | `--llvm-release-version <ver>` | Official LLVM release for bootstrap toolchain (default: `22.1.8`) |
 | `--tag <tag>` | Docker image tag (default: `latest`) |
-| `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist baked into the instrumented build (default: `amdgpu`) |
+| `--allowlist amdgpu\|spirv\|llvm\|clang\|llvm-clang` | SanitizerCoverage allowlist baked into the instrumented build (default: `amdgpu`) |
+| `--enable-projects <list>` | `LLVM_ENABLE_PROJECTS` (default: `clang`). Pass an empty string to skip Clang. |
+| `--tests <suite>` | Lit suite recorded in the image (repeatable; default: `llvm/test`) |
 | `--sancov-instrumentation-mode func\|bb\|edge` | SanitizerCoverage instrumentation mode (default: `bb`; produces `-fsanitize-coverage=<mode>,trace-pc-guard`) |
 | `-j <n>`, `--jobs <n>` | Limit ninja parallelism for the sancov build (default: unconstrained) |
 
@@ -558,7 +573,10 @@ Use this image with **`--image fuzz-fill-test:latest`** for local-commit gap fin
 |--------|---------|
 | `--llvm-repo <path>` | Local `llvm-project` clone |
 | `--pr-id <n>` | GitHub pull request number |
-| `--allowlist amdgpu\|spirv` | SanitizerCoverage allowlist |
+| `--allowlist amdgpu\|spirv\|llvm\|clang\|llvm-clang` | SanitizerCoverage allowlist |
+| `--targets <list>` | `LLVM_TARGETS_TO_BUILD` |
+| `--enable-projects <list>` | `LLVM_ENABLE_PROJECTS` (empty string skips Clang) |
+| `--tests <suite>` | Lit suite recorded in the image (repeatable) |
 | `--sancov-instrumentation-mode func\|bb\|edge` | SanitizerCoverage instrumentation mode (default: `bb`) |
 | `--github-repo <owner/repo>` | GitHub repo hosting the PR (default: `llvm/llvm-project`) |
 | `-j <n>`, `--jobs <n>` | Limit ninja parallelism for both LLVM builds (default: unconstrained) |
@@ -576,7 +594,8 @@ Gap-finding Docker runners share [`ensure-image.sh`](scripts/docker/ensure-image
 | `--keep-image` | Do not remove the image after a `--build-image` run (default: remove) |
 | `--pr-id <n>` | Select `fuzz-fill-test:llvm-pr-<n>` |
 | `--llvm-repo <path>` | Required with `--build-image` |
-| `--backend-tests amdgpu\|spirv` | Required with `--build-image` |
+| `--auto` | Classify backends, tests, and allowlist from the PR |
+| `--backends` / `--tests` / `--allowlist` | Explicit scope for `--build-image` |
 
 Build once, then reuse on later runs (omit `--build-image`):
 
@@ -584,7 +603,7 @@ Build once, then reuse on later runs (omit `--build-image`):
 ./scripts/docker/gap-finding-pr.sh \
   --build-image --keep-image \
   --llvm-repo /path/llvm-project --pr-id 203468 \
-  --backend-tests amdgpu --output-dir ./data/gap-finding-pr-203468 -j "$(nproc)"
+  --auto --output-dir ./data/gap-finding-pr-203468 -j "$(nproc)"
 
 ./scripts/docker/gap-finding-pr.sh \
   --pr-id 203468 --output-dir ./data/gap-finding-pr-203468
@@ -607,7 +626,8 @@ Build once, then reuse on later runs (omit `--build-image`):
 | `--pr-id <n>` | PR image `fuzz-fill-test:llvm-pr-<n>` |
 | `--build-image` | Build PR image when missing (see [PR image build and reuse](#pr-image-build-and-reuse)) |
 | `--bind-repo` | Mount local fuzz-fill checkout over `/work/fuzz-fill` |
-| `--lit-filter <prefix>` | LIT filter override (default: from image `/work/.sancov-allowlist`) |
+| `--tests <suite>` | Lit suite (default: suites recorded in the image) |
+| `--lit-filter <regex>` | llvm-lit `--filter=` regex for every suite; repeatable |
 | `-j <n>`, `--jobs <n>` | Parallel jobs for llvm-lit and ninja (when building) |
 
 ### Gap finding (PR) in Docker
@@ -621,7 +641,7 @@ Build once, then reuse on later runs (omit `--build-image`):
   --build-image \
   --llvm-repo /path/llvm-project \
   --pr-id 203468 \
-  --backend-tests amdgpu \
+  --auto \
   --output-dir ./data/gap-finding-pr-203468 \
   -j "$(nproc)"
 ```
@@ -636,7 +656,7 @@ Build once, then reuse on later runs (omit `--build-image`):
   -j "$(nproc)"
 ```
 
-For AMDGPU images, baseline defaults to `(?:^|/)AMDGPU(?:/|$)`; SPIRV to `(?:^|/)SPIRV(?:/|$)`. Override with `--lit-filter`.
+Lit suites come from the image (`/work/.gap-test-suites`, default `llvm/test`). Pass `--tests` or `--lit-filter` to narrow the run.
 
 | Option | Meaning |
 |--------|---------|
@@ -646,10 +666,11 @@ For AMDGPU images, baseline defaults to `(?:^|/)AMDGPU(?:/|$)`; SPIRV to `(?:^|/
 | `--build-image` | Build PR image when missing |
 | `--force-build` / `--keep-image` | Rebuild or retain PR image |
 | `--llvm-repo <path>` | Required with `--build-image` |
-| `--backend-tests amdgpu\|spirv` | Required with `--build-image` |
+| `--auto` | Classify scope when building |
+| `--backends` / `--tests` / `--allowlist` | Explicit scope when building or running |
 | `--output-dir <path>` | Host output directory |
 | `-j <n>`, `--jobs <n>` | Parallel jobs |
-| `--lit-filter <dir>` | LIT prefix; repeat for multiple |
+| `--lit-filter <regex>` | llvm-lit `--filter=` regex; repeat for multiple |
 | `--github-repo <owner/repo>` | When building (default: `llvm/llvm-project`) |
 
 Main output: `<output-dir>/commit_lines_report/target_lines_uncovered.csv`.

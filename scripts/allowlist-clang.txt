@@ -1,0 +1,3 @@
+# Enable instrumentation for clang/lib
+src:*/clang/lib/*
+fun:*

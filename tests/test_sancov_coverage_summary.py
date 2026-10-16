@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 import pandas as pd
 
@@ -158,6 +161,34 @@ class GetCoverageDfTest(unittest.TestCase):
         self.assertEqual(len(df), 1)
         self.assertEqual(int(df.iloc[0]["covered"]), 1)
         Sancov.build_coverage_summary([df])
+
+    def test_parallel_load_matches_sequential_order(self) -> None:
+        llc = {
+            "point-symbol-info": {"/llvm/Foo.cpp": {"f": {"0x1": "10:0"}}},
+            "covered-points": ["0x1"],
+        }
+        opt = {
+            "point-symbol-info": {"/llvm/Bar.cpp": {"g": {"0x2": "20:0"}}},
+            "covered-points": [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp) / "raw"
+            raw.mkdir()
+            tools = [
+                Sancov(Path(tmp) / "sancov", raw_sancov_dir=raw, suffix="llc"),
+                Sancov(Path(tmp) / "sancov", raw_sancov_dir=raw, suffix="opt"),
+            ]
+            for sancov, payload in zip(tools, (llc, opt)):
+                sancov.get_merged_symcov_path().write_text(
+                    json.dumps(payload), encoding="utf-8"
+                )
+            expected = Sancov.load_coverage_dfs(
+                [sancov.get_merged_symcov_path() for sancov in tools], ""
+            )
+            got = Sancov.load_coverage_dfs_from_sancovs(tools, jobs=2)
+        self.assertEqual(len(got), 2)
+        for actual, want in zip(got, expected):
+            pd.testing.assert_frame_equal(actual, want)
 
 
 def _address_line_map(rows: list[tuple[str, int, str, int]]) -> pd.DataFrame:

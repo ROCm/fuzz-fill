@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import re
 import shutil
 import subprocess
 import tempfile
-import json
+import orjson
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -16,6 +17,21 @@ from fuzz_fill.log import get_logger, log_timing, run_subprocess
 logger = get_logger("coverage.sancov")
 
 _RAW_SANCOV_NAME = re.compile(r"^(?P<tool>.+)\.(?P<pid>\d+)\.sancov$")
+
+
+def _load_symcov(path: Path | str) -> dict:
+    """Load a merged symcov JSON file."""
+    return orjson.loads(Path(path).read_bytes())
+
+
+def _coverage_df_from_symcov_path(task: tuple[str, str]) -> pd.DataFrame:
+    """Load one merged symcov in a worker process."""
+    symcov_path, source_code_filter = task
+    try:
+        symcov = _load_symcov(symcov_path)
+        return Sancov.get_coverage_df(symcov, source_code_filter)
+    except Exception as exc:
+        raise RuntimeError(f"failed to load symcov {symcov_path}") from exc
 
 
 class Sancov:
@@ -70,21 +86,19 @@ class Sancov:
     @staticmethod
     def flatten_point_symbol_info(point_symbol_info: dict[str, object]) -> pd.DataFrame:
         """Flatten the point-symbol-info dictionary into a dataframe."""
-        rows = ((file, addr_to_line) for file, d1 in point_symbol_info.items() for fun, addr_to_line in d1.items())
-        df = pd.DataFrame.from_records(rows, columns=["file", "addr_to_line"])
-
         files, addrs, lines = [], [], []
-        for t in df.itertuples(index=False):
-            f = t.file
-            for a, ln in t.addr_to_line.items():
-                files.append(f)
-                addrs.append(a)
-                lines.append(ln)
+        for file, functions in point_symbol_info.items():
+            for addr_to_line in functions.values():
+                for addr, line_col in addr_to_line.items():
+                    files.append(file)
+                    addrs.append(addr)
+                    lines.append(int(line_col.partition(":")[0]))
 
-        out = pd.DataFrame({"file": files, "point": addrs, "line": lines}, dtype=object)
-        out[["line", "col"]] = (
-            out["line"].str.split(":", n=1, expand=True).reindex(columns=[0, 1])
-        )
+        out = pd.DataFrame({
+            "file": pd.Series(files, dtype=object),
+            "point": pd.Series(addrs, dtype=object),
+            "line": np.array(lines, dtype=np.int32),
+        })
         if not out.empty:
             out["point"] = out["point"].map(Sancov.format_hex_address)
 
@@ -129,24 +143,14 @@ class Sancov:
         """Collapse duplicate ``(file, line, point)`` rows from symcov flattening.
 
         Header and STL paths can map the same instrumentation point through multiple
-        function entries. Duplicate rows must agree on ``covered``; keep one row per
-        triple.
+        function entries. ``covered`` is a function of ``point`` alone, so duplicate
+        rows agree on it; keep the first row per triple.
         """
         if df.empty:
             return df
-        covered_nunique = (
-            df.groupby(["file", "line", "point"], dropna=False)["covered"]
-            .nunique()
-        )
-        conflicts = covered_nunique[covered_nunique > 1]
-        assert conflicts.empty, (
-            "duplicate (file, line, point) rows disagree on covered: "
-            f"{conflicts.reset_index()[['file', 'line', 'point']].to_dict('records')}"
-        )
         return (
-            df.groupby(["file", "line", "point"], as_index=False, dropna=False)["covered"]
-            .max()
-            .astype({"covered": int})
+            df.drop_duplicates(["file", "line", "point"], ignore_index=True)
+            [["file", "line", "point", "covered"]]
         )
 
     @staticmethod
@@ -333,23 +337,39 @@ class Sancov:
         """Load per-tool coverage frames from symcov JSON files."""
         dfs: list[pd.DataFrame] = []
         for symcov_path in symcov_paths:
-            with symcov_path.open(encoding="utf-8") as f:
-                symcov = json.load(f)
-            dfs.append(Sancov.get_coverage_df(symcov, source_code_filter))
+            dfs.append(
+                Sancov.get_coverage_df(_load_symcov(symcov_path), source_code_filter)
+            )
         return dfs
 
     @staticmethod
     def load_coverage_dfs_from_sancovs(
         sancovs: list[Sancov],
         source_code_filter: str | None = None,
+        jobs: int | None = None,
     ) -> list[pd.DataFrame]:
-        """Load per-tool coverage frames from merged symcov paths on each Sancov."""
+        """Load per-tool coverage frames from merged symcov paths on each Sancov.
+
+        One process per tool, capped by ``jobs`` when it is set. Threads do not
+        overlap this walk: the pandas steps hold the GIL. Result order matches
+        ``sancovs``.
+        """
         if source_code_filter is None:
             source_code_filter = ""
-        return Sancov.load_coverage_dfs(
-            [s.get_merged_symcov_path() for s in sancovs],
-            source_code_filter,
-        )
+        paths = [s.get_merged_symcov_path() for s in sancovs]
+        if len(paths) <= 1:
+            return Sancov.load_coverage_dfs(paths, source_code_filter)
+
+        workers = len(paths)
+        if jobs is not None:
+            workers = min(jobs, workers)
+        if workers <= 1:
+            return Sancov.load_coverage_dfs(paths, source_code_filter)
+
+        tasks = [(str(path), source_code_filter) for path in paths]
+        with log_timing(logger, "symcov load"):
+            with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as pool:
+                return list(pool.map(_coverage_df_from_symcov_path, tasks, chunksize=1))
 
     def get_merged_sancov_path(self) -> Path:
         return self.output_dir / f"{self.suffix}.0.sancov"

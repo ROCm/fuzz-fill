@@ -10,18 +10,19 @@ gap_finding_local_source_libs() {
     source "${SCRIPT_DIR}/lib/common.sh"
     # shellcheck source=scripts/lib/local-llvm-env.sh
     source "${SCRIPT_DIR}/lib/local-llvm-env.sh"
-    # shellcheck source=scripts/lib/lit-filters.sh
-    source "${SCRIPT_DIR}/lib/lit-filters.sh"
+    # shellcheck source=scripts/lib/gap-scope.sh
+    source "${SCRIPT_DIR}/lib/gap-scope.sh"
     # shellcheck source=scripts/lib/lit-failures.sh
     source "${SCRIPT_DIR}/lib/lit-failures.sh"
 
     output_dir=""
     lit_filters=()
+    tests=()
     jobs=""
     llvm_repo=""
     llvm_bin=""
     instrumented_bin_dir=""
-    backend_tests=""
+    auto_scope=0
 }
 
 # Override in entrypoints to parse workflow-specific flags (e.g. --commit).
@@ -39,8 +40,9 @@ EOF
 
 gap_finding_local_usage_common_options() {
     cat <<EOF
-  --lit-filter <prefix>           LIT directory prefix; repeat for multiple
-  --backend-tests amdgpu|spirv    Default LIT filter(s) when --lit-filter is omitted
+  --auto                          Choose lit suites from the commit (requires --commit or --pr-id)
+  --tests <suite>                 Lit suite root or subdirectory (repeatable)
+  --lit-filter <regex>            llvm-lit --filter= regex for every --tests suite; repeatable
   -j <n>, --jobs <n>              Parallel jobs for llvm-lit
   --help, -h                      Show this help
 EOF
@@ -60,6 +62,22 @@ gap_finding_local_parse_args() {
                 lit_filters+=("$2")
                 shift 2
                 ;;
+            --tests)
+                [[ $# -ge 2 ]] || { echo "error: --tests requires a value" >&2; exit 2; }
+                case "$2" in
+                    */test|*/test/*) ;;
+                    *)
+                        echo "error: --tests must be <project>/test or a subdirectory: $2" >&2
+                        exit 1
+                        ;;
+                esac
+                tests+=("$2")
+                shift 2
+                ;;
+            --auto)
+                auto_scope=1
+                shift
+                ;;
             --llvm-repo)
                 [[ $# -ge 2 ]] || { echo "error: --llvm-repo requires a value" >&2; exit 2; }
                 llvm_repo="$2"
@@ -73,11 +91,6 @@ gap_finding_local_parse_args() {
             --instrumented-bin-dir)
                 [[ $# -ge 2 ]] || { echo "error: --instrumented-bin-dir requires a value" >&2; exit 2; }
                 instrumented_bin_dir="$2"
-                shift 2
-                ;;
-            --backend-tests)
-                [[ $# -ge 2 ]] || { echo "error: --backend-tests requires a value" >&2; exit 2; }
-                backend_tests="$2"
                 shift 2
                 ;;
             -j|--jobs)
@@ -149,18 +162,37 @@ gap_finding_local_validate_required_paths() {
     return 0
 }
 
-gap_finding_local_default_lit_filters() {
-    if [[ ${#lit_filters[@]} -gt 0 ]]; then
+# Choose lit suites. --auto reads them from the commit; otherwise use --tests
+# or the full llvm/test + clang/test default.
+# Returns 2 when classification says to skip the run.
+# The binary is already built, so backends and allowlist are only printed.
+gap_finding_local_resolve_scope() {
+    if [[ "$auto_scope" -eq 1 ]]; then
+        if [[ ${#tests[@]} -gt 0 ]]; then
+            echo "error: --auto cannot be combined with --tests" >&2
+            return 1
+        fi
+        if [[ -z "${commit_rev:-}" ]]; then
+            echo "error: --auto requires --commit or --pr-id" >&2
+            return 1
+        fi
+        gap_scope_classify_commit "$llvm_repo" "$commit_rev"
+        if [[ "$gap_scope_action" == "skip" ]]; then
+            echo "gap-scope: skip (rule ${gap_scope_rule}): ${gap_scope_reason}"
+            return 2
+        fi
+        local projects
+        IFS=',' read -r -a tests <<< "$gap_scope_tests"
+        projects="$(gap_scope_enable_projects_for_allowlist "$gap_scope_allowlist")"
+        echo "gap-scope: rule=${gap_scope_rule} tests=${tests[*]} (${gap_scope_reason})"
+        echo "gap-scope: matching build is backends=${gap_scope_backends} allowlist=${gap_scope_allowlist} enable_projects=${projects:-<none>}"
         return 0
     fi
 
-    if [[ -z "$backend_tests" ]]; then
-        echo "error: pass --lit-filter or --backend-tests (amdgpu|spirv)" >&2
-        return 1
+    if [[ ${#tests[@]} -eq 0 ]]; then
+        tests=("${GAP_SCOPE_DEFAULT_TESTS[@]}")
     fi
-
-    mapfile -t lit_filters < <(default_lit_filters_for_allowlist "$backend_tests")
-    echo "backend-tests: ${backend_tests} -> ${#lit_filters[@]} lit-filter prefix(es)"
+    return 0
 }
 
 gap_finding_local_prepare_output_dir() {

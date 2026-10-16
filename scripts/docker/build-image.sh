@@ -14,6 +14,8 @@ llvm_release_version="22.1.8"
 ninja_jobs=""
 llvm_targets=""
 llvm_enable_projects="clang"
+enable_projects_explicit=0
+gap_test_suites=()
 no_cache=0
 
 usage() {
@@ -29,15 +31,16 @@ Options:
   --llvm-release-version <ver>   Official LLVM GitHub release for bootstrap toolchain
                                  (default: 22.1.8)
   --tag <tag>                    Docker image tag (default: latest)
-  --allowlist <target>           SanitizerCoverage allowlist target: amdgpu or spirv
-                                 (default: amdgpu)
+  --allowlist <target>           SanitizerCoverage allowlist preset: amdgpu, spirv,
+                                 llvm, clang, or llvm-clang (default: amdgpu)
   --sancov-instrumentation-mode func|bb|edge
                                  SanitizerCoverage instrumentation mode (default: bb).
                                  fuzz-fill expects basic-block (bb) coverage; func or edge will likely break it.
   --targets <list>               Semicolon-separated LLVM_TARGETS_TO_BUILD
                                  (default: X86;AMDGPU;SPIRV)
   --enable-projects <list>       Semicolon-separated LLVM_ENABLE_PROJECTS
-                                 (default: clang)
+                                 (default: clang). Pass an empty string to build no extra projects.
+  --tests <suite>                Lit suite recorded in the image (repeatable; default: llvm/test)
   -j <n>, --jobs <n>             Parallel jobs for ninja when building LLVM (default: unconstrained)
   --no-cache                     Pass --no-cache to docker build (ignore layer cache)
 
@@ -126,6 +129,15 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             llvm_enable_projects="$2"
+            enable_projects_explicit=1
+            shift 2
+            ;;
+        --tests)
+            if [[ $# -lt 2 ]]; then
+                echo "error: --tests requires a value" >&2
+                exit 1
+            fi
+            gap_test_suites+=("$2")
             shift 2
             ;;
         --no-cache)
@@ -154,9 +166,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$allowlist" in
-    amdgpu|spirv) ;;
+    amdgpu|spirv|llvm|clang|llvm-clang) ;;
     *)
-        echo "error: --allowlist must be amdgpu or spirv: ${allowlist}" >&2
+        echo "error: --allowlist must be amdgpu, spirv, llvm, clang, or llvm-clang: ${allowlist}" >&2
         exit 1
         ;;
 esac
@@ -210,8 +222,11 @@ fi
 if [[ -n "$llvm_targets" ]]; then
     docker_build_args+=(--build-arg LLVM_TARGETS_TO_BUILD="${llvm_targets}")
 fi
-if [[ -n "$llvm_enable_projects" ]]; then
+if [[ "$enable_projects_explicit" -eq 1 || -n "$llvm_enable_projects" ]]; then
     docker_build_args+=(--build-arg LLVM_ENABLE_PROJECTS="${llvm_enable_projects}")
+fi
+if [[ ${#gap_test_suites[@]} -gt 0 ]]; then
+    docker_build_args+=(--build-arg GAP_TEST_SUITES="${gap_test_suites[*]}")
 fi
 if [[ "$no_cache" -eq 1 ]]; then
     docker_build_args+=(--no-cache)

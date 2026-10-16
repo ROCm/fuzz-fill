@@ -16,6 +16,9 @@ if [[ "${IN_CONTAINER:-}" == 1 ]]; then
     source "${REPO_ROOT}/scripts/lib/coverage-baseline.sh"
 
     mapfile -t lit_filters < /mounted-output/.lit-filters
+    if [[ -s /mounted-output/.gap-test-suites ]]; then
+        mapfile -t tests < /mounted-output/.gap-test-suites
+    fi
 
     export LIT_ALLOW_FAILURES=1
 
@@ -45,7 +48,8 @@ $(docker_gap_finding_usage_image_build_options)
 
 Options:
   --bind-repo                   Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
-  --lit-filter <prefix>         LIT --filter= prefix; repeat for multiple (default: from image /work/.sancov-allowlist)
+  --tests <suite>               Lit suite (<project>/test or a subdirectory; default: image /work/.gap-test-suites)
+  --lit-filter <regex>          llvm-lit --filter= regex for every suite; repeatable
   -j <n>, --jobs <n>            Parallel jobs for llvm-lit and ninja (build)
   --help, -h                    Show this help
 
@@ -53,7 +57,7 @@ Examples:
   $(basename "$0") --output-dir ./data/baseline -j "\$(nproc)"
   $(basename "$0") --pr-id 203468 --output-dir ./data/pr-baseline -j "\$(nproc)"
   $(basename "$0") --build-image --llvm-repo /path/llvm-project --pr-id 203468 \\
-      --backend-tests amdgpu --output-dir ./data/pr-baseline -j "\$(nproc)"
+      --auto --output-dir ./data/pr-baseline -j "\$(nproc)"
 EOF
 }
 
@@ -67,20 +71,23 @@ if ! docker_gap_finding_validate_host_prerequisites; then
     exit 1
 fi
 
-DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --backend-tests"
+DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --auto (or --backends/--tests/--allowlist)"
 docker_image_cli_prepare
 
-docker_gap_default_lit_filters_from_image
+docker_gap_default_lit_suites_from_image
 
 docker_gap_finding_prepare_output_dir
-docker_gap_finding_write_lit_filters_file
+docker_gap_finding_write_scope_files
 rm -rf "${output_dir}/baseline"
 
 docker_env=(-e "IN_CONTAINER=1")
 docker_gap_finding_prepare_and_run docker_env
 
 echo "Image: ${image_ref}"
-echo "LIT filters: ${lit_filters[*]}"
+echo "LIT suites: ${tests[*]}"
+if [[ ${#lit_filters[@]} -gt 0 ]]; then
+    echo "LIT filters: ${lit_filters[*]}"
+fi
 echo "Wrote ${output_dir}/baseline/"
 
 emit_lit_failures_warning "$output_dir" "downstream gap lists"

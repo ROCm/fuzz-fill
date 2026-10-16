@@ -123,6 +123,7 @@ if [[ -z "${SKIP_TEST_SUITE:-}" ]]; then
     --llvm-lit "$INSTRUMENTED_BIN/llvm-lit" \
     --llc "$INSTRUMENTED_BIN/llc" \
     --opt "$INSTRUMENTED_BIN/opt" \
+    --tests llvm/test \
     --lit-filter "$FILTER"
   STEP1_ELAPSED="$(format_duration $((SECONDS - step_start)))"
   echo "    finished in $STEP1_ELAPSED"

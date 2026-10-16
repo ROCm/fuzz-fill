@@ -111,6 +111,7 @@ config.substitutions.extend(
         ("%reduce", f"{_venv_python} -m reduce"),
         ("%added-lines", f"{_venv_python} -m added_lines"),
         ("%gap-pruner", f"{_venv_python} -m gap_pruner"),
+        ("%gap-scope", f"{_venv_python} -m gap_scope"),
     ]
 )
 

@@ -13,8 +13,11 @@ docker_image_cli_init_vars() {
     keep_image=0
     force_build=0
     llvm_repo=""
-    backend_tests=""
     github_repo=""
+    backends=""
+    allowlist=""
+    tests=()
+    auto_scope=0
 }
 
 # Parse one image-related flag. Returns 0 if consumed; sets DOCKER_IMAGE_CLI_SHIFT.
@@ -55,10 +58,34 @@ docker_image_cli_try_parse() {
             DOCKER_IMAGE_CLI_SHIFT=2
             return 0
             ;;
-        --backend-tests)
-            [[ $# -ge 2 ]] || { echo "error: --backend-tests requires a value" >&2; exit 2; }
-            backend_tests="$2"
+        --backends)
+            [[ $# -ge 2 ]] || { echo "error: --backends requires a value" >&2; exit 2; }
+            backends="$2"
             DOCKER_IMAGE_CLI_SHIFT=2
+            return 0
+            ;;
+        --allowlist)
+            [[ $# -ge 2 ]] || { echo "error: --allowlist requires a value" >&2; exit 2; }
+            allowlist="$2"
+            DOCKER_IMAGE_CLI_SHIFT=2
+            return 0
+            ;;
+        --tests)
+            [[ $# -ge 2 ]] || { echo "error: --tests requires a value" >&2; exit 2; }
+            case "$2" in
+                */test|*/test/*) ;;
+                *)
+                    echo "error: --tests must be <project>/test or a subdirectory: $2" >&2
+                    exit 1
+                    ;;
+            esac
+            tests+=("$2")
+            DOCKER_IMAGE_CLI_SHIFT=2
+            return 0
+            ;;
+        --auto)
+            auto_scope=1
+            DOCKER_IMAGE_CLI_SHIFT=1
             return 0
             ;;
         --github-repo)
@@ -81,7 +108,6 @@ docker_image_cli_try_parse() {
 
 docker_image_cli_prepare() {
     docker_image_validate_build_flags
-    docker_image_normalize_backend_tests
     docker_image_validate_pr_id
     docker_image_resolve_ref
     docker_image_ensure

@@ -52,6 +52,37 @@ def _merge_and_symbolize_sancov(sancov: Sancov) -> None:
     )
 
 
+def _sancovs_for_tools(
+    tools: list[str],
+    sancov_bin: Path,
+    raw_sancov_dir: Path,
+    instrumented_bin: Path,
+    build_root: Path,
+) -> list[Sancov]:
+    """One ``Sancov`` per tool, aimed at the binary that emitted its dumps."""
+    sancovs: list[Sancov] = []
+    for tool in tools:
+        symbolize_target = _resolve_symbolize_target(
+            instrumented_bin, build_root, tool
+        )
+        sancovs.append(
+            Sancov(sancov_bin, symbolize_target, raw_sancov_dir, tool)
+        )
+    return sancovs
+
+
+def _merge_and_symbolize_sancovs(sancovs: list[Sancov], workers: int) -> None:
+    """Merge each tool's raw dumps, then symbolize the merged file.
+
+    *workers* is the cap shared with the later symcov load. Threads only wait
+    on the ``sancov`` subprocesses.
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_merge_and_symbolize_sancov, s) for s in sancovs]
+        for future in concurrent.futures.as_completed(futures):
+            future.result()
+
+
 def _find_unittests_executables(unittests_root: Path, tool: str) -> list[Path]:
     """Executable paths under ``unittests/`` whose basename matches *tool*."""
     if not unittests_root.is_dir():
@@ -69,29 +100,46 @@ def _find_unittests_executables(unittests_root: Path, tool: str) -> list[Path]:
     return matches
 
 
+def _is_lit_temporary_tool(tool: str) -> bool:
+    """True for a lit ``%t`` copy such as ``exec-options.ll.tmp.bin--``.
+
+    Lit names ``%t`` ``<test>.tmp``. Tests that copy an instrumented tool onto
+    that path emit sancov dumps under the copy's basename. Those copies are not
+    build products, so they are skipped. Any other missing binary still fails.
+    """
+    return ".tmp." in tool
+
+
 def _resolve_symbolize_target(bin_dir: Path, build_root: Path, tool: str) -> Path:
     """Locate the binary that produced ``<tool>.*.sancov`` dumps.
 
-    Tools normally live in ``bin/``. Backend lit filters can also select
-    LLVM-Unit shards whose binaries live under ``unittests/`` (for example
-    ``unittests/MC/AMDGPU/AMDGPUMCTests``).
+    Tools normally live in ``bin/``. Lit unit suites also select gtest binaries
+    under ``unittests/`` (LLVM-Unit, e.g. ``unittests/MC/AMDGPU/AMDGPUMCTests``)
+    and under ``tools/clang/unittests/`` (Clang-Unit, e.g.
+    ``tools/clang/unittests/AllClangUnitTests``).
     """
     candidate = bin_dir / tool
     if candidate.is_file():
         return candidate
 
-    matches = _find_unittests_executables(build_root / "unittests", tool)
+    search_roots = (
+        build_root / "unittests",
+        build_root / "tools" / "clang" / "unittests",
+    )
+    matches: list[Path] = []
+    for root in search_roots:
+        matches.extend(_find_unittests_executables(root, tool))
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
         listed = "\n".join(f"  {path}" for path in matches)
         raise SystemExit(
             f"error: multiple instrumented binaries named {tool!r} under "
-            f"{build_root / 'unittests'}:\n{listed}"
+            f"{' or '.join(str(root) for root in search_roots)}:\n{listed}"
         )
     raise SystemExit(
         f"error: instrumented binary for {tool!r} not found: {candidate} "
-        f"(also searched under {build_root / 'unittests'})"
+        f"(also searched under {' and '.join(str(root) for root in search_roots)})"
     )
 
 
@@ -183,7 +231,7 @@ class TestRunner:
         if not out_dir.exists():
             out_dir.mkdir(parents=True, exist_ok=True)
 
-        cov_opts = f"coverage=1:coverage_dir={out_dir}"
+        cov_opts = f"coverage=1:coverage_dir={out_dir}:print_coverage_summary=0"
         
         prev = env.get("UBSAN_OPTIONS", "").strip()
         env["UBSAN_OPTIONS"] = f"{cov_opts}:{prev}" if prev else cov_opts
@@ -432,7 +480,16 @@ class TestRunner:
                         f"{removed} sancov dump(s); llvm-lit selected no tests",
                         flush=True,
                     )
-            tools = Sancov.discover_tools(self.raw_sancov_output_dir)
+            discovered = Sancov.discover_tools(self.raw_sancov_output_dir)
+            tools: list[str] = []
+            for tool in discovered:
+                if _is_lit_temporary_tool(tool):
+                    print(
+                        f"warning: skipping lit temporary coverage for {tool!r}",
+                        flush=True,
+                    )
+                    continue
+                tools.append(tool)
             if not tools:
                 if self.require_sancov:
                     raise SystemExit(
@@ -452,53 +509,46 @@ class TestRunner:
                 raise SystemExit(
                     "error: --llc is required to locate the instrumented bin directory"
                 )
-            if self.filepaths.sancov is None:
+            sancov_bin = self.filepaths.sancov
+            if sancov_bin is None:
                 raise SystemExit("error: --sancov is required to merge and symbolize coverage")
 
             instrumented_bin = self.filepaths.llc.parent
             build_root = instrumented_bin.parent
-            sancovs: list[Sancov] = []
-            for tool in tools:
-                symbolize_target = _resolve_symbolize_target(
-                    instrumented_bin, build_root, tool
-                )
-                sancovs.append(
-                    Sancov(
-                        self.filepaths.sancov,
-                        symbolize_target,
-                        self.raw_sancov_output_dir,
-                        tool,
-                    )
-                )
+            sancovs = _sancovs_for_tools(
+                tools,
+                sancov_bin,
+                self.raw_sancov_output_dir,
+                instrumented_bin,
+                build_root,
+            )
+            # Same resolution as lit: honor -j when set, else core count, capped
+            # at MAX_LIT_JOBS. Previously, jobs=None meant one worker per tool
+            # with no cap, which OOMs on high-core Docker hosts.
+            workers = min(resolve_lit_job_count(self.jobs), len(sancovs))
+            _merge_and_symbolize_sancovs(sancovs, workers)
 
-            workers = len(sancovs)
-            if self.jobs is not None:
-                workers = min(self.jobs, workers)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = [
-                    pool.submit(_merge_and_symbolize_sancov, s) for s in sancovs
-                ]
-                for future in concurrent.futures.as_completed(futures):
-                    future.result()
+        coverage_dfs = []
+        for tool, sancov in zip(tools, sancovs):
+            df = Sancov.load_coverage_dfs([sancov.get_merged_symcov_path()], "")[0]
+            coverage_dfs.append(df)
 
-        coverage_dfs = Sancov.load_coverage_dfs_from_sancovs(sancovs)
-        address_line_maps, line_point_summaries, coverage = Sancov.get_joint_coverage(
-            coverage_dfs
-        )
-
-        for tool, address_line_map, line_point_summary in zip(
-            tools, address_line_maps, line_point_summaries
-        ):
+            address_line_map = Sancov.build_address_line_map(df)
+            line_point_summary = Sancov.build_line_point_summary(address_line_map)
             address_line_map.to_csv(
                 self.filepaths.output_dir
                 / Sancov.tool_address_line_map_filename(tool),
                 index=False,
             )
+            del address_line_map
             line_point_summary.to_csv(
                 self.filepaths.output_dir
                 / Sancov.tool_line_point_summary_filename(tool),
                 index=False,
             )
+            del line_point_summary
+
+        coverage = Sancov.build_coverage_summary(coverage_dfs)
         coverage.to_csv(
             self.filepaths.output_dir / self.filepaths.line_coverage_summary_file,
             index=False,

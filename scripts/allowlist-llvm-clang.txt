@@ -1,0 +1,4 @@
+# Enable instrumentation for llvm/lib and clang/lib
+src:*/llvm/lib/*
+src:*/clang/lib/*
+fun:*

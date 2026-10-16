@@ -36,8 +36,8 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: aws-linux-scale-rocm-medium-dev
-    timeout-minutes: 45
+    runs-on: aws-linux-scale-rocm-medium
+    timeout-minutes: 120
     permissions:
       contents: read
       actions: write
@@ -63,8 +63,23 @@ jobs:
       FUZZ_FILL_LLVM_DIS: /work/llvm-build-sancov/bin/llvm-dis
       LLVM_MIRROR_DIR: /work/llvm-mirror
       FUZZ_FILL_LLVM_REPO: /work/llvm-project
+      # nproc inside this container can be the host CPU count.
+      FUZZ_FILL_E2E_JOBS: "32"
 
     steps:
+      - name: Report container resources
+        run: |
+          echo "nproc=$(nproc) nproc_all=$(nproc --all)"
+          awk '/MemTotal/ {printf "mem_total_gib=%.1f\n", $2/1024/1024}' /proc/meminfo
+          if [[ -r /sys/fs/cgroup/memory.max ]]; then
+            max="$(cat /sys/fs/cgroup/memory.max)"
+            if [[ "$max" == "max" ]]; then
+              echo "cgroup_memory_max=unlimited"
+            else
+              awk -v b="$max" 'BEGIN {printf "cgroup_memory_max_gib=%.1f\n", b/1024/1024/1024}'
+            fi
+          fi
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -106,13 +121,16 @@ jobs:
 
       - name: Build sancov LLVM
         run: |
+          bash ./scripts/ci-cgroup-memstat.sh 30 &
+          memstat_pid=$!
+          trap 'kill "$memstat_pid" 2>/dev/null || true' EXIT
           ./scripts/build-llvm-sancov.sh \
             "${SANCOV_ALLOWLIST}" \
             "${LLVM_PROJECT_DIR}" \
             "${LLVM_BUILD_DIR}" \
             --bootstrap-bin "${LLVM_RELEASE_BIN}" \
             --enable-projects clang \
-            "$(nproc)"
+            "${FUZZ_FILL_E2E_JOBS}"
 
       - name: Install fuzz-fill venv
         run: |
@@ -126,6 +144,9 @@ jobs:
 
       - name: Run integration tests
         run: |
+          bash ./scripts/ci-cgroup-memstat.sh 30 &
+          memstat_pid=$!
+          trap 'kill "$memstat_pid" 2>/dev/null || true' EXIT
           source "${VENV_DIR}/bin/activate"
           ./integration-tests/test.sh \
             --venv "${VENV_DIR}" \
@@ -181,6 +202,15 @@ jobs:
             apt-get update
             apt-get install -y gh
           fi
+          # Lit buffers each test until it exits. The tests tee phases here so
+          # this tail shows them while the test is still running.
+          e2e_log=/work/e2e-progress.log
+          : > "$e2e_log"
+          tail -f "$e2e_log" &
+          tail_pid=$!
+          bash ./scripts/ci-cgroup-memstat.sh 30 &
+          memstat_pid=$!
+          set +e
           ./integration-tests/test.sh \
             --venv "${VENV_DIR}" \
             --llvm-build "${LLVM_BUILD_BIN}" \
@@ -189,3 +219,7 @@ jobs:
             --param e2e=1 \
             -j 1 \
             -v integration-tests/e2e/
+          status=$?
+          kill "$tail_pid" "$memstat_pid" 2>/dev/null || true
+          wait "$tail_pid" "$memstat_pid" 2>/dev/null || true
+          exit "$status"
