@@ -65,9 +65,6 @@ jobs:
       FUZZ_FILL_LLVM_REPO: /work/llvm-project
       # nproc inside this container can be the host CPU count.
       FUZZ_FILL_E2E_JOBS: "32"
-      # Reclaim file cache once usage crosses this fraction of memory.max,
-      # or of MemTotal when the cgroup cap is unlimited.
-      FUZZ_FILL_MEMORY_HIGH_PERCENT: "85"
 
     steps:
       - name: Report container resources
@@ -81,29 +78,6 @@ jobs:
             else
               awk -v b="$max" 'BEGIN {printf "cgroup_memory_max_gib=%.1f\n", b/1024/1024/1024}'
             fi
-          fi
-
-      - name: Bound container memory.high
-        run: |
-          percent="${FUZZ_FILL_MEMORY_HIGH_PERCENT}"
-          mem_kib="$(awk '/MemTotal/ {print $2}' /proc/meminfo)"
-          base_bytes=$(( mem_kib * 1024 ))
-          base_label="MemTotal"
-          if [[ -r /sys/fs/cgroup/memory.max ]]; then
-            max="$(cat /sys/fs/cgroup/memory.max)"
-            if [[ "$max" != "max" && "$max" -gt 0 ]]; then
-              base_bytes="$max"
-              base_label="memory.max"
-            fi
-          fi
-          high_bytes=$(( base_bytes * percent / 100 ))
-          if echo "$high_bytes" > /sys/fs/cgroup/memory.high 2>/tmp/memory-high.err; then
-            awk -v b="$(cat /sys/fs/cgroup/memory.high)" -v p="$percent" -v label="$base_label" \
-              'BEGIN {printf "memory_high_gib=%.1f percent=%s of %s\n", b/1024/1024/1024, p, label}'
-          else
-            echo "memory_high_set=failed"
-            cat /tmp/memory-high.err
-            exit 1
           fi
 
       - name: Checkout
