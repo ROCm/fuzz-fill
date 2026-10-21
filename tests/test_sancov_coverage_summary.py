@@ -366,5 +366,33 @@ class SancovDiscoverToolsTest(unittest.TestCase):
             self.assertEqual(Sancov.discover_tools(Path(tmp)), [])
 
 
+class SancovGroupRawDumpsTest(unittest.TestCase):
+    def test_groups_sorted_paths_and_ignores_non_matching(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp)
+            (raw / "llc.456.sancov").write_bytes(b"")
+            (raw / "llc.123.sancov").write_bytes(b"")
+            (raw / "opt.789.sancov").write_bytes(b"")
+            (raw / "notes.txt").write_text("ignore", encoding="utf-8")
+            (raw / "not-a-dump.sancov").write_bytes(b"")
+            # Glob ``llc.*.sancov`` would match this; the regex does not assign
+            # it to llc (pid must be numeric-only after the tool name).
+            (raw / "llc.ll.tmp.bin--.7.sancov").write_bytes(b"")
+            groups = Sancov.group_raw_dumps(raw)
+            self.assertEqual(sorted(groups), ["llc", "llc.ll.tmp.bin--", "opt"])
+            self.assertEqual(
+                [Path(p).name for p in groups["llc"]],
+                ["llc.123.sancov", "llc.456.sancov"],
+            )
+            self.assertEqual(
+                [Path(p).name for p in groups["llc.ll.tmp.bin--"]],
+                ["llc.ll.tmp.bin--.7.sancov"],
+            )
+            self.assertEqual(Sancov.discover_tools(raw), sorted(groups))
+
+
 if __name__ == "__main__":
     unittest.main()

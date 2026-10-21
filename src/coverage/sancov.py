@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import concurrent.futures
+import os
 import re
 import shutil
 import subprocess
 import tempfile
+from collections import defaultdict
+from collections.abc import Sequence
 import orjson
 import pandas as pd
 import numpy as np
@@ -17,6 +20,11 @@ from fuzz_fill.log import get_logger, log_timing, run_subprocess
 logger = get_logger("coverage.sancov")
 
 _RAW_SANCOV_NAME = re.compile(r"^(?P<tool>.+)\.(?P<pid>\d+)\.sancov$")
+
+
+def _quote_rsp_path(path: str) -> str:
+    """Quote a path for an LLVM GNU-style response file."""
+    return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _load_symcov(path: Path | str) -> dict:
@@ -48,14 +56,24 @@ class Sancov:
         return f"0x{s.lower()}"
 
     @staticmethod
+    def group_raw_dumps(raw_sancov_dir: Path) -> dict[str, list[str]]:
+        """One ``os.scandir`` pass: tool basename to sorted dump path strings.
+
+        Only names matching ``<tool>.<pid>.sancov`` with a numeric process ID
+        are kept. Strings avoid building a ``Path`` per file.
+        """
+        groups: dict[str, list[str]] = defaultdict(list)
+        with os.scandir(raw_sancov_dir) as entries:
+            for entry in entries:
+                match = _RAW_SANCOV_NAME.match(entry.name)
+                if match:
+                    groups[match.group("tool")].append(entry.path)
+        return {tool: sorted(paths) for tool, paths in groups.items()}
+
+    @staticmethod
     def discover_tools(raw_sancov_dir: Path) -> list[str]:
         """Sorted tool basenames that emitted ``<tool>.<pid>.sancov`` dumps."""
-        tools: set[str] = set()
-        for path in raw_sancov_dir.glob("*.sancov"):
-            match = _RAW_SANCOV_NAME.match(path.name)
-            if match:
-                tools.add(match.group("tool"))
-        return sorted(tools)
+        return sorted(Sancov.group_raw_dumps(raw_sancov_dir))
 
     @staticmethod
     def tool_address_line_map_filename(tool: str) -> str:
@@ -71,11 +89,9 @@ class Sancov:
         symbolize_target: Path | None = None,
         raw_sancov_dir: Path | None = None,
         suffix: str | None = None,
-        union_batch: int = 200,
     ) -> None:
         self.sancov_bin = sancov
         self.symbolize_target = symbolize_target
-        self.union_batch = union_batch
         self.raw_sancov_dir = raw_sancov_dir
         self.suffix = suffix
 
@@ -406,47 +422,74 @@ class Sancov:
 
     def has_raw_files(self) -> bool:
         """True if any raw ``.sancov`` files exist for this suffix."""
-        return any(self.raw_sancov_dir.glob(f"{self.suffix}.*.sancov"))
+        with os.scandir(self.raw_sancov_dir) as entries:
+            for entry in entries:
+                match = _RAW_SANCOV_NAME.match(entry.name)
+                if match and match.group("tool") == self.suffix:
+                    return True
+        return False
+
+    def raw_files(self) -> list[Path]:
+        """Sorted raw ``.sancov`` dumps for this suffix."""
+        paths: list[Path] = []
+        with os.scandir(self.raw_sancov_dir) as entries:
+            for entry in entries:
+                match = _RAW_SANCOV_NAME.match(entry.name)
+                if match and match.group("tool") == self.suffix:
+                    paths.append(Path(entry.path))
+        return sorted(paths)
+
+    def union_files(
+        self, inputs: Sequence[str | Path], output: Path
+    ) -> None:
+        """Union *inputs* into *output*.
+
+        A single input is copied. Multiple inputs are passed to ``sancov -union``
+        via a response file (``@list``), one quoted path per line.
+        """
+        if not inputs:
+            raise ValueError("union_files requires at least one input")
+        if len(inputs) == 1:
+            shutil.copy(str(inputs[0]), output)
+            return
+
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            prefix="sancov-union-",
+            suffix=".rsp",
+            dir=output.parent,
+            delete=False,
+            mode="w",
+            encoding="utf-8",
+        ) as list_file:
+            list_file.write(
+                "".join(_quote_rsp_path(str(path)) + "\n" for path in inputs)
+            )
+            rsp = Path(list_file.name)
+        try:
+            run_subprocess(
+                logger,
+                [
+                    str(self.sancov_bin),
+                    "-union",
+                    f"@{rsp}",
+                    "--output",
+                    str(output),
+                ],
+                check=True,
+            )
+        finally:
+            rsp.unlink(missing_ok=True)
 
     def merge(self) -> None:
         """Merge the sancov files for the given suffix."""
         with log_timing(logger, f"sancov merge ({self.suffix})"):
-            merged_out = self.get_merged_sancov_path()
-
-            raw_files = list(self.raw_sancov_dir.glob(f"{self.suffix}.*.sancov"))
+            raw_files = self.raw_files()
             if not raw_files:
-                raise FileNotFoundError(f"No sancov files found for suffix: {self.suffix}")
-
-            """Merge raw ``.sancov`` files with repeated ``sancov -union`` (batched)."""
-            if len(raw_files) == 1:
-                shutil.copy(raw_files[0], merged_out)
-                return
-
-            sancov = self.sancov_bin
-            batch = self.union_batch
-            layer = list(raw_files)
-            with tempfile.TemporaryDirectory(dir=merged_out.parent) as tmp:
-                tmp_path = Path(tmp)
-                round_idx = 0
-                while len(layer) > 1:
-                    nxt: list[Path] = []
-                    for i in range(0, len(layer), batch):
-                        chunk = layer[i : i + batch]
-                        if len(chunk) == 1:
-                            nxt.append(chunk[0])
-                            continue
-                        out_f = tmp_path / f"u_{round_idx}_{len(nxt)}.sancov"
-                        run_subprocess(
-                            logger,
-                            [str(sancov), "-union"]
-                            + [str(p) for p in chunk]
-                            + ["--output", str(out_f)],
-                            check=True,
-                        )
-                        nxt.append(out_f)
-                    layer = nxt
-                    round_idx += 1
-                shutil.copy(layer[0], merged_out)
+                raise FileNotFoundError(
+                    f"No sancov files found for suffix: {self.suffix}"
+                )
+            self.union_files(raw_files, self.get_merged_sancov_path())
     
     def symbolize(
         self,

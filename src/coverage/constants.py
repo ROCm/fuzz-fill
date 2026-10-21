@@ -25,8 +25,8 @@ DEFAULT_TARGET_LINES_REPORT = "target_lines_uncovered.csv"
 DEFAULT_LIT_FAILURES_REPORT = "lit_failures.json"
 DEFAULT_TIMINGS_FILE = "timings.csv"
 
-# Sancov constants
-UNION_BATCH_SIZE = 200
+# Per-process memory budget for ``sancov -symbolize`` (round-2 pool sizing).
+SYMBOLIZE_MEMORY_BYTES = 8 * 1024**3
 
 # llvm-lit parallelism cap (workaround for high core-count Docker hosts)
 MAX_LIT_JOBS = 384
