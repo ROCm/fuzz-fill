@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from collections import defaultdict
 from collections.abc import Sequence
@@ -20,6 +21,10 @@ from fuzz_fill.log import get_logger, log_timing, run_subprocess
 logger = get_logger("coverage.sancov")
 
 _RAW_SANCOV_NAME = re.compile(r"^(?P<tool>.+)\.(?P<pid>\d+)\.sancov$")
+
+# Implementations accepted by Sancov.union_files.
+UNION_IMPLS = ("python", "sancov")
+DEFAULT_UNION_IMPL = "python"
 
 
 def _quote_rsp_path(path: str) -> str:
@@ -439,16 +444,36 @@ class Sancov:
                     paths.append(Path(entry.path))
         return sorted(paths)
 
-    def union_files(
-        self, inputs: Sequence[str | Path], output: Path
-    ) -> None:
-        """Union *inputs* into *output*.
+    def union_command(self, impl: str = DEFAULT_UNION_IMPL) -> list[str]:
+        """Command prefix for *impl*; it takes ``@list --output <path>``.
 
-        A single input is copied. Multiple inputs are passed to ``sancov -union``
+        ``python`` runs ``coverage.sancov_union``, a TEMPORARY replacement used
+        by default until the upstream ``sancov -union`` fix lands.
+        ``sancov`` runs ``sancov -union`` from ``self.sancov_bin``.
+        """
+        if impl == "python":
+            return [sys.executable, "-m", "coverage.sancov_union"]
+        if impl == "sancov":
+            return [str(self.sancov_bin), "-union"]
+        raise ValueError(
+            f"unknown sancov union implementation {impl!r}; "
+            f"expected one of {', '.join(UNION_IMPLS)}"
+        )
+
+    def union_files(
+        self,
+        inputs: Sequence[str | Path],
+        output: Path,
+        impl: str = DEFAULT_UNION_IMPL,
+    ) -> None:
+        """Union *inputs* into *output* with the *impl* union utility.
+
+        A single input is copied. Multiple inputs are passed to the utility
         via a response file (``@list``), one quoted path per line.
         """
         if not inputs:
             raise ValueError("union_files requires at least one input")
+        command = self.union_command(impl)
         if len(inputs) == 1:
             shutil.copy(str(inputs[0]), output)
             return
@@ -469,13 +494,7 @@ class Sancov:
         try:
             run_subprocess(
                 logger,
-                [
-                    str(self.sancov_bin),
-                    "-union",
-                    f"@{rsp}",
-                    "--output",
-                    str(output),
-                ],
+                [*command, f"@{rsp}", "--output", str(output)],
                 check=True,
             )
         finally:
