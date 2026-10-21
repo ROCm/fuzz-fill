@@ -23,8 +23,9 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
   ninja_jobs        Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
 
 Configures one RelWithDebInfo + SanitizerCoverage tree and builds ninja all.
-The sancov tool in that tree is then replaced by a separate Release build with
-assertions and SanitizerCoverage disabled.
+The sancov tool and the lit helpers FileCheck, not, count, and split-file in
+that tree are then replaced by a separate Release build with assertions and
+SanitizerCoverage disabled, so those processes do not write .sancov dumps.
 Bootstrap supplies clang, clang++, and ld.lld; llvm-tblgen is built in-tree.
 EOF
 }
@@ -278,19 +279,24 @@ echo "=== Instrumented tree (RelWithDebInfo + SanitizerCoverage, ninja all) ==="
     ninja "${ninja_args[@]}"
 )
 
-echo "=== Release sancov tool (no SanitizerCoverage) ==="
+echo "=== Release sancov tool and lit helpers (no SanitizerCoverage) ==="
 mkdir -p "$SANCOV_TOOL_BUILD_DIR"
+# Lit helpers are invoked once per test. Built here so they do not link the
+# coverage runtime and do not write a .sancov file on exit.
+RELEASE_TOOLS=(sancov FileCheck not count split-file)
 (
     cd "$SANCOV_TOOL_BUILD_DIR"
     cmake "${SANCOV_TOOL_CMAKE_ARGS[@]}" \
         "$LLVM_DIR/llvm"
-    ninja "${ninja_args[@]}" sancov
+    ninja "${ninja_args[@]}" "${RELEASE_TOOLS[@]}"
 )
-if [[ ! -x "$SANCOV_TOOL_BUILD_DIR/bin/sancov" ]]; then
-    echo "Error: release sancov not found at $SANCOV_TOOL_BUILD_DIR/bin/sancov" >&2
-    exit 1
-fi
-cp -f "$SANCOV_TOOL_BUILD_DIR/bin/sancov" "$SANCOV_BUILD_DIR/bin/sancov"
+for tool in "${RELEASE_TOOLS[@]}"; do
+    if [[ ! -x "$SANCOV_TOOL_BUILD_DIR/bin/$tool" ]]; then
+        echo "Error: release $tool not found at $SANCOV_TOOL_BUILD_DIR/bin/$tool" >&2
+        exit 1
+    fi
+    cp -f "$SANCOV_TOOL_BUILD_DIR/bin/$tool" "$SANCOV_BUILD_DIR/bin/$tool"
+done
 
 if [[ ! -f "$SANCOV_BUILD_DIR/test/lit.site.cfg.py" ]]; then
     echo "Error: test/lit.site.cfg.py not found under $SANCOV_BUILD_DIR" >&2

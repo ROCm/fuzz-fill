@@ -110,6 +110,24 @@ def _is_lit_temporary_tool(tool: str) -> bool:
     return ".tmp." in tool
 
 
+# ``scripts/build-llvm-sancov.sh`` replaces these with a Release build that has
+# SanitizerCoverage disabled (RELEASE_TOOLS). They run on every lit test and
+# are not compiler coverage. Ignore their dumps if that replacement is missed
+# and they are instrumented by accident.
+_RELEASE_UTILITY_TOOLS = frozenset({
+    "sancov",
+    "FileCheck",
+    "not",
+    "count",
+    "split-file",
+})
+
+
+def _is_release_utility_tool(tool: str) -> bool:
+    """True for the sancov tool and the lit helpers built without coverage."""
+    return tool in _RELEASE_UTILITY_TOOLS
+
+
 def _resolve_symbolize_target(bin_dir: Path, build_root: Path, tool: str) -> Path:
     """Locate the binary that produced ``<tool>.*.sancov`` dumps.
 
@@ -483,6 +501,12 @@ class TestRunner:
             discovered = Sancov.discover_tools(self.raw_sancov_output_dir)
             tools: list[str] = []
             for tool in discovered:
+                if _is_release_utility_tool(tool):
+                    print(
+                        f"warning: ignoring sancov dumps from release utility {tool!r}",
+                        flush=True,
+                    )
+                    continue
                 if _is_lit_temporary_tool(tool):
                     print(
                         f"warning: skipping lit temporary coverage for {tool!r}",
