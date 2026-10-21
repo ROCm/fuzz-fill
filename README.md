@@ -876,7 +876,7 @@ export GH_TOKEN="$(gh auth token)"   # or ${{ github.token }} in CI
   -v integration-tests/e2e/gap-finding-pr/
 ```
 
-E2E tests use [`scripts/prepare-pr-llvm.sh`](scripts/prepare-pr-llvm.sh) with `--plain-clone` (same squash + self-contained export as the Docker PR path), then build SanitizerCoverage and run gap finding, gap filling, and **llvm-reduce** on the pinned gap-fill fixture. The first run can take several hours (LLVM build + amdgpu LIT slice). The reduction step checks that `reduced/reduced.ll` exists and is smaller than the disassembled input (not a byte-for-byte golden match).
+E2E tests use [`scripts/prepare-pr-llvm.sh`](scripts/prepare-pr-llvm.sh) (local `--reference` to `llvm-project`, or CI’s filtered mirror), then build SanitizerCoverage and run gap finding, gap filling, and **llvm-reduce** on the pinned gap-fill fixture. The first run can take several hours (LLVM build + amdgpu LIT slice). The reduction step checks that `reduced/reduced.ll` exists and is smaller than the disassembled input (not a byte-for-byte golden match).
 
 ---
 

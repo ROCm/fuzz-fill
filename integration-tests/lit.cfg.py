@@ -143,7 +143,8 @@ if lit_config.params.get("e2e"):
         )
 
     # E2e PR prepare: CI sets FUZZ_FILL_E2E_LLVM_MIRROR to a cached filtered
-    # llvm-project git mirror; local runs leave it unset and use plain-clone.
+    # llvm-project git mirror; local runs leave it unset and use
+    # --reference %repo-root/llvm-project.
     _e2e_mirror = os.environ.get("FUZZ_FILL_E2E_LLVM_MIRROR")
     if _e2e_mirror:
         _e2e_mirror = os.path.abspath(os.path.expanduser(_e2e_mirror))
