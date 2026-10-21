@@ -10,7 +10,7 @@ llvm_dir=""
 image_tag="${IMAGE_TAG:-latest}"
 allowlist="amdgpu"
 sancov_instrumentation_mode=""
-llvm_release_version="22.1.8"
+llvm_release_version="22.1.8"  # llvm-project source tag (bootstrap is apt.llvm.org)
 ninja_jobs=""
 llvm_targets=""
 llvm_enable_projects="clang"
@@ -28,8 +28,9 @@ Options:
   --llvm-dir <path>              Use a local llvm-project checkout instead of downloading
                                  the tagged LLVM source from GitHub. The path must
                                  contain an llvm/ subdirectory.
-  --llvm-release-version <ver>   Official LLVM GitHub release for bootstrap toolchain
-                                 (default: 22.1.8)
+  --llvm-release-version <ver>   llvm-project source tag llvmorg-<ver> when --llvm-dir
+                                 is omitted (default: 22.1.8). Bootstrap clang comes
+                                 from apt.llvm.org (snapshot), not this release.
   --tag <tag>                    Docker image tag (default: latest)
   --allowlist <target>           SanitizerCoverage allowlist preset: amdgpu, spirv,
                                  llvm, clang, or llvm-clang (default: amdgpu)
@@ -55,6 +56,7 @@ Examples:
   $(basename "$0") --sancov-instrumentation-mode edge --tag edge
   $(basename "$0") --targets 'X86;AMDGPU' --enable-projects clang --tag bench
   $(basename "$0") --llvm-release-version 22.1.8 -j "\$(nproc)"
+  $(basename "$0") --llvm-dir /path/to/llvm-project -j "\$(nproc)"
 EOF
 }
 

@@ -9,7 +9,7 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
   allowlist         Sanitizer coverage allowlist file
   llvm_dir          LLVM source tree (directory containing llvm/)
   sancov_build_dir  Output directory for the SanitizerCoverage-instrumented LLVM build
-  --bootstrap-bin   Directory with clang, clang++, and ld.lld (e.g. official LLVM release bin/)
+  --bootstrap-bin   Directory with clang, clang++, and ld.lld
   --ignorelist      Sanitizer coverage ignorelist file (optional)
   --instrumentation-mode func|bb|edge
                     SanitizerCoverage instrumentation granularity (default: bb).
@@ -26,7 +26,8 @@ Configures one RelWithDebInfo + SanitizerCoverage tree and builds ninja all.
 The sancov tool and the lit helpers FileCheck, not, count, and split-file in
 that tree are then replaced by a separate Release build with assertions and
 SanitizerCoverage disabled, so those processes do not write .sancov dumps.
-Bootstrap supplies clang, clang++, and ld.lld; llvm-tblgen is built in-tree.
+Bootstrap supplies clang, clang++, and ld.lld (apt.llvm.org snapshot or another
+toolchain bin/); llvm-tblgen is built in-tree.
 EOF
 }
 

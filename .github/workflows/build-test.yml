@@ -48,8 +48,7 @@ jobs:
       WORK_ROOT: /work
       LLVM_RELEASE_VERSION: "22.1.8"
       SANCOV_ALLOWLIST: scripts/allowlist-amdgpu.txt
-      LLVM_RELEASE_DIR: /work/llvm-release
-      LLVM_RELEASE_BIN: /work/llvm-release/bin
+      LLVM_RELEASE_BIN: /usr/lib/llvm-24/bin
       LLVM_PROJECT_DIR: /work/llvm-project
       LLVM_BUILD_DIR: /work/llvm-build-sancov
       LLVM_BUILD_BIN: /work/llvm-build-sancov/bin
@@ -91,19 +90,8 @@ jobs:
       - name: Install CMake
         run: ./scripts/image/install-cmake.sh
 
-      - name: Restore LLVM release bootstrap binaries
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache-llvm-release
-        with:
-          path: ${{ env.LLVM_RELEASE_DIR }}
-          key: fuzz-fill-llvm-release-${{ env.LLVM_RELEASE_VERSION }}
-
-      - name: Download LLVM release bootstrap binaries
-        if: steps.cache-llvm-release.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p "${LLVM_RELEASE_DIR}"
-          curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_RELEASE_VERSION}/LLVM-${LLVM_RELEASE_VERSION}-Linux-X64.tar.xz" \
-            | tar -xJ --strip-components=1 -C "${LLVM_RELEASE_DIR}"
+      - name: Install apt.llvm.org bootstrap
+        run: ./scripts/image/install-llvm-apt.sh 24
 
       - name: Restore LLVM source
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

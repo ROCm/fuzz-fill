@@ -109,14 +109,14 @@ pip install -e .
 
 ### LLVM builds
 
-You need an official **LLVM GitHub release** as bootstrap and one **SanitizerCoverage** build of llvm-project at the matching tag:
+You need a bootstrap LLVM bin directory (`clang`, `clang++`, `ld.lld`) and one **SanitizerCoverage** build of llvm-project:
 
 | Component | Purpose | How |
 |-----------|---------|-----|
-| **Release bootstrap** | `clang`, `clang++` for compiling LLVM | Download [LLVM release](https://github.com/llvm/llvm-project/releases) (e.g. `LLVM-22.1.8-Linux-X64.tar.xz`) |
-| **SanitizerCoverage** | Instrumented LLVM tree (`llc`, `opt`, `sancov`, …) | `./scripts/build-llvm-sancov.sh ./scripts/allowlist-amdgpu.txt llvm-project llvm-project/build-sancov --bootstrap-bin /path/to/LLVM-22.1.8/bin` |
+| **Bootstrap** | `clang`, `clang++`, `ld.lld` for compiling LLVM | Any LLVM install's `bin/` directory containing those tools |
+| **SanitizerCoverage** | Instrumented LLVM tree (`llc`, `opt`, `sancov`, …) | `./scripts/build-llvm-sancov.sh ./scripts/allowlist-amdgpu.txt llvm-project llvm-project/build-sancov --bootstrap-bin /path/to/llvm/bin` |
 
-`build-llvm-sancov.sh` builds one instrumented RelWithDebInfo tree (`ninja all`). Bootstrap supplies **clang/clang++ only**.
+`build-llvm-sancov.sh` builds one instrumented RelWithDebInfo tree (`ninja all`). Bootstrap supplies **clang/clang++/ld.lld**. The instrumented tree is usually built from a pinned llvm-project tag (default `llvmorg-22.1.8`) or a local checkout; that source revision is independent of the bootstrap version.
 
 Allowlist presets:
 
@@ -523,7 +523,7 @@ Optional commands outside the main workflows in fuzz-fill.
 
 ## Docker test image
 
-The Docker image bundles an official LLVM release bootstrap, an instrumented SanitizerCoverage LLVM tree, and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
+The Docker image bundles an apt.llvm.org snapshot bootstrap, an instrumented SanitizerCoverage LLVM tree, and a fuzz-fill venv. Use it when you want to run integration tests or experiment without building LLVM locally.
 
 **Scripts** (under [`scripts/docker/`](scripts/docker/)): [`build-image.sh`](scripts/docker/build-image.sh), [`build-image-pr.sh`](scripts/docker/build-image-pr.sh), [`ensure-image.sh`](scripts/docker/ensure-image.sh), [`gap-finding-baseline.sh`](scripts/docker/gap-finding-baseline.sh), [`gap-finding-pr.sh`](scripts/docker/gap-finding-pr.sh), [`gap-filling.sh`](scripts/docker/gap-filling.sh), [`reduction.sh`](scripts/docker/reduction.sh), [`run-full-workflow.sh`](scripts/docker/run-full-workflow.sh), [`test-image.sh`](scripts/docker/test-image.sh), [`tmp-container.sh`](scripts/docker/tmp-container.sh)
 
@@ -537,12 +537,12 @@ From the repo root (first build compiles LLVM and can take a while):
 ./scripts/docker/build-image.sh
 ```
 
-By default the image is tagged `fuzz-fill-test:latest`. LLVM source is downloaded at tag `llvmorg-22.1.8` and bootstrapped from the matching GitHub release.
+By default the image is tagged `fuzz-fill-test:latest`. LLVM source is downloaded at tag `llvmorg-22.1.8`. The bootstrap compiler is the apt.llvm.org snapshot.
 
 | Option | Meaning |
 |--------|---------|
 | `--llvm-dir <path>` | Use a local `llvm-project` checkout instead of downloading tagged source |
-| `--llvm-release-version <ver>` | Official LLVM release for bootstrap toolchain (default: `22.1.8`) |
+| `--llvm-release-version <ver>` | llvm-project source tag `llvmorg-<ver>` when `--llvm-dir` is omitted (default: `22.1.8`). Bootstrap clang comes from apt.llvm.org, not this release. |
 | `--tag <tag>` | Docker image tag (default: `latest`) |
 | `--allowlist amdgpu\|spirv\|llvm\|clang\|llvm-clang` | SanitizerCoverage allowlist baked into the instrumented build (default: `amdgpu`) |
 | `--enable-projects <list>` | `LLVM_ENABLE_PROJECTS` (default: `clang`). Pass an empty string to skip Clang. |
@@ -864,7 +864,7 @@ Both `--llvm-build` and `--llvm-sancov-build` point at the same SanitizerCoverag
 Tests under `integration-tests/e2e/` are marked `# REQUIRES: e2e` and are **not** run by default. Pass `--param e2e=1` to lit explicitly:
 
 ```bash
-export FUZZ_FILL_E2E_BOOTSTRAP_BIN=/path/to/LLVM-22.1.8/bin
+export FUZZ_FILL_E2E_BOOTSTRAP_BIN=/path/to/llvm/bin
 export GH_TOKEN="$(gh auth token)"   # or ${{ github.token }} in CI
 
 ./integration-tests/test.sh \
