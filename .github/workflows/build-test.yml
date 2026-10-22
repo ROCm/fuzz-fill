@@ -38,6 +38,7 @@ env:
   DEBIAN_FRONTEND: noninteractive
   WORK_ROOT: /work
   LLVM_APT_MAJOR: "24"
+  LLVM_RELEASE_BIN: /usr/lib/llvm-24/bin
   VENV_DIR: /work/fuzz-fill-venv
   VENV_BIN: /work/fuzz-fill-venv/bin
   # nproc inside this container can be the host CPU count.
@@ -55,7 +56,6 @@ jobs:
     env:
       LLVM_RELEASE_VERSION: "22.1.8"
       SANCOV_ALLOWLIST: scripts/allowlist-amdgpu.txt
-      LLVM_RELEASE_BIN: /usr/lib/llvm-${{ env.LLVM_APT_MAJOR }}/bin
       LLVM_PROJECT_DIR: /work/llvm-project
       LLVM_BUILD_DIR: /work/llvm-build-sancov
       LLVM_BUILD_BIN: /work/llvm-build-sancov/bin
@@ -158,7 +158,6 @@ jobs:
       matrix:
         pr: ["214457", "230193"]
     env:
-      LLVM_RELEASE_BIN: /usr/lib/llvm-${{ env.LLVM_APT_MAJOR }}/bin
       LLVM_MIRROR_DIR: /work/llvm-mirror
 
     steps:
