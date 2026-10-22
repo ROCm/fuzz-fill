@@ -1,0 +1,46 @@
+# REQUIRES: e2e, e2e-bootstrap, gh-token
+# COM: End-to-end PR gap finding for llvm/llvm-project#230193 (rule 3).
+# COM: Clones the PR, classifies scope with --auto, builds SanitizerCoverage,
+# COM: runs gap finding once, and checks that the added SROA.cpp line is covered.
+
+# RUN: rm -rf %t && mkdir -p %t
+# RUN: echo "pr-230193 CLONE $(date -u +%H:%M:%S)" >> /work/e2e-progress.log || true
+# COM: Prefer a reference clone. CI uses the filtered mirror; locally use repo-root/llvm-project.
+# RUN: %if e2e-llvm-mirror %{ %repo-root/scripts/prepare-pr-llvm.sh --pr-id 230193 --dest %t/llvm-project --reference %e2e-llvm-mirror --partial-reference --no-self-contained --squash-commit-file %t/squash-commit %} %else %{ %repo-root/scripts/prepare-pr-llvm.sh --pr-id 230193 --dest %t/llvm-project --reference %repo-root/llvm-project --squash-commit-file %t/squash-commit %}
+# RUN: echo "pr-230193 SCOPE $(date -u +%H:%M:%S)" >> /work/e2e-progress.log || true
+# RUN: bash -c '%gap-scope --llvm-repo %t/llvm-project --commit "$(cat %t/squash-commit)" > %t/scope.txt'
+# RUN: %FileCheck %s --input-file=%t/scope.txt --check-prefix=SCOPE
+# SCOPE: action=run
+# SCOPE: rule=3
+# SCOPE: backends=all
+# SCOPE: tests=llvm/test,clang/test
+# SCOPE: allowlist={{.*}}allowlist-llvm-clang.txt
+# COM: Read backends with command substitution. eval splits semicolon-separated lists.
+# COM: FUZZ_FILL_E2E_JOBS (set by CI) caps ninja and the later lit/merge -j.
+# RUN: bash -c 'set -o pipefail; echo "pr-230193 BUILD $(date -u +%H:%M:%S)" >> /work/e2e-progress.log || true; BACKENDS=$(sed -n "s/^backends=//p" %t/scope.txt); ALLOWLIST=$(sed -n "s/^allowlist=//p" %t/scope.txt); REPO_ROOT=%repo-root; source "$REPO_ROOT/scripts/lib/gap-scope.sh"; if test -x %t/build-sancov/bin/llvm-lit; then echo "pr-230193 BUILD skipped" >> /work/e2e-progress.log || true; else projects="$(gap_scope_enable_projects_for_allowlist "$ALLOWLIST")"; build_args=("$REPO_ROOT/scripts/build-llvm-sancov.sh" "$ALLOWLIST" %t/llvm-project %t/build-sancov --bootstrap-bin %e2e-bootstrap-bin --targets "$BACKENDS"); if [[ -n "$projects" ]]; then build_args+=(--enable-projects "$projects"); fi; if [[ -n "${FUZZ_FILL_E2E_JOBS:-}" ]]; then build_args+=("${FUZZ_FILL_E2E_JOBS}"); fi; if [[ -w /work ]]; then stdbuf -oL -eL "${build_args[@]}" 2>&1 | stdbuf -oL tee -a /work/e2e-progress.log; else "${build_args[@]}"; fi; fi'
+# RUN: grep '^LLVM_TARGETS_TO_BUILD:' %t/build-sancov/CMakeCache.txt | %FileCheck %s --check-prefix=TARGETS
+# TARGETS: LLVM_TARGETS_TO_BUILD:STRING=all
+# RUN: setarch x86_64 -R bash -c 'set -o pipefail; echo "pr-230193 GAP-FINDING-PR $(date -u +%H:%M:%S)" >> /work/e2e-progress.log || true; args=("%repo-root/scripts/gap-finding-pr.sh" --output-dir %t/out --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --commit "$(cat %t/squash-commit)" --auto); if [[ -n "${FUZZ_FILL_E2E_JOBS:-}" ]]; then args+=(-j "${FUZZ_FILL_E2E_JOBS}"); fi; if [[ -w /work ]]; then stdbuf -oL -eL "${args[@]}" 2>&1 | stdbuf -oL tee -a /work/e2e-progress.log; else "${args[@]}"; fi'
+
+# RUN: test -f %t/out/baseline/line_coverage_covered.csv
+# RUN: test -f %t/out/added-lines/added-lines.csv
+# RUN: test -f %t/out/commit_lines_report/target_lines_uncovered.csv
+
+# COM: PR #230193 adds Function &Fn = F in SROAPass::run (SROA.cpp:6575 on that tip).
+# RUN: %FileCheck %s --input-file=%t/out/added-lines/added-lines.csv --check-prefix=ADDED
+# ADDED: path,line_no,text
+# ADDED: llvm/lib/Transforms/Scalar/SROA.cpp,6575,{{.*}}Function &Fn = F
+
+# COM: The added line must be covered by the lit suite.
+# RUN: %FileCheck %s --input-file=%t/out/baseline/line_coverage_covered.csv --check-prefix=COVERED
+# COVERED: {{.*}}SROA.cpp,6575{{$}}
+
+# COM: A covered added line must not appear in the uncovered PR target lines report.
+# RUN: %FileCheck %s --input-file=%t/out/commit_lines_report/target_lines_uncovered.csv --check-prefix=TARGET_NOT
+# TARGET_NOT-NOT: Function &Fn = F
+# RUN: %FileCheck %s --input-file=%t/out/commit_lines_report/target_lines_uncovered.csv --check-prefix=TARGET_LINE_NOT
+# TARGET_LINE_NOT-NOT: SROA.cpp,6575,
+
+# COM: Drop the llvm-project clone and sancov build after coverage runs to save disk space.
+# COM: Delete at the end so it is deleted only on success.
+# RUN: rm -rf %t/llvm-project %t/build-sancov %t/build-sancov-helpers
