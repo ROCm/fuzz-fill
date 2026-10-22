@@ -60,7 +60,6 @@ jobs:
       FUZZ_FILL_OPT: /work/llvm-build-sancov/bin/opt
       FUZZ_FILL_LLVM_REDUCE: /work/llvm-build-sancov/bin/llvm-reduce
       FUZZ_FILL_LLVM_DIS: /work/llvm-build-sancov/bin/llvm-dis
-      LLVM_MIRROR_DIR: /work/llvm-mirror
       FUZZ_FILL_LLVM_REPO: /work/llvm-project
       # nproc inside this container can be the host CPU count.
       FUZZ_FILL_E2E_JOBS: "32"
@@ -143,6 +142,70 @@ jobs:
             --llvm-src "${LLVM_PROJECT_DIR}" \
             -v integration-tests/
 
+  e2e:
+    runs-on: aws-linux-scale-rocm-medium
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: write
+    container:
+      image: ubuntu:24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: ["214457", "230193"]
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      WORK_ROOT: /work
+      LLVM_RELEASE_BIN: /usr/lib/llvm-24/bin
+      VENV_DIR: /work/fuzz-fill-venv
+      VENV_BIN: /work/fuzz-fill-venv/bin
+      LLVM_MIRROR_DIR: /work/llvm-mirror
+      # nproc inside this container can be the host CPU count.
+      FUZZ_FILL_E2E_JOBS: "32"
+
+    steps:
+      - name: Report container resources
+        run: |
+          echo "nproc=$(nproc) nproc_all=$(nproc --all)"
+          awk '/MemTotal/ {printf "mem_total_gib=%.1f\n", $2/1024/1024}' /proc/meminfo
+          if [[ -r /sys/fs/cgroup/memory.max ]]; then
+            max="$(cat /sys/fs/cgroup/memory.max)"
+            if [[ "$max" == "max" ]]; then
+              echo "cgroup_memory_max=unlimited"
+            else
+              awk -v b="$max" 'BEGIN {printf "cgroup_memory_max_gib=%.1f\n", b/1024/1024/1024}'
+            fi
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install apt packages
+        run: ./scripts/image/install-apt-packages.sh all
+
+      - name: Install CMake
+        run: ./scripts/image/install-cmake.sh
+
+      - name: Install apt.llvm.org bootstrap and FileCheck
+        run: |
+          ./scripts/image/install-llvm-apt.sh 24
+          apt-get update
+          apt-get install -y --no-install-recommends llvm-24 llvm-24-tools
+          test -x "${LLVM_RELEASE_BIN}/FileCheck"
+
+      - name: Install GitHub CLI
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends gh
+
+      - name: Install fuzz-fill venv
+        run: |
+          python3 -m venv "${VENV_DIR}"
+          "${VENV_BIN}/pip" install --no-cache-dir -e "${GITHUB_WORKSPACE}"
+
       - name: Compute mirror cache key
         id: mirror-cache-key
         run: |
@@ -173,23 +236,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! command -v gh >/dev/null 2>&1; then
-            apt-get update
-            apt-get install -y gh
-          fi
-          ./scripts/warm-llvm-mirror-for-pr.sh "${LLVM_MIRROR_DIR}" --pr-id 214457
+          ./scripts/warm-llvm-mirror-for-pr.sh "${LLVM_MIRROR_DIR}" --pr-id "${{ matrix.pr }}"
 
       - name: Run e2e integration tests
         env:
           GH_TOKEN: ${{ github.token }}
           FUZZ_FILL_E2E_BOOTSTRAP_BIN: ${{ env.LLVM_RELEASE_BIN }}
-          FUZZ_FILL_E2E_LLVM_MIRROR: ${{ env.LLVM_MIRROR_DIR }}
         run: |
           source "${VENV_DIR}/bin/activate"
-          if ! command -v gh >/dev/null 2>&1; then
-            apt-get update
-            apt-get install -y gh
-          fi
           # Lit buffers each test until it exits. The tests tee phases here so
           # this tail shows them while the test is still running.
           e2e_log=/work/e2e-progress.log
@@ -201,11 +255,10 @@ jobs:
           set +e
           ./integration-tests/test.sh \
             --venv "${VENV_DIR}" \
-            --llvm-build "${LLVM_BUILD_BIN}" \
-            --llvm-sancov-build "${LLVM_BUILD_BIN}" \
-            --llvm-src "${LLVM_PROJECT_DIR}" \
+            --llvm-build "${LLVM_RELEASE_BIN}" \
+            --llvm-src "${LLVM_MIRROR_DIR}" \
             --param e2e=1 \
-            --filter='pr-230193\.test$' \
+            --filter="pr-${{ matrix.pr }}\.test$" \
             -j 1 \
             -v integration-tests/e2e/
           status=$?

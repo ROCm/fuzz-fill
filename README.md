@@ -838,7 +838,7 @@ python -m unittest tests.test_analyser -v
 
 ### Integration tests
 
-Integration tests need the SanitizerCoverage LLVM `bin` directory and llvm-project source. Locally:
+The main suite under `integration-tests/` needs the SanitizerCoverage LLVM `bin` directory (`--llvm-sancov-build`) and llvm-project source. Locally:
 
 ```bash
 ./integration-tests/test.sh \
@@ -861,7 +861,9 @@ Both `--llvm-build` and `--llvm-sancov-build` point at the same SanitizerCoverag
 
 #### E2E integration tests
 
-Tests under `integration-tests/e2e/` are marked `# REQUIRES: e2e` and are **not** run by default. Pass `--param e2e=1` to lit explicitly:
+`integration-tests/e2e/` is its own lit suite. It does **not** need `--llvm-sancov-build` (each test builds SanitizerCoverage itself). Tests are marked `# REQUIRES: e2e` and are **not** run by default. Pass `--param e2e=1` to lit explicitly.
+
+`--llvm-src` must be a git llvm-project checkout: e2e tests use it as the `--reference` for [`scripts/prepare-pr-llvm.sh`](scripts/prepare-pr-llvm.sh) when cloning the PR (a local `llvm-project`, or CI’s filtered mirror).
 
 ```bash
 export FUZZ_FILL_E2E_BOOTSTRAP_BIN=/path/to/llvm/bin
@@ -869,14 +871,13 @@ export GH_TOKEN="$(gh auth token)"   # or ${{ github.token }} in CI
 
 ./integration-tests/test.sh \
   --venv ./venv/ \
-  --llvm-build llvm-project/build-sancov/bin/ \
-  --llvm-sancov-build llvm-project/build-sancov/bin/ \
+  --llvm-build /usr/lib/llvm-24/bin \
   --llvm-src llvm-project/ \
   --param e2e=1 \
   -v integration-tests/e2e/gap-finding-pr/
 ```
 
-E2E tests use [`scripts/prepare-pr-llvm.sh`](scripts/prepare-pr-llvm.sh) (local `--reference` to `llvm-project`, or CI’s filtered mirror), then build SanitizerCoverage and run gap finding, gap filling, and **llvm-reduce** on the pinned gap-fill fixture. The first run can take several hours (LLVM build + amdgpu LIT slice). The reduction step checks that `reduced/reduced.ll` exists and is smaller than the disassembled input (not a byte-for-byte golden match).
+E2E tests prepare the PR checkout, then build SanitizerCoverage and run gap finding, gap filling, and **llvm-reduce** on the pinned gap-fill fixture. The first run can take several hours (LLVM build + amdgpu LIT slice). The reduction step checks that `reduced/reduced.ll` exists and is smaller than the disassembled input (not a byte-for-byte golden match).
 
 ---
 

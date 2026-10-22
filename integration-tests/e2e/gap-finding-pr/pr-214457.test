@@ -6,7 +6,8 @@
 
 # RUN: rm -rf %t && mkdir -p %t
 # RUN: bash -c 'echo "pr-214457 CLONE $(date -u +%H:%M:%%S)" >> /work/e2e-progress.log || true'
-# RUN: %if e2e-llvm-mirror %{ %repo-root/scripts/prepare-pr-llvm.sh --pr-id 214457 --dest %t/llvm-project --reference %e2e-llvm-mirror --partial-reference --no-self-contained --squash-commit-file %t/squash-commit %} %else %{ %repo-root/scripts/prepare-pr-llvm.sh --pr-id 214457 --dest %t/llvm-project --reference %repo-root/llvm-project --squash-commit-file %t/squash-commit %}
+# COM: --llvm-src (%llvm-repo) is the clone reference (CI filtered mirror or local llvm-project).
+# RUN: %repo-root/scripts/prepare-pr-llvm.sh --pr-id 214457 --dest %t/llvm-project --reference %llvm-repo --partial-reference --no-self-contained --squash-commit-file %t/squash-commit
 # RUN: bash -c 'echo "pr-214457 SCOPE $(date -u +%H:%M:%%S)" >> /work/e2e-progress.log || true'
 # RUN: bash -c '%gap-scope --llvm-repo %t/llvm-project --commit "$(cat %t/squash-commit)" > %t/scope.txt'
 # RUN: %FileCheck %s --input-file=%t/scope.txt --check-prefix=SCOPE
