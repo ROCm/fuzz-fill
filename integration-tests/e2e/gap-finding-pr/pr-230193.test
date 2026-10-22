@@ -26,20 +26,21 @@
 # RUN: test -f %t/out/added-lines/added-lines.csv
 # RUN: test -f %t/out/commit_lines_report/target_lines_uncovered.csv
 
-# COM: PR #230193 adds Function &Fn = F in SROAPass::run (SROA.cpp:6575 on that tip).
+# COM: PR #230193 adds PA.preserveSet<CFGAnalyses>() in SROAPass::run
+# COM: (SROA.cpp:6585 on that tip). That line is a SanitizerCoverage bb entry.
 # RUN: %FileCheck %s --input-file=%t/out/added-lines/added-lines.csv --check-prefix=ADDED
 # ADDED: path,line_no,text
-# ADDED: llvm/lib/Transforms/Scalar/SROA.cpp,6575,{{.*}}Function &Fn = F
+# ADDED: llvm/lib/Transforms/Scalar/SROA.cpp,6585,{{.*}}PA.preserveSet<CFGAnalyses>()
 
 # COM: The added line must be covered by the lit suite.
 # RUN: %FileCheck %s --input-file=%t/out/baseline/line_coverage_covered.csv --check-prefix=COVERED
-# COVERED: {{.*}}SROA.cpp,6575{{$}}
+# COVERED: {{.*}}SROA.cpp,6585{{$}}
 
 # COM: A covered added line must not appear in the uncovered PR target lines report.
 # RUN: %FileCheck %s --input-file=%t/out/commit_lines_report/target_lines_uncovered.csv --check-prefix=TARGET_NOT
-# TARGET_NOT-NOT: Function &Fn = F
+# TARGET_NOT-NOT: PA.preserveSet<CFGAnalyses>()
 # RUN: %FileCheck %s --input-file=%t/out/commit_lines_report/target_lines_uncovered.csv --check-prefix=TARGET_LINE_NOT
-# TARGET_LINE_NOT-NOT: SROA.cpp,6575,
+# TARGET_LINE_NOT-NOT: SROA.cpp,6585,
 
 # COM: Drop the llvm-project clone and sancov build after coverage runs to save disk space.
 # COM: Delete at the end so it is deleted only on success.
