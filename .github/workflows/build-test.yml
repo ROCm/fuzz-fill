@@ -34,6 +34,15 @@ concurrency:
   group: build-test-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  DEBIAN_FRONTEND: noninteractive
+  WORK_ROOT: /work
+  LLVM_APT_MAJOR: "24"
+  VENV_DIR: /work/fuzz-fill-venv
+  VENV_BIN: /work/fuzz-fill-venv/bin
+  # nproc inside this container can be the host CPU count.
+  FUZZ_FILL_E2E_JOBS: "32"
+
 jobs:
   build-and-test:
     runs-on: aws-linux-scale-rocm-medium-dev
@@ -44,16 +53,12 @@ jobs:
     container:
       image: ubuntu:24.04
     env:
-      DEBIAN_FRONTEND: noninteractive
-      WORK_ROOT: /work
       LLVM_RELEASE_VERSION: "22.1.8"
       SANCOV_ALLOWLIST: scripts/allowlist-amdgpu.txt
-      LLVM_RELEASE_BIN: /usr/lib/llvm-24/bin
+      LLVM_RELEASE_BIN: /usr/lib/llvm-${{ env.LLVM_APT_MAJOR }}/bin
       LLVM_PROJECT_DIR: /work/llvm-project
       LLVM_BUILD_DIR: /work/llvm-build-sancov
       LLVM_BUILD_BIN: /work/llvm-build-sancov/bin
-      VENV_DIR: /work/fuzz-fill-venv
-      VENV_BIN: /work/fuzz-fill-venv/bin
       FUZZ_FILL_SANCOV: /work/llvm-build-sancov/bin/sancov
       FUZZ_FILL_LLVM_LIT: /work/llvm-build-sancov/bin/llvm-lit
       FUZZ_FILL_LLC: /work/llvm-build-sancov/bin/llc
@@ -61,8 +66,6 @@ jobs:
       FUZZ_FILL_LLVM_REDUCE: /work/llvm-build-sancov/bin/llvm-reduce
       FUZZ_FILL_LLVM_DIS: /work/llvm-build-sancov/bin/llvm-dis
       FUZZ_FILL_LLVM_REPO: /work/llvm-project
-      # nproc inside this container can be the host CPU count.
-      FUZZ_FILL_E2E_JOBS: "32"
 
     steps:
       - name: Report container resources
@@ -90,7 +93,7 @@ jobs:
         run: ./scripts/image/install-cmake.sh
 
       - name: Install apt.llvm.org bootstrap
-        run: ./scripts/image/install-llvm-apt.sh 24
+        run: ./scripts/image/install-llvm-apt.sh "${LLVM_APT_MAJOR}"
 
       - name: Restore LLVM source
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -155,14 +158,8 @@ jobs:
       matrix:
         pr: ["214457", "230193"]
     env:
-      DEBIAN_FRONTEND: noninteractive
-      WORK_ROOT: /work
-      LLVM_RELEASE_BIN: /usr/lib/llvm-24/bin
-      VENV_DIR: /work/fuzz-fill-venv
-      VENV_BIN: /work/fuzz-fill-venv/bin
+      LLVM_RELEASE_BIN: /usr/lib/llvm-${{ env.LLVM_APT_MAJOR }}/bin
       LLVM_MIRROR_DIR: /work/llvm-mirror
-      # nproc inside this container can be the host CPU count.
-      FUZZ_FILL_E2E_JOBS: "32"
 
     steps:
       - name: Report container resources
@@ -191,9 +188,9 @@ jobs:
 
       - name: Install apt.llvm.org bootstrap and FileCheck
         run: |
-          ./scripts/image/install-llvm-apt.sh 24
+          ./scripts/image/install-llvm-apt.sh "${LLVM_APT_MAJOR}"
           apt-get update
-          apt-get install -y --no-install-recommends llvm-24 llvm-24-tools
+          apt-get install -y --no-install-recommends "llvm-${LLVM_APT_MAJOR}" "llvm-${LLVM_APT_MAJOR}-tools"
           test -x "${LLVM_RELEASE_BIN}/FileCheck"
 
       - name: Install GitHub CLI
