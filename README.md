@@ -53,7 +53,7 @@ cd fuzz-fill
   -j "$(nproc)"
 ```
 
-`--auto` classifies the PR's changed files and chooses backends, lit suites, and the SanitizerCoverage allowlist. Pass `--backends`, `--tests`, and `--allowlist` instead when you want a fixed scope.
+With `--build-image`, `--auto` chooses the backends, lit suites, and SanitizerCoverage allowlist from the PR so the build matches the code under change ([automatic PR image scope](#automatic-pr-image-scope)). Pass `--backends`, `--tests`, and `--allowlist` instead when you want a fixed scope.
 
 **Local commit** — build from your `llvm-project` checkout (the local checkout remains unchanged). This command only finds gaps in lines changed in a single commit rather than a full PR. Replace `HEAD` with a hash, branch, or `main~3` as needed:
 
@@ -73,6 +73,7 @@ cd fuzz-fill
 - [Setup](#setup)
   - [Python environment](#python-environment)
   - [LLVM builds](#llvm-builds)
+    - [Automatic PR image scope](#automatic-pr-image-scope)
 - [Gap finding (baseline)](#gap-finding-baseline)
 - [Gap finding (PR)](#gap-finding-pr)
 - [Gap filling](#gap-filling)
@@ -128,7 +129,16 @@ Allowlist presets:
 | `clang` | [`scripts/allowlist-clang.txt`](scripts/allowlist-clang.txt) | `clang/lib` |
 | `llvm-clang` | [`scripts/allowlist-llvm-clang.txt`](scripts/allowlist-llvm-clang.txt) | `llvm/lib` and `clang/lib` |
 
-`python -m gap_scope` (or `--auto` on the gap-finding scripts) picks one of `llvm`, `clang`, or `llvm-clang` from the commit. Clang is built only for the `clang` and `llvm-clang` presets. A backend-only change under `llvm/lib/Target/<Backend>/` uses the `llvm` allowlist and does not build Clang.
+#### Automatic PR image scope
+
+When building a PR image, `--auto` looks at the changed files and chooses the backends, lit suites, and SanitizerCoverage allowlist. That selects an instrumented build that can measure coverage for the code the PR touches. The first matching rule wins.
+
+| Rule | Changed files | `LLVM_TARGETS_TO_BUILD` | Tests | Allowlist |
+|------|----------------|-------------------------|-------|-----------|
+| 1 | Only under `llvm/lib/Target/<Backend>/` | `X86` and each matched backend | `llvm/test` | `llvm` |
+| 2 | Only under `clang/lib/` | `all` | `clang/test` | `clang` |
+| 3 | Any other `llvm/lib/` or `clang/lib/` change | `all` | `llvm/test`, `clang/test` | `llvm-clang` |
+| 4 | No match | skip the build | skip tests | — |
 
 **`python -m coverage baseline`** patches **`<instrumented-build>/test/lit.site.cfg.py`** so LIT forwards **`UBSAN_OPTIONS`** to every test subprocess. The patch is idempotent and is re-applied if CMake regenerates that file.
 
@@ -224,7 +234,7 @@ Step 3 does **not** re-run LIT; you can repeat it with different `added-lines.cs
 | `--github-repo` | With `--pr-id` (default: `llvm/llvm-project`) |
 | `--llvm-repo` | `llvm-project` checkout (`added-lines` tree; with `--pr-id`, used as clone reference) |
 | `--llvm-bin` / `--instrumented-bin-dir` | Same as [baseline gap finding](#gap-finding-baseline) |
-| `--auto` | Choose lit suites from `--commit` or `--pr-id` |
+| `--auto` | Choose lit suites from `--commit` or `--pr-id`; does not rebuild LLVM |
 | `--tests` | Lit suites (cannot be combined with `--auto`) |
 | `--lit-filter` | llvm-lit `--filter=` regex for every suite |
 | `-j`, `--jobs` | Parallel jobs for llvm-lit |
@@ -594,7 +604,7 @@ Gap-finding Docker runners share [`ensure-image.sh`](scripts/docker/ensure-image
 | `--keep-image` | Do not remove the image after a `--build-image` run (default: remove) |
 | `--pr-id <n>` | Select `fuzz-fill-test:llvm-pr-<n>` |
 | `--llvm-repo <path>` | Required with `--build-image` |
-| `--auto` | Classify backends, tests, and allowlist from the PR |
+| `--auto` | Classify backends, tests, and allowlist from the PR ([automatic PR image scope](#automatic-pr-image-scope)) |
 | `--backends` / `--tests` / `--allowlist` | Explicit scope for `--build-image` |
 
 Build once, then reuse on later runs (omit `--build-image`):
@@ -666,7 +676,7 @@ Lit suites come from the image (`/work/.gap-test-suites`, default `llvm/test`). 
 | `--build-image` | Build PR image when missing |
 | `--force-build` / `--keep-image` | Rebuild or retain PR image |
 | `--llvm-repo <path>` | Required with `--build-image` |
-| `--auto` | Classify scope when building |
+| `--auto` | Classify scope when building ([automatic PR image scope](#automatic-pr-image-scope)) |
 | `--backends` / `--tests` / `--allowlist` | Explicit scope when building or running |
 | `--output-dir <path>` | Host output directory |
 | `-j <n>`, `--jobs <n>` | Parallel jobs |
