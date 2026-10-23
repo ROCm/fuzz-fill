@@ -106,6 +106,7 @@ echo "=== gap finding (baseline) ==="
 "${SCRIPT_DIR}/gap-finding-baseline.sh" \
     "${BIND_REPO[@]}" \
     --output-dir "$GAP_FINDING_OUT" \
+    --tests llvm/test \
     --lit-filter CodeGen/AMDGPU/loop \
     -j "$J"
 

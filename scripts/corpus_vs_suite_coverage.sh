@@ -5,7 +5,7 @@
 #   pip install -e .
 #   Download LLVM release and checkout llvm-project at the matching tag, then:
 #   ./scripts/build-llvm-sancov.sh scripts/allowlist-amdgpu.txt llvm-project \
-#       llvm-project/build-sancov --bootstrap-bin /path/to/LLVM-22.1.8/bin
+#       llvm-project/build-sancov --bootstrap-bin /path/to/llvm/bin
 #
 # Usage:
 #   ./scripts/corpus_vs_suite_coverage.sh
@@ -123,6 +123,7 @@ if [[ -z "${SKIP_TEST_SUITE:-}" ]]; then
     --llvm-lit "$INSTRUMENTED_BIN/llvm-lit" \
     --llc "$INSTRUMENTED_BIN/llc" \
     --opt "$INSTRUMENTED_BIN/opt" \
+    --tests llvm/test \
     --lit-filter "$FILTER"
   STEP1_ELAPSED="$(format_duration $((SECONDS - step_start)))"
   echo "    finished in $STEP1_ELAPSED"

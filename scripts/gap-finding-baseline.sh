@@ -37,14 +37,14 @@ Examples:
       --llvm-repo /path/llvm-project \\
       --llvm-bin /path/llvm-project/build/bin \\
       --instrumented-bin-dir /path/llvm-project/build-sancov/bin \\
-      --backend-tests amdgpu -j "\$(nproc)"
+      --tests llvm/test/CodeGen/AMDGPU -j "\$(nproc)"
 
   $(basename "$0") \\
       --output-dir ./data/baseline-codegen \\
       --llvm-repo /path/llvm-project \\
       --llvm-bin /path/llvm-project/build/bin \\
       --instrumented-bin-dir /path/llvm-project/build-sancov/bin \\
-      --lit-filter CodeGen/AMDGPU -j "\$(nproc)"
+      --tests llvm/test --lit-filter CodeGen/AMDGPU -j "\$(nproc)"
 EOF
 }
 
@@ -58,7 +58,12 @@ if ! gap_finding_local_validate_required_paths; then
     exit 1
 fi
 
-if ! gap_finding_local_default_lit_filters; then
+scope_rc=0
+gap_finding_local_resolve_scope || scope_rc=$?
+if [[ "$scope_rc" -eq 2 ]]; then
+    exit 0
+fi
+if [[ "$scope_rc" -ne 0 ]]; then
     usage >&2
     exit 1
 fi

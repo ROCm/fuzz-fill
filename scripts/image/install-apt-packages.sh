@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install apt packages for a fuzz-fill test image profile.
 #
-# Profiles match Dockerfile stages: release, source, builder, runtime.
+# Profiles match Dockerfile stages: source, builder, runtime.
 # The all profile installs the union of every stage (for single-container CI).
 
 set -euo pipefail
@@ -14,11 +14,10 @@ usage() {
 Usage: $(basename "$0") <profile>
 
 Profiles:
-  release   Dockerfile llvm-release stage
   source    Dockerfile llvm-source stage
   builder   Dockerfile llvm-builder stage
   runtime   Dockerfile final stage
-  all       Union of release, source, builder, and runtime (CI)
+  all       Union of source, builder, and runtime (CI)
 EOF
 }
 
@@ -56,9 +55,9 @@ declare -a packages=()
 
 case "$profile" in
     all)
-        merge_profiles release source builder runtime
+        merge_profiles source builder runtime
         ;;
-    release|source|builder|runtime)
+    source|builder|runtime)
         while IFS= read -r pkg; do
             [[ -z "$pkg" ]] && continue
             packages+=("$pkg")

@@ -16,8 +16,6 @@ docker_gap_finding_source_host_libs() {
     source "${SCRIPT_DIR}/docker-run.sh"
     # shellcheck source=scripts/lib/common.sh
     source "${REPO_ROOT}/scripts/lib/common.sh"
-    # shellcheck source=scripts/lib/lit-filters.sh
-    source "${REPO_ROOT}/scripts/lib/lit-filters.sh"
     # shellcheck source=scripts/lib/lit-failures.sh
     source "${REPO_ROOT}/scripts/lib/lit-failures.sh"
 
@@ -46,7 +44,10 @@ docker_gap_finding_usage_image_build_options() {
   --force-build                 Rebuild PR image even when the tag already exists
   --keep-image                  Keep PR image after run (default: remove when --build-image)
   --llvm-repo <path>            Local llvm-project clone (required with --build-image)
-  --backend-tests <target>      amdgpu or spirv (required with --build-image)
+  --auto                        Derive backends, tests, and allowlist from the PR
+  --backends <list>             LLVM_TARGETS_TO_BUILD for --build-image
+  --tests <suite>               Lit suite (<project>/test or a subdirectory; repeatable)
+  --allowlist <path|preset>     Allowlist preset or file for --build-image
   --github-repo <owner/repo>    GitHub repo hosting the PR (default: llvm/llvm-project)
   --image-name <name>           Image name when using --pr-id (default: fuzz-fill-test)
 EOF
@@ -96,21 +97,26 @@ docker_gap_finding_prepare_output_dir() {
     output_dir="$(realpath "$output_dir")"
 }
 
-docker_gap_default_lit_filters_from_image() {
-    local allowlist
-
-    if [[ ${#lit_filters[@]} -gt 0 ]]; then
+docker_gap_default_lit_suites_from_image() {
+    if [[ ${#tests[@]} -gt 0 ]]; then
         return 0
     fi
-
-    allowlist="$(docker_image_read_allowlist)"
-    mapfile -t lit_filters < <(default_lit_filters_for_allowlist "$allowlist")
-    echo "Image allowlist: ${allowlist} -> ${#lit_filters[@]} lit-filter prefix(es)"
+    mapfile -t tests < <(docker_image_read_test_suites | sed '/^$/d')
+    if [[ ${#tests[@]} -eq 0 ]]; then
+        tests=("llvm/test")
+    fi
+    echo "Image gap test suites: ${tests[*]}"
 }
 
-docker_gap_finding_write_lit_filters_file() {
+docker_gap_finding_write_scope_files() {
     local filters_file="${output_dir}/.lit-filters"
-    printf '%s\n' "${lit_filters[@]}" > "$filters_file"
+    local suites_file="${output_dir}/.gap-test-suites"
+    if [[ ${#lit_filters[@]} -gt 0 ]]; then
+        printf '%s\n' "${lit_filters[@]}" > "$filters_file"
+    else
+        : > "$filters_file"
+    fi
+    printf '%s\n' "${tests[@]}" > "$suites_file"
 }
 
 # Override in entrypoints to parse workflow-specific flags (e.g. --commit).

@@ -34,37 +34,53 @@ concurrency:
   group: build-test-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  DEBIAN_FRONTEND: noninteractive
+  WORK_ROOT: /work
+  LLVM_APT_MAJOR: "24"
+  LLVM_RELEASE_BIN: /usr/lib/llvm-24/bin
+  VENV_DIR: /work/fuzz-fill-venv
+  VENV_BIN: /work/fuzz-fill-venv/bin
+  # nproc inside this container can be the host CPU count.
+  FUZZ_FILL_E2E_JOBS: "32"
+
 jobs:
   build-and-test:
-    runs-on: aws-linux-scale-rocm-medium-dev
-    timeout-minutes: 45
+    runs-on: aws-linux-scale-rocm-medium
+    timeout-minutes: 30
     permissions:
       contents: read
       actions: write
     container:
       image: ubuntu:24.04
     env:
-      DEBIAN_FRONTEND: noninteractive
-      WORK_ROOT: /work
       LLVM_RELEASE_VERSION: "22.1.8"
       SANCOV_ALLOWLIST: scripts/allowlist-amdgpu.txt
-      LLVM_RELEASE_DIR: /work/llvm-release
-      LLVM_RELEASE_BIN: /work/llvm-release/bin
       LLVM_PROJECT_DIR: /work/llvm-project
       LLVM_BUILD_DIR: /work/llvm-build-sancov
       LLVM_BUILD_BIN: /work/llvm-build-sancov/bin
-      VENV_DIR: /work/fuzz-fill-venv
-      VENV_BIN: /work/fuzz-fill-venv/bin
       FUZZ_FILL_SANCOV: /work/llvm-build-sancov/bin/sancov
       FUZZ_FILL_LLVM_LIT: /work/llvm-build-sancov/bin/llvm-lit
       FUZZ_FILL_LLC: /work/llvm-build-sancov/bin/llc
       FUZZ_FILL_OPT: /work/llvm-build-sancov/bin/opt
       FUZZ_FILL_LLVM_REDUCE: /work/llvm-build-sancov/bin/llvm-reduce
       FUZZ_FILL_LLVM_DIS: /work/llvm-build-sancov/bin/llvm-dis
-      LLVM_MIRROR_DIR: /work/llvm-mirror
       FUZZ_FILL_LLVM_REPO: /work/llvm-project
 
     steps:
+      - name: Report container resources
+        run: |
+          echo "nproc=$(nproc) nproc_all=$(nproc --all)"
+          awk '/MemTotal/ {printf "mem_total_gib=%.1f\n", $2/1024/1024}' /proc/meminfo
+          if [[ -r /sys/fs/cgroup/memory.max ]]; then
+            max="$(cat /sys/fs/cgroup/memory.max)"
+            if [[ "$max" == "max" ]]; then
+              echo "cgroup_memory_max=unlimited"
+            else
+              awk -v b="$max" 'BEGIN {printf "cgroup_memory_max_gib=%.1f\n", b/1024/1024/1024}'
+            fi
+          fi
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -76,19 +92,8 @@ jobs:
       - name: Install CMake
         run: ./scripts/image/install-cmake.sh
 
-      - name: Restore LLVM release bootstrap binaries
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache-llvm-release
-        with:
-          path: ${{ env.LLVM_RELEASE_DIR }}
-          key: fuzz-fill-llvm-release-${{ env.LLVM_RELEASE_VERSION }}
-
-      - name: Download LLVM release bootstrap binaries
-        if: steps.cache-llvm-release.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p "${LLVM_RELEASE_DIR}"
-          curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_RELEASE_VERSION}/LLVM-${LLVM_RELEASE_VERSION}-Linux-X64.tar.xz" \
-            | tar -xJ --strip-components=1 -C "${LLVM_RELEASE_DIR}"
+      - name: Install apt.llvm.org bootstrap
+        run: ./scripts/image/install-llvm-apt.sh "${LLVM_APT_MAJOR}"
 
       - name: Restore LLVM source
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -106,13 +111,16 @@ jobs:
 
       - name: Build sancov LLVM
         run: |
+          bash ./scripts/ci-cgroup-memstat.sh 30 &
+          memstat_pid=$!
+          trap 'kill "$memstat_pid" 2>/dev/null || true' EXIT
           ./scripts/build-llvm-sancov.sh \
             "${SANCOV_ALLOWLIST}" \
             "${LLVM_PROJECT_DIR}" \
             "${LLVM_BUILD_DIR}" \
             --bootstrap-bin "${LLVM_RELEASE_BIN}" \
             --enable-projects clang \
-            "$(nproc)"
+            "${FUZZ_FILL_E2E_JOBS}"
 
       - name: Install fuzz-fill venv
         run: |
@@ -126,6 +134,9 @@ jobs:
 
       - name: Run integration tests
         run: |
+          bash ./scripts/ci-cgroup-memstat.sh 30 &
+          memstat_pid=$!
+          trap 'kill "$memstat_pid" 2>/dev/null || true' EXIT
           source "${VENV_DIR}/bin/activate"
           ./integration-tests/test.sh \
             --venv "${VENV_DIR}" \
@@ -133,6 +144,63 @@ jobs:
             --llvm-sancov-build "${LLVM_BUILD_BIN}" \
             --llvm-src "${LLVM_PROJECT_DIR}" \
             -v integration-tests/
+
+  e2e:
+    runs-on: aws-linux-scale-rocm-medium
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: write
+    container:
+      image: ubuntu:24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: ["214457", "230193"]
+    env:
+      LLVM_MIRROR_DIR: /work/llvm-mirror
+
+    steps:
+      - name: Report container resources
+        run: |
+          echo "nproc=$(nproc) nproc_all=$(nproc --all)"
+          awk '/MemTotal/ {printf "mem_total_gib=%.1f\n", $2/1024/1024}' /proc/meminfo
+          if [[ -r /sys/fs/cgroup/memory.max ]]; then
+            max="$(cat /sys/fs/cgroup/memory.max)"
+            if [[ "$max" == "max" ]]; then
+              echo "cgroup_memory_max=unlimited"
+            else
+              awk -v b="$max" 'BEGIN {printf "cgroup_memory_max_gib=%.1f\n", b/1024/1024/1024}'
+            fi
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install apt packages
+        run: ./scripts/image/install-apt-packages.sh all
+
+      - name: Install CMake
+        run: ./scripts/image/install-cmake.sh
+
+      - name: Install apt.llvm.org bootstrap and FileCheck
+        run: |
+          ./scripts/image/install-llvm-apt.sh "${LLVM_APT_MAJOR}"
+          apt-get update
+          apt-get install -y --no-install-recommends "llvm-${LLVM_APT_MAJOR}" "llvm-${LLVM_APT_MAJOR}-tools"
+          test -x "${LLVM_RELEASE_BIN}/FileCheck"
+
+      - name: Install GitHub CLI
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends gh
+
+      - name: Install fuzz-fill venv
+        run: |
+          python3 -m venv "${VENV_DIR}"
+          "${VENV_BIN}/pip" install --no-cache-dir -e "${GITHUB_WORKSPACE}"
 
       - name: Compute mirror cache key
         id: mirror-cache-key
@@ -164,28 +232,32 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! command -v gh >/dev/null 2>&1; then
-            apt-get update
-            apt-get install -y gh
-          fi
-          ./scripts/warm-llvm-mirror-for-pr.sh "${LLVM_MIRROR_DIR}" --pr-id 214457
+          ./scripts/warm-llvm-mirror-for-pr.sh "${LLVM_MIRROR_DIR}" --pr-id "${{ matrix.pr }}"
 
       - name: Run e2e integration tests
         env:
           GH_TOKEN: ${{ github.token }}
           FUZZ_FILL_E2E_BOOTSTRAP_BIN: ${{ env.LLVM_RELEASE_BIN }}
-          FUZZ_FILL_E2E_LLVM_MIRROR: ${{ env.LLVM_MIRROR_DIR }}
         run: |
           source "${VENV_DIR}/bin/activate"
-          if ! command -v gh >/dev/null 2>&1; then
-            apt-get update
-            apt-get install -y gh
-          fi
+          # Lit buffers each test until it exits. The tests tee phases here so
+          # this tail shows them while the test is still running.
+          e2e_log=/work/e2e-progress.log
+          : > "$e2e_log"
+          tail -f "$e2e_log" &
+          tail_pid=$!
+          bash ./scripts/ci-cgroup-memstat.sh 30 &
+          memstat_pid=$!
+          set +e
           ./integration-tests/test.sh \
             --venv "${VENV_DIR}" \
-            --llvm-build "${LLVM_BUILD_BIN}" \
-            --llvm-sancov-build "${LLVM_BUILD_BIN}" \
-            --llvm-src "${LLVM_PROJECT_DIR}" \
+            --llvm-build "${LLVM_RELEASE_BIN}" \
+            --llvm-src "${LLVM_MIRROR_DIR}" \
             --param e2e=1 \
+            --filter="pr-${{ matrix.pr }}\.test$" \
             -j 1 \
             -v integration-tests/e2e/
+          status=$?
+          kill "$tail_pid" "$memstat_pid" 2>/dev/null || true
+          wait "$tail_pid" "$memstat_pid" 2>/dev/null || true
+          exit "$status"

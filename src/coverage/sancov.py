@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import concurrent.futures
+import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
-import json
+from collections import defaultdict
+from collections.abc import Sequence
+import orjson
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -16,6 +21,30 @@ from fuzz_fill.log import get_logger, log_timing, run_subprocess
 logger = get_logger("coverage.sancov")
 
 _RAW_SANCOV_NAME = re.compile(r"^(?P<tool>.+)\.(?P<pid>\d+)\.sancov$")
+
+# Implementations accepted by Sancov.union_files.
+UNION_IMPLS = ("python", "sancov")
+DEFAULT_UNION_IMPL = "python"
+
+
+def _quote_rsp_path(path: str) -> str:
+    """Quote a path for an LLVM GNU-style response file."""
+    return '"' + path.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _load_symcov(path: Path | str) -> dict:
+    """Load a merged symcov JSON file."""
+    return orjson.loads(Path(path).read_bytes())
+
+
+def _coverage_df_from_symcov_path(task: tuple[str, str]) -> pd.DataFrame:
+    """Load one merged symcov in a worker process."""
+    symcov_path, source_code_filter = task
+    try:
+        symcov = _load_symcov(symcov_path)
+        return Sancov.get_coverage_df(symcov, source_code_filter)
+    except Exception as exc:
+        raise RuntimeError(f"failed to load symcov {symcov_path}") from exc
 
 
 class Sancov:
@@ -32,14 +61,24 @@ class Sancov:
         return f"0x{s.lower()}"
 
     @staticmethod
+    def group_raw_dumps(raw_sancov_dir: Path) -> dict[str, list[str]]:
+        """One ``os.scandir`` pass: tool basename to sorted dump path strings.
+
+        Only names matching ``<tool>.<pid>.sancov`` with a numeric process ID
+        are kept. Strings avoid building a ``Path`` per file.
+        """
+        groups: dict[str, list[str]] = defaultdict(list)
+        with os.scandir(raw_sancov_dir) as entries:
+            for entry in entries:
+                match = _RAW_SANCOV_NAME.match(entry.name)
+                if match:
+                    groups[match.group("tool")].append(entry.path)
+        return {tool: sorted(paths) for tool, paths in groups.items()}
+
+    @staticmethod
     def discover_tools(raw_sancov_dir: Path) -> list[str]:
         """Sorted tool basenames that emitted ``<tool>.<pid>.sancov`` dumps."""
-        tools: set[str] = set()
-        for path in raw_sancov_dir.glob("*.sancov"):
-            match = _RAW_SANCOV_NAME.match(path.name)
-            if match:
-                tools.add(match.group("tool"))
-        return sorted(tools)
+        return sorted(Sancov.group_raw_dumps(raw_sancov_dir))
 
     @staticmethod
     def tool_address_line_map_filename(tool: str) -> str:
@@ -55,11 +94,9 @@ class Sancov:
         symbolize_target: Path | None = None,
         raw_sancov_dir: Path | None = None,
         suffix: str | None = None,
-        union_batch: int = 200,
     ) -> None:
         self.sancov_bin = sancov
         self.symbolize_target = symbolize_target
-        self.union_batch = union_batch
         self.raw_sancov_dir = raw_sancov_dir
         self.suffix = suffix
 
@@ -70,21 +107,19 @@ class Sancov:
     @staticmethod
     def flatten_point_symbol_info(point_symbol_info: dict[str, object]) -> pd.DataFrame:
         """Flatten the point-symbol-info dictionary into a dataframe."""
-        rows = ((file, addr_to_line) for file, d1 in point_symbol_info.items() for fun, addr_to_line in d1.items())
-        df = pd.DataFrame.from_records(rows, columns=["file", "addr_to_line"])
-
         files, addrs, lines = [], [], []
-        for t in df.itertuples(index=False):
-            f = t.file
-            for a, ln in t.addr_to_line.items():
-                files.append(f)
-                addrs.append(a)
-                lines.append(ln)
+        for file, functions in point_symbol_info.items():
+            for addr_to_line in functions.values():
+                for addr, line_col in addr_to_line.items():
+                    files.append(file)
+                    addrs.append(addr)
+                    lines.append(int(line_col.partition(":")[0]))
 
-        out = pd.DataFrame({"file": files, "point": addrs, "line": lines}, dtype=object)
-        out[["line", "col"]] = (
-            out["line"].str.split(":", n=1, expand=True).reindex(columns=[0, 1])
-        )
+        out = pd.DataFrame({
+            "file": pd.Series(files, dtype=object),
+            "point": pd.Series(addrs, dtype=object),
+            "line": np.array(lines, dtype=np.int32),
+        })
         if not out.empty:
             out["point"] = out["point"].map(Sancov.format_hex_address)
 
@@ -129,24 +164,14 @@ class Sancov:
         """Collapse duplicate ``(file, line, point)`` rows from symcov flattening.
 
         Header and STL paths can map the same instrumentation point through multiple
-        function entries. Duplicate rows must agree on ``covered``; keep one row per
-        triple.
+        function entries. ``covered`` is a function of ``point`` alone, so duplicate
+        rows agree on it; keep the first row per triple.
         """
         if df.empty:
             return df
-        covered_nunique = (
-            df.groupby(["file", "line", "point"], dropna=False)["covered"]
-            .nunique()
-        )
-        conflicts = covered_nunique[covered_nunique > 1]
-        assert conflicts.empty, (
-            "duplicate (file, line, point) rows disagree on covered: "
-            f"{conflicts.reset_index()[['file', 'line', 'point']].to_dict('records')}"
-        )
         return (
-            df.groupby(["file", "line", "point"], as_index=False, dropna=False)["covered"]
-            .max()
-            .astype({"covered": int})
+            df.drop_duplicates(["file", "line", "point"], ignore_index=True)
+            [["file", "line", "point", "covered"]]
         )
 
     @staticmethod
@@ -333,23 +358,39 @@ class Sancov:
         """Load per-tool coverage frames from symcov JSON files."""
         dfs: list[pd.DataFrame] = []
         for symcov_path in symcov_paths:
-            with symcov_path.open(encoding="utf-8") as f:
-                symcov = json.load(f)
-            dfs.append(Sancov.get_coverage_df(symcov, source_code_filter))
+            dfs.append(
+                Sancov.get_coverage_df(_load_symcov(symcov_path), source_code_filter)
+            )
         return dfs
 
     @staticmethod
     def load_coverage_dfs_from_sancovs(
         sancovs: list[Sancov],
         source_code_filter: str | None = None,
+        jobs: int | None = None,
     ) -> list[pd.DataFrame]:
-        """Load per-tool coverage frames from merged symcov paths on each Sancov."""
+        """Load per-tool coverage frames from merged symcov paths on each Sancov.
+
+        One process per tool, capped by ``jobs`` when it is set. Threads do not
+        overlap this walk: the pandas steps hold the GIL. Result order matches
+        ``sancovs``.
+        """
         if source_code_filter is None:
             source_code_filter = ""
-        return Sancov.load_coverage_dfs(
-            [s.get_merged_symcov_path() for s in sancovs],
-            source_code_filter,
-        )
+        paths = [s.get_merged_symcov_path() for s in sancovs]
+        if len(paths) <= 1:
+            return Sancov.load_coverage_dfs(paths, source_code_filter)
+
+        workers = len(paths)
+        if jobs is not None:
+            workers = min(jobs, workers)
+        if workers <= 1:
+            return Sancov.load_coverage_dfs(paths, source_code_filter)
+
+        tasks = [(str(path), source_code_filter) for path in paths]
+        with log_timing(logger, "symcov load"):
+            with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as pool:
+                return list(pool.map(_coverage_df_from_symcov_path, tasks, chunksize=1))
 
     def get_merged_sancov_path(self) -> Path:
         return self.output_dir / f"{self.suffix}.0.sancov"
@@ -386,47 +427,88 @@ class Sancov:
 
     def has_raw_files(self) -> bool:
         """True if any raw ``.sancov`` files exist for this suffix."""
-        return any(self.raw_sancov_dir.glob(f"{self.suffix}.*.sancov"))
+        with os.scandir(self.raw_sancov_dir) as entries:
+            for entry in entries:
+                match = _RAW_SANCOV_NAME.match(entry.name)
+                if match and match.group("tool") == self.suffix:
+                    return True
+        return False
+
+    def raw_files(self) -> list[Path]:
+        """Sorted raw ``.sancov`` dumps for this suffix."""
+        paths: list[Path] = []
+        with os.scandir(self.raw_sancov_dir) as entries:
+            for entry in entries:
+                match = _RAW_SANCOV_NAME.match(entry.name)
+                if match and match.group("tool") == self.suffix:
+                    paths.append(Path(entry.path))
+        return sorted(paths)
+
+    def union_command(self, impl: str = DEFAULT_UNION_IMPL) -> list[str]:
+        """Command prefix for *impl*; it takes ``@list --output <path>``.
+
+        ``python`` runs ``coverage.sancov_union``, a TEMPORARY replacement used
+        by default until the upstream ``sancov -union`` fix lands.
+        ``sancov`` runs ``sancov -union`` from ``self.sancov_bin``.
+        """
+        if impl == "python":
+            return [sys.executable, "-m", "coverage.sancov_union"]
+        if impl == "sancov":
+            return [str(self.sancov_bin), "-union"]
+        raise ValueError(
+            f"unknown sancov union implementation {impl!r}; "
+            f"expected one of {', '.join(UNION_IMPLS)}"
+        )
+
+    def union_files(
+        self,
+        inputs: Sequence[str | Path],
+        output: Path,
+        impl: str = DEFAULT_UNION_IMPL,
+    ) -> None:
+        """Union *inputs* into *output* with the *impl* union utility.
+
+        A single input is copied. Multiple inputs are passed to the utility
+        via a response file (``@list``), one quoted path per line.
+        """
+        if not inputs:
+            raise ValueError("union_files requires at least one input")
+        command = self.union_command(impl)
+        if len(inputs) == 1:
+            shutil.copy(str(inputs[0]), output)
+            return
+
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            prefix="sancov-union-",
+            suffix=".rsp",
+            dir=output.parent,
+            delete=False,
+            mode="w",
+            encoding="utf-8",
+        ) as list_file:
+            list_file.write(
+                "".join(_quote_rsp_path(str(path)) + "\n" for path in inputs)
+            )
+            rsp = Path(list_file.name)
+        try:
+            run_subprocess(
+                logger,
+                [*command, f"@{rsp}", "--output", str(output)],
+                check=True,
+            )
+        finally:
+            rsp.unlink(missing_ok=True)
 
     def merge(self) -> None:
         """Merge the sancov files for the given suffix."""
         with log_timing(logger, f"sancov merge ({self.suffix})"):
-            merged_out = self.get_merged_sancov_path()
-
-            raw_files = list(self.raw_sancov_dir.glob(f"{self.suffix}.*.sancov"))
+            raw_files = self.raw_files()
             if not raw_files:
-                raise FileNotFoundError(f"No sancov files found for suffix: {self.suffix}")
-
-            """Merge raw ``.sancov`` files with repeated ``sancov -union`` (batched)."""
-            if len(raw_files) == 1:
-                shutil.copy(raw_files[0], merged_out)
-                return
-
-            sancov = self.sancov_bin
-            batch = self.union_batch
-            layer = list(raw_files)
-            with tempfile.TemporaryDirectory(dir=merged_out.parent) as tmp:
-                tmp_path = Path(tmp)
-                round_idx = 0
-                while len(layer) > 1:
-                    nxt: list[Path] = []
-                    for i in range(0, len(layer), batch):
-                        chunk = layer[i : i + batch]
-                        if len(chunk) == 1:
-                            nxt.append(chunk[0])
-                            continue
-                        out_f = tmp_path / f"u_{round_idx}_{len(nxt)}.sancov"
-                        run_subprocess(
-                            logger,
-                            [str(sancov), "-union"]
-                            + [str(p) for p in chunk]
-                            + ["--output", str(out_f)],
-                            check=True,
-                        )
-                        nxt.append(out_f)
-                    layer = nxt
-                    round_idx += 1
-                shutil.copy(layer[0], merged_out)
+                raise FileNotFoundError(
+                    f"No sancov files found for suffix: {self.suffix}"
+                )
+            self.union_files(raw_files, self.get_merged_sancov_path())
     
     def symbolize(
         self,

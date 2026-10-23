@@ -7,20 +7,27 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # shellcheck source=scripts/lib/prepare-pr-llvm.sh
 source "${REPO_ROOT}/scripts/lib/prepare-pr-llvm.sh"
+# shellcheck source=scripts/lib/gap-scope.sh
+source "${REPO_ROOT}/scripts/lib/gap-scope.sh"
 
 llvm_repo=""
 pr_id=""
 github_repo=""
 image_tag=""
 allowlist=""
+targets=""
+enable_projects=""
+enable_projects_set=0
+auto_scope=0
 sancov_instrumentation_mode=""
 ninja_jobs=""
 keep_clone=0
 no_cache=0
+test_suites=()
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") --llvm-repo <path> --pr-id <n> --allowlist <target> [options]
+Usage: $(basename "$0") --llvm-repo <path> --pr-id <n> [options]
 
 Fetch an LLVM pull request, squash it into a single commit in a standalone
 llvm-project clone, and build the fuzz-fill Docker test image from that tree.
@@ -28,9 +35,16 @@ llvm-project clone, and build the fuzz-fill Docker test image from that tree.
 Required:
   --llvm-repo <path>     Local llvm-project git clone (must contain llvm/)
   --pr-id <n>            GitHub pull request number
-  --allowlist <target>   SanitizerCoverage allowlist: amdgpu or spirv
 
-Options:
+Scope (default: all backends, llvm/test and clang/test, llvm-clang allowlist):
+  --auto                 Classify backends, tests, and allowlist from the PR
+  --allowlist <target>   Preset or allowlist file: amdgpu, spirv, llvm, clang,
+                         or llvm-clang
+  --targets <list>       LLVM_TARGETS_TO_BUILD
+  --tests <suite>        Lit suite recorded in the image (repeatable)
+  --enable-projects <list>
+                         Override LLVM_ENABLE_PROJECTS. By default Clang is built
+                         only for the clang and llvm-clang allowlists.
   --sancov-instrumentation-mode func|bb|edge
                          SanitizerCoverage instrumentation mode (default: bb).
                          fuzz-fill expects basic-block (bb) coverage; func or edge will likely break it.
@@ -53,7 +67,7 @@ Squash branches are named:
 Requires: git, gh, docker (BuildKit), and scripts/build-image.sh.
 
 Examples:
-  $(basename "$0") --llvm-repo ../llvm-project --pr-id 185430 --allowlist amdgpu
+  $(basename "$0") --llvm-repo ../llvm-project --pr-id 185430 --auto
   $(basename "$0") --llvm-repo ../llvm-project --pr-id 185430 --allowlist spirv --keep-clone
   $(basename "$0") --llvm-repo ../llvm-project --pr-id 42 --allowlist amdgpu --sancov-instrumentation-mode edge --tag llvm-pr-42 -j 8
 EOF
@@ -107,12 +121,48 @@ while [[ $# -gt 0 ]]; do
             image_tag="$2"
             shift 2
             ;;
+        --auto)
+            auto_scope=1
+            shift
+            ;;
         --allowlist)
             if [[ $# -lt 2 ]]; then
                 echo "error: --allowlist requires a value" >&2
                 exit 1
             fi
             allowlist="$2"
+            shift 2
+            ;;
+        --targets)
+            if [[ $# -lt 2 ]]; then
+                echo "error: --targets requires a value" >&2
+                exit 1
+            fi
+            targets="$2"
+            shift 2
+            ;;
+        --enable-projects)
+            if [[ $# -lt 2 ]]; then
+                echo "error: --enable-projects requires a value" >&2
+                exit 1
+            fi
+            enable_projects="$2"
+            enable_projects_set=1
+            shift 2
+            ;;
+        --tests)
+            if [[ $# -lt 2 ]]; then
+                echo "error: --tests requires a value" >&2
+                exit 1
+            fi
+            case "$2" in
+                */test|*/test/*) ;;
+                *)
+                    echo "error: --tests must be <project>/test or a subdirectory: $2" >&2
+                    exit 1
+                    ;;
+            esac
+            test_suites+=("$2")
             shift 2
             ;;
         --sancov-instrumentation-mode)
@@ -178,24 +228,17 @@ if [[ -z "$pr_id" ]]; then
     exit 1
 fi
 
-if [[ -z "$allowlist" ]]; then
-    echo "error: --allowlist is required" >&2
-    usage >&2
-    exit 1
+if [[ "$auto_scope" -eq 1 ]]; then
+    if [[ -n "$allowlist" || -n "$targets" || ${#test_suites[@]} -gt 0 || "$enable_projects_set" -eq 1 ]]; then
+        echo "error: --auto cannot be combined with --allowlist, --targets, --tests, or --enable-projects" >&2
+        exit 1
+    fi
 fi
 
 if [[ ! "$pr_id" =~ ^[0-9]+$ ]] || [[ "$pr_id" -eq 0 ]]; then
     echo "error: --pr-id must be a positive integer: ${pr_id}" >&2
     exit 1
 fi
-
-case "$allowlist" in
-    amdgpu|spirv) ;;
-    *)
-        echo "error: --allowlist must be amdgpu or spirv: ${allowlist}" >&2
-        exit 1
-        ;;
-esac
 
 case "$sancov_instrumentation_mode" in
     ""|func|bb|edge) ;;
@@ -250,7 +293,46 @@ prepare_pr_llvm_worktree \
     --branch "$branch" \
     --squash-message "$squash_msg"
 
+if [[ "$auto_scope" -eq 1 ]]; then
+    gap_scope_classify_commit "$PREPARE_PR_REPO_DIR" "$PREPARE_PR_SQUASH_OID"
+    if [[ "$gap_scope_action" == "skip" ]]; then
+        echo "gap-scope: skip (rule ${gap_scope_rule}): ${gap_scope_reason}"
+        if [[ "$keep_clone" -eq 0 ]]; then
+            rm -rf "$docker_llvm_path"
+        fi
+        exit 2
+    fi
+    gap_scope_apply_classification
+    echo "gap-scope: rule=${gap_scope_rule} backends=${backends} tests=${tests[*]} allowlist=${allowlist} enable_projects=${enable_projects:-<none>}"
+    echo "gap-scope: ${gap_scope_reason}"
+else
+    local_enable_projects="$enable_projects"
+    local_enable_projects_set="$enable_projects_set"
+    backends="$targets"
+    tests=("${test_suites[@]}")
+    gap_scope_fill_build_scope || exit 1
+    if [[ "$local_enable_projects_set" -eq 1 ]]; then
+        enable_projects="$local_enable_projects"
+    fi
+fi
+
+targets="$backends"
+test_suites=("${tests[@]}")
+allowlist="$(gap_scope_allowlist_preset "$allowlist")" || exit 1
+enable_projects_set=1
+
 build_args=(--llvm-dir "$docker_llvm_path" --tag "$image_tag" --allowlist "$allowlist")
+if [[ -n "$targets" ]]; then
+    build_args+=(--targets "$targets")
+fi
+if [[ "$enable_projects_set" -eq 1 ]]; then
+    build_args+=(--enable-projects "$enable_projects")
+fi
+if [[ ${#test_suites[@]} -gt 0 ]]; then
+    for suite in "${test_suites[@]}"; do
+        build_args+=(--tests "$suite")
+    done
+fi
 if [[ -n "$sancov_instrumentation_mode" ]]; then
     build_args+=(--sancov-instrumentation-mode "$sancov_instrumentation_mode")
 fi

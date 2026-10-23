@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 import pandas as pd
 
@@ -158,6 +161,34 @@ class GetCoverageDfTest(unittest.TestCase):
         self.assertEqual(len(df), 1)
         self.assertEqual(int(df.iloc[0]["covered"]), 1)
         Sancov.build_coverage_summary([df])
+
+    def test_parallel_load_matches_sequential_order(self) -> None:
+        llc = {
+            "point-symbol-info": {"/llvm/Foo.cpp": {"f": {"0x1": "10:0"}}},
+            "covered-points": ["0x1"],
+        }
+        opt = {
+            "point-symbol-info": {"/llvm/Bar.cpp": {"g": {"0x2": "20:0"}}},
+            "covered-points": [],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp) / "raw"
+            raw.mkdir()
+            tools = [
+                Sancov(Path(tmp) / "sancov", raw_sancov_dir=raw, suffix="llc"),
+                Sancov(Path(tmp) / "sancov", raw_sancov_dir=raw, suffix="opt"),
+            ]
+            for sancov, payload in zip(tools, (llc, opt)):
+                sancov.get_merged_symcov_path().write_text(
+                    json.dumps(payload), encoding="utf-8"
+                )
+            expected = Sancov.load_coverage_dfs(
+                [sancov.get_merged_symcov_path() for sancov in tools], ""
+            )
+            got = Sancov.load_coverage_dfs_from_sancovs(tools, jobs=2)
+        self.assertEqual(len(got), 2)
+        for actual, want in zip(got, expected):
+            pd.testing.assert_frame_equal(actual, want)
 
 
 def _address_line_map(rows: list[tuple[str, int, str, int]]) -> pd.DataFrame:
@@ -333,6 +364,34 @@ class SancovDiscoverToolsTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(Sancov.discover_tools(Path(tmp)), [])
+
+
+class SancovGroupRawDumpsTest(unittest.TestCase):
+    def test_groups_sorted_paths_and_ignores_non_matching(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp)
+            (raw / "llc.456.sancov").write_bytes(b"")
+            (raw / "llc.123.sancov").write_bytes(b"")
+            (raw / "opt.789.sancov").write_bytes(b"")
+            (raw / "notes.txt").write_text("ignore", encoding="utf-8")
+            (raw / "not-a-dump.sancov").write_bytes(b"")
+            # Glob ``llc.*.sancov`` would match this; the regex does not assign
+            # it to llc (pid must be numeric-only after the tool name).
+            (raw / "llc.ll.tmp.bin--.7.sancov").write_bytes(b"")
+            groups = Sancov.group_raw_dumps(raw)
+            self.assertEqual(sorted(groups), ["llc", "llc.ll.tmp.bin--", "opt"])
+            self.assertEqual(
+                [Path(p).name for p in groups["llc"]],
+                ["llc.123.sancov", "llc.456.sancov"],
+            )
+            self.assertEqual(
+                [Path(p).name for p in groups["llc.ll.tmp.bin--"]],
+                ["llc.ll.tmp.bin--.7.sancov"],
+            )
+            self.assertEqual(Sancov.discover_tools(raw), sorted(groups))
 
 
 if __name__ == "__main__":

@@ -2,10 +2,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Default LIT --filter= regex (AMDGPU path component; see scripts/lit-filters-amdgpu.sh).
-DEFAULT_LIT_FILTER_DIRS = [r"(?:^|/)AMDGPU(?:/|$)"]
 # Default symcov source-path regex for incremental gap scoping (--source-filter).
-DEFAULT_SOURCE_CODE_FILTER = r"(?:^|/)llvm/lib/"
+# Matches llvm/lib and clang/lib path components at the same time.
+DEFAULT_SOURCE_CODE_FILTER = r"(?:^|/)(?:llvm|clang)/lib/"
 
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "coverage_output" / f"cov_<timestamp>"
 
@@ -26,8 +25,8 @@ DEFAULT_TARGET_LINES_REPORT = "target_lines_uncovered.csv"
 DEFAULT_LIT_FAILURES_REPORT = "lit_failures.json"
 DEFAULT_TIMINGS_FILE = "timings.csv"
 
-# Sancov constants
-UNION_BATCH_SIZE = 200
+# Per-process memory budget for ``sancov -symbolize`` (round-2 pool sizing).
+SYMBOLIZE_MEMORY_BYTES = 8 * 1024**3
 
 # llvm-lit parallelism cap (workaround for high core-count Docker hosts)
 MAX_LIT_JOBS = 384

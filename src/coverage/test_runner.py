@@ -7,9 +7,13 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+from typing import TypeVar
 import pandas as pd
 from pathlib import Path
+
+_T = TypeVar("_T")
 
 from coverage.candidate_test_settings import (
     DEFAULT_LLC_FLAG_VARIANTS,
@@ -21,6 +25,7 @@ from coverage.constants import (
     DEFAULT_CANDIDATE_TEST_MANIFEST_FILE,
     DEFAULT_CANDIDATE_TEST_SETTINGS_FILE,
     DEFAULT_LIT_FAILURES_REPORT,
+    SYMBOLIZE_MEMORY_BYTES,
 )
 from coverage.filepaths import Filepaths
 from coverage.lit_config import (
@@ -42,14 +47,199 @@ logger = get_logger("coverage.test_runner")
 _LIT_SELECTED_NONE = re.compile(
     r"filter did not match any tests|-- Testing: 0 of "
 )
+_MEMINFO_AVAILABLE = re.compile(r"^MemAvailable:\s+(\d+)\s+kB$", re.MULTILINE)
 
 
-def _merge_and_symbolize_sancov(sancov: Sancov) -> None:
-    sancov.merge()
-    sancov.symbolize(
-        sancov.get_merged_sancov_path(),
-        sancov.get_merged_symcov_path(),
+_CGROUP_STAT_FILE = re.compile(r"^file (\d+)$", re.MULTILINE)
+
+
+def available_memory_bytes(
+    meminfo: Path = Path("/proc/meminfo"),
+    cgroup: Path = Path("/sys/fs/cgroup"),
+) -> int:
+    """Bytes available for new processes: MemAvailable, capped by cgroup v2 headroom.
+
+    Page cache is treated as evictable, so it is not charged against the
+    cgroup limit.
+    """
+    text = meminfo.read_text(encoding="utf-8")
+    available = int(_MEMINFO_AVAILABLE.search(text).group(1)) * 1024
+    try:
+        limit = (cgroup / "memory.max").read_text(encoding="utf-8").strip()
+        if limit != "max":
+            used = int((cgroup / "memory.current").read_text(encoding="utf-8"))
+            stat = (cgroup / "memory.stat").read_text(encoding="utf-8")
+            used -= int(_CGROUP_STAT_FILE.search(stat).group(1))
+            available = min(available, int(limit) - used)
+    except (OSError, ValueError, AttributeError):
+        pass
+    return max(0, available)
+
+
+def symbolize_worker_count(
+    workers: int,
+    tool_count: int,
+    *,
+    available_bytes: int | None = None,
+    per_process_bytes: int = SYMBOLIZE_MEMORY_BYTES,
+) -> int:
+    """Round-2 pool size: memory slots, capped by ``-j`` and tool count."""
+    if available_bytes is None:
+        available_bytes = available_memory_bytes()
+    slots = max(1, available_bytes // per_process_bytes)
+    return max(1, min(slots, workers, tool_count))
+
+
+def split_into_chunks(items: list[_T], n_chunks: int) -> list[list[_T]]:
+    """Split *items* into up to *n_chunks* contiguous, nearly equal non-empty chunks."""
+    if not items:
+        return []
+    n = min(max(1, n_chunks), len(items))
+    size, rem = divmod(len(items), n)
+    chunks: list[list[_T]] = []
+    start = 0
+    for i in range(n):
+        end = start + size + (1 if i < rem else 0)
+        chunks.append(items[start:end])
+        start = end
+    return chunks
+
+
+def global_chunk_size(total_files: int, workers: int) -> int:
+    """Shared round-1 chunk size: ``ceil(total_files / workers)``."""
+    workers = max(1, workers)
+    if total_files <= 0:
+        return 1
+    return (total_files + workers - 1) // workers
+
+
+def tool_chunk_count(n_files: int, chunk_size: int) -> int:
+    """Number of round-1 chunks for one tool (1 means skip round 1)."""
+    if n_files <= 0:
+        return 0
+    return (n_files + max(1, chunk_size) - 1) // max(1, chunk_size)
+
+
+def _sancovs_for_tools(
+    tools: list[str],
+    sancov_bin: Path,
+    raw_sancov_dir: Path,
+    instrumented_bin: Path,
+    build_root: Path,
+) -> list[Sancov]:
+    """One ``Sancov`` per tool, aimed at the binary that emitted its dumps."""
+    sancovs: list[Sancov] = []
+    for tool in tools:
+        symbolize_target = _resolve_symbolize_target(
+            instrumented_bin, build_root, tool
+        )
+        sancovs.append(
+            Sancov(sancov_bin, symbolize_target, raw_sancov_dir, tool)
+        )
+    return sancovs
+
+
+def _union_chunk(
+    sancov: Sancov, inputs: list[str], output: Path
+) -> Path:
+    sancov.union_files(inputs, output)
+    return output
+
+
+def _reduce_and_symbolize(
+    sancov: Sancov, inputs: list[str]
+) -> None:
+    """Union *inputs* into the final sancov, then symbolize."""
+    merged = sancov.get_merged_sancov_path()
+    sancov.union_files(inputs, merged)
+    sancov.symbolize(merged, sancov.get_merged_symcov_path())
+
+
+def _merge_and_symbolize_sancovs(
+    sancovs: list[Sancov],
+    dumps_by_tool: dict[str, list[str]],
+    workers: int,
+) -> None:
+    """Chunk-merge raw dumps in parallel, then per-tool reduce and symbolize.
+
+    Round 1 sizes chunks from ``ceil(total files / workers)`` so small tools
+    are not split into one-file processes. A tool that fits in one chunk skips
+    round 1 and unions its raw dumps in round 2. Round 2 is capped by the
+    ~8 GiB symbolize budget.
+    """
+    if not sancovs:
+        return
+
+    workers = max(1, workers)
+    total_files = sum(
+        len(dumps_by_tool.get(sancov.suffix or "", [])) for sancov in sancovs
     )
+    chunk_size = global_chunk_size(total_files, workers)
+    output_dir = sancovs[0].output_dir
+    with tempfile.TemporaryDirectory(
+        prefix="sancov-chunks-", dir=output_dir
+    ) as tmp:
+        tmp_path = Path(tmp)
+        chunk_jobs: list[tuple[Sancov, list[str], Path]] = []
+        round2_inputs: dict[str, list[str]] = {}
+
+        for sancov in sancovs:
+            tool = sancov.suffix or ""
+            raw = dumps_by_tool.get(tool, [])
+            if not raw:
+                raise FileNotFoundError(
+                    f"No sancov files found for suffix: {sancov.suffix}"
+                )
+            n_chunks = tool_chunk_count(len(raw), chunk_size)
+            if n_chunks <= 1:
+                # Fits in one chunk: union the raw dumps in round 2.
+                round2_inputs[tool] = raw
+                continue
+            chunks = split_into_chunks(raw, n_chunks)
+            tool_partials: list[str] = []
+            for idx, chunk in enumerate(chunks):
+                out = tmp_path / f"{tool}.chunk{idx}.sancov"
+                chunk_jobs.append((sancov, chunk, out))
+                tool_partials.append(str(out))
+            round2_inputs[tool] = tool_partials
+
+        if chunk_jobs:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=workers
+            ) as pool:
+                futures = [
+                    pool.submit(_union_chunk, sancov, inputs, out)
+                    for sancov, inputs, out in chunk_jobs
+                ]
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+
+        available = available_memory_bytes()
+        round2 = symbolize_worker_count(
+            workers, len(sancovs), available_bytes=available
+        )
+        logger.info(
+            "sancov round-1 chunk_size=%d jobs=%d; round-2 workers=%d "
+            "(available=%d GiB, budget=%d GiB/process, tools=%d, -j=%d)",
+            chunk_size,
+            len(chunk_jobs),
+            round2,
+            available // (1024**3),
+            SYMBOLIZE_MEMORY_BYTES // (1024**3),
+            len(sancovs),
+            workers,
+        )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=round2) as pool:
+            futures = [
+                pool.submit(
+                    _reduce_and_symbolize,
+                    sancov,
+                    round2_inputs[sancov.suffix or ""],
+                )
+                for sancov in sancovs
+            ]
+            for future in concurrent.futures.as_completed(futures):
+                future.result()
 
 
 def _find_unittests_executables(unittests_root: Path, tool: str) -> list[Path]:
@@ -69,29 +259,64 @@ def _find_unittests_executables(unittests_root: Path, tool: str) -> list[Path]:
     return matches
 
 
+def _is_lit_temporary_tool(tool: str) -> bool:
+    """True for a lit ``%t`` copy such as ``exec-options.ll.tmp.bin--``.
+
+    Lit names ``%t`` ``<test>.tmp``. Tests that copy an instrumented tool onto
+    that path emit sancov dumps under the copy's basename. Those copies are not
+    build products, so they are skipped. Any other missing binary still fails.
+    """
+    return ".tmp." in tool
+
+
+# ``scripts/build-llvm-sancov.sh`` replaces these with a Release build that has
+# SanitizerCoverage disabled (RELEASE_TOOLS). They run on every lit test and
+# are not compiler coverage. Ignore their dumps if that replacement is missed
+# and they are instrumented by accident.
+_RELEASE_UTILITY_TOOLS = frozenset({
+    "sancov",
+    "FileCheck",
+    "not",
+    "count",
+    "split-file",
+})
+
+
+def _is_release_utility_tool(tool: str) -> bool:
+    """True for the sancov tool and the lit helpers built without coverage."""
+    return tool in _RELEASE_UTILITY_TOOLS
+
+
 def _resolve_symbolize_target(bin_dir: Path, build_root: Path, tool: str) -> Path:
     """Locate the binary that produced ``<tool>.*.sancov`` dumps.
 
-    Tools normally live in ``bin/``. Backend lit filters can also select
-    LLVM-Unit shards whose binaries live under ``unittests/`` (for example
-    ``unittests/MC/AMDGPU/AMDGPUMCTests``).
+    Tools normally live in ``bin/``. Lit unit suites also select gtest binaries
+    under ``unittests/`` (LLVM-Unit, e.g. ``unittests/MC/AMDGPU/AMDGPUMCTests``)
+    and under ``tools/clang/unittests/`` (Clang-Unit, e.g.
+    ``tools/clang/unittests/AllClangUnitTests``).
     """
     candidate = bin_dir / tool
     if candidate.is_file():
         return candidate
 
-    matches = _find_unittests_executables(build_root / "unittests", tool)
+    search_roots = (
+        build_root / "unittests",
+        build_root / "tools" / "clang" / "unittests",
+    )
+    matches: list[Path] = []
+    for root in search_roots:
+        matches.extend(_find_unittests_executables(root, tool))
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
         listed = "\n".join(f"  {path}" for path in matches)
         raise SystemExit(
             f"error: multiple instrumented binaries named {tool!r} under "
-            f"{build_root / 'unittests'}:\n{listed}"
+            f"{' or '.join(str(root) for root in search_roots)}:\n{listed}"
         )
     raise SystemExit(
         f"error: instrumented binary for {tool!r} not found: {candidate} "
-        f"(also searched under {build_root / 'unittests'})"
+        f"(also searched under {' and '.join(str(root) for root in search_roots)})"
     )
 
 
@@ -108,9 +333,11 @@ def _discard_sancovs(raw_sancov_dir: Path) -> int:
     selected test ran, so none of the dumps are coverage to keep.
     """
     removed = 0
-    for path in raw_sancov_dir.glob("*.sancov"):
-        path.unlink()
-        removed += 1
+    with os.scandir(raw_sancov_dir) as entries:
+        for entry in entries:
+            if entry.name.endswith(".sancov"):
+                os.unlink(entry.path)
+                removed += 1
     return removed
 
 
@@ -183,7 +410,7 @@ class TestRunner:
         if not out_dir.exists():
             out_dir.mkdir(parents=True, exist_ok=True)
 
-        cov_opts = f"coverage=1:coverage_dir={out_dir}"
+        cov_opts = f"coverage=1:coverage_dir={out_dir}:print_coverage_summary=0"
         
         prev = env.get("UBSAN_OPTIONS", "").strip()
         env["UBSAN_OPTIONS"] = f"{cov_opts}:{prev}" if prev else cov_opts
@@ -432,7 +659,24 @@ class TestRunner:
                         f"{removed} sancov dump(s); llvm-lit selected no tests",
                         flush=True,
                     )
-            tools = Sancov.discover_tools(self.raw_sancov_output_dir)
+            dumps_by_tool = Sancov.group_raw_dumps(self.raw_sancov_output_dir)
+            tools: list[str] = []
+            filtered_dumps: dict[str, list[str]] = {}
+            for tool in sorted(dumps_by_tool):
+                if _is_release_utility_tool(tool):
+                    print(
+                        f"warning: ignoring sancov dumps from release utility {tool!r}",
+                        flush=True,
+                    )
+                    continue
+                if _is_lit_temporary_tool(tool):
+                    print(
+                        f"warning: skipping lit temporary coverage for {tool!r}",
+                        flush=True,
+                    )
+                    continue
+                tools.append(tool)
+                filtered_dumps[tool] = dumps_by_tool[tool]
             if not tools:
                 if self.require_sancov:
                     raise SystemExit(
@@ -452,53 +696,46 @@ class TestRunner:
                 raise SystemExit(
                     "error: --llc is required to locate the instrumented bin directory"
                 )
-            if self.filepaths.sancov is None:
+            sancov_bin = self.filepaths.sancov
+            if sancov_bin is None:
                 raise SystemExit("error: --sancov is required to merge and symbolize coverage")
 
             instrumented_bin = self.filepaths.llc.parent
             build_root = instrumented_bin.parent
-            sancovs: list[Sancov] = []
-            for tool in tools:
-                symbolize_target = _resolve_symbolize_target(
-                    instrumented_bin, build_root, tool
-                )
-                sancovs.append(
-                    Sancov(
-                        self.filepaths.sancov,
-                        symbolize_target,
-                        self.raw_sancov_output_dir,
-                        tool,
-                    )
-                )
+            sancovs = _sancovs_for_tools(
+                tools,
+                sancov_bin,
+                self.raw_sancov_output_dir,
+                instrumented_bin,
+                build_root,
+            )
+            # Round 1 uses the full -j pool so one large tool (often llc) can
+            # chunk-merge across workers. Round 2 is capped separately by the
+            # symbolize memory budget inside _merge_and_symbolize_sancovs.
+            workers = resolve_lit_job_count(self.jobs)
+            _merge_and_symbolize_sancovs(sancovs, filtered_dumps, workers)
 
-            workers = len(sancovs)
-            if self.jobs is not None:
-                workers = min(self.jobs, workers)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = [
-                    pool.submit(_merge_and_symbolize_sancov, s) for s in sancovs
-                ]
-                for future in concurrent.futures.as_completed(futures):
-                    future.result()
+        coverage_dfs = []
+        for tool, sancov in zip(tools, sancovs):
+            df = Sancov.load_coverage_dfs([sancov.get_merged_symcov_path()], "")[0]
+            coverage_dfs.append(df)
 
-        coverage_dfs = Sancov.load_coverage_dfs_from_sancovs(sancovs)
-        address_line_maps, line_point_summaries, coverage = Sancov.get_joint_coverage(
-            coverage_dfs
-        )
-
-        for tool, address_line_map, line_point_summary in zip(
-            tools, address_line_maps, line_point_summaries
-        ):
+            address_line_map = Sancov.build_address_line_map(df)
+            line_point_summary = Sancov.build_line_point_summary(address_line_map)
             address_line_map.to_csv(
                 self.filepaths.output_dir
                 / Sancov.tool_address_line_map_filename(tool),
                 index=False,
             )
+            del address_line_map
             line_point_summary.to_csv(
                 self.filepaths.output_dir
                 / Sancov.tool_line_point_summary_filename(tool),
                 index=False,
             )
+            del line_point_summary
+
+        coverage = Sancov.build_coverage_summary(coverage_dfs)
         coverage.to_csv(
             self.filepaths.output_dir / self.filepaths.line_coverage_summary_file,
             index=False,

@@ -1,0 +1,3 @@
+# Enable instrumentation for llvm/lib
+src:*/llvm/lib/*
+fun:*
