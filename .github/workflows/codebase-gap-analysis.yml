@@ -12,9 +12,6 @@ run-name: >-
       || 'Codebase gap analysis' }}
 
 on:
-  pull_request:
-    paths:
-      - .github/workflows/codebase-gap-analysis.yml
   workflow_dispatch:
     inputs:
       github_repo:
@@ -117,8 +114,6 @@ env:
 
 jobs:
   codebase-gap-analysis:
-    # Skip pull_request runs (registration only); workflow_dispatch runs normally.
-    if: github.event_name == 'workflow_dispatch'
     name: Codebase gap analysis
     runs-on: aws-linux-scale-rocm-medium
     timeout-minutes: 480

@@ -12,11 +12,6 @@ run-name: >-
       || 'PR gap analysis' }}
 
 on:
-  # Temporary: registers the workflow with GitHub before merge to main.
-  # REMOVE
-  pull_request:
-    paths:
-      - .github/workflows/pr-gap-analysis.yml
   workflow_dispatch:
     inputs:
       pr_id:
@@ -115,8 +110,6 @@ env:
 
 jobs:
   pr-gap-analysis:
-    # Skip pull_request runs (registration only); workflow_dispatch runs normally.
-    if: github.event_name == 'workflow_dispatch'
     name: PR gap analysis
     runs-on: aws-linux-scale-rocm-medium
     timeout-minutes: 480
