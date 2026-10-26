@@ -111,7 +111,7 @@ jobs:
     # Skip pull_request runs (registration only); workflow_dispatch runs normally.
     if: github.event_name == 'workflow_dispatch'
     name: Codebase gap analysis
-    runs-on: aws-linux-scale-rocm-medium-dev
+    runs-on: aws-linux-scale-rocm-medium
     timeout-minutes: 480
     container:
       image: ubuntu:24.04
