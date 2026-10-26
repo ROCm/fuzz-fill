@@ -43,6 +43,9 @@ env:
   VENV_BIN: /work/fuzz-fill-venv/bin
   # nproc inside this container can be the host CPU count.
   FUZZ_FILL_E2E_JOBS: "32"
+  CCACHE_DIR: /work/ccache
+  CCACHE_MAXSIZE: 3G
+  CCACHE_COMPRESS: "true"
 
 jobs:
   build-and-test:
@@ -109,6 +112,18 @@ jobs:
           curl -fsSL "https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-${LLVM_RELEASE_VERSION}.tar.gz" \
             | tar -xz --strip-components=1 -C "${LLVM_PROJECT_DIR}"
 
+      - name: Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache-ccache
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: fuzz-fill-llvm-sancov-ccache-build-test-${{ env.LLVM_RELEASE_VERSION }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-fill-llvm-sancov-ccache-build-test-${{ env.LLVM_RELEASE_VERSION }}-
+
+      - name: Reset ccache stats for this run
+        run: ccache --zero-stats
+
       - name: Build sancov LLVM
         run: |
           bash ./scripts/ci-cgroup-memstat.sh 30 &
@@ -120,7 +135,20 @@ jobs:
             "${LLVM_BUILD_DIR}" \
             --bootstrap-bin "${LLVM_RELEASE_BIN}" \
             --enable-projects clang \
+            --enable-ccache \
+            --ccache-compiler-check-version \
             "${FUZZ_FILL_E2E_JOBS}"
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache --show-stats -v
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.cache-ccache.outputs.cache-primary-key }}
 
       - name: Install fuzz-fill venv
         run: |
@@ -234,10 +262,24 @@ jobs:
         run: |
           ./scripts/warm-llvm-mirror-for-pr.sh "${LLVM_MIRROR_DIR}" --pr-id "${{ matrix.pr }}"
 
+      - name: Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache-ccache
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: fuzz-fill-llvm-sancov-ccache-e2e-${{ matrix.pr }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-fill-llvm-sancov-ccache-e2e-${{ matrix.pr }}-
+
+      - name: Reset ccache stats for this run
+        run: ccache --zero-stats
+
       - name: Run e2e integration tests
         env:
           GH_TOKEN: ${{ github.token }}
           FUZZ_FILL_E2E_BOOTSTRAP_BIN: ${{ env.LLVM_RELEASE_BIN }}
+          FUZZ_FILL_E2E_CCACHE: "1"
+          FUZZ_FILL_E2E_CCACHE_COMPILER_CHECK_VERSION: "1"
         run: |
           source "${VENV_DIR}/bin/activate"
           # Lit buffers each test until it exits. The tests tee phases here so
@@ -261,3 +303,14 @@ jobs:
           kill "$tail_pid" "$memstat_pid" 2>/dev/null || true
           wait "$tail_pid" "$memstat_pid" 2>/dev/null || true
           exit "$status"
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache --show-stats -v
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.cache-ccache.outputs.cache-primary-key }}

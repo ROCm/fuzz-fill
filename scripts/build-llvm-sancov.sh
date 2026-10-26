@@ -20,6 +20,10 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
                     Pass clang to build an instrumented Clang and its lit suite.
   --link-jobs <n>   Maximum concurrent link jobs (default: 8). Compile parallelism
                     stays at ninja_jobs.
+  --enable-ccache   Route compilation through ccache (CMAKE_C/CXX_COMPILER_LAUNCHER=ccache).
+                    Disabled by default. Fails if ccache is not installed.
+  --ccache-compiler-check-version
+                    With --enable-ccache, hash via '%compiler% --version' (off by default).
   ninja_jobs        Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
 
 Configures one RelWithDebInfo + SanitizerCoverage tree and builds ninja all.
@@ -41,6 +45,8 @@ TARGETS="X86;AMDGPU;SPIRV"
 ENABLE_PROJECTS=""
 LINK_JOBS="8"
 NINJA_JOBS=""
+ENABLE_CCACHE=0
+CCACHE_COMPILER_CHECK_VERSION=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -97,6 +103,14 @@ while [[ $# -gt 0 ]]; do
             fi
             LINK_JOBS="$2"
             shift 2
+            ;;
+        --enable-ccache)
+            ENABLE_CCACHE=1
+            shift
+            ;;
+        --ccache-compiler-check-version)
+            CCACHE_COMPILER_CHECK_VERSION=1
+            shift
             ;;
         --help|-h)
             usage
@@ -185,6 +199,34 @@ mkdir -p "$SANCOV_BUILD_DIR"
 SANCOV_BUILD_DIR="$(realpath "$SANCOV_BUILD_DIR")"
 SANCOV_TOOL_BUILD_DIR="${SANCOV_BUILD_DIR}.sancov-release"
 
+CCACHE_LAUNCHER_ARGS=()
+if [[ "$CCACHE_COMPILER_CHECK_VERSION" -eq 1 && "$ENABLE_CCACHE" -ne 1 ]]; then
+    echo "Error: --ccache-compiler-check-version requires --enable-ccache" >&2
+    exit 1
+fi
+
+if [[ "$ENABLE_CCACHE" -eq 1 ]]; then
+    if ! command -v ccache >/dev/null 2>&1; then
+        echo "Error: --enable-ccache was passed but ccache is not installed" >&2
+        exit 1
+    fi
+    # LLVM builds with precompiled headers by default (LLVM_ENABLE_PCH). Without this
+    # sloppiness, ccache cannot cache PCH-dependent compiles at all (nearly the entire
+    # build), since it can't verify __DATE__/__TIME__ or #define usage across the PCH.
+    # See ccache(1) PRECOMPILED HEADERS. Respect a caller-provided value if already set.
+    export CCACHE_SLOPPINESS="${CCACHE_SLOPPINESS:-pch_defines,time_macros}"
+
+    if [[ "$CCACHE_COMPILER_CHECK_VERSION" -eq 1 ]]; then
+        # Prefer --version over mtime for apt.llvm.org nightlies. Keep a caller override.
+        export CCACHE_COMPILERCHECK="${CCACHE_COMPILERCHECK:-%compiler% --version}"
+    fi
+
+    CCACHE_LAUNCHER_ARGS=(
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+    )
+fi
+
 SANCOV_FLAGS="-fno-inline -fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=${INSTRUMENTATION_MODE},trace-pc-guard"
 if [[ -n "$IGNORELIST" ]]; then
     SANCOV_FLAGS+=" -fsanitize-coverage-ignorelist=$IGNORELIST"
@@ -209,6 +251,7 @@ LLVM_CMAKE_ARGS=(
     -G Ninja
     -DCMAKE_C_COMPILER="$C_COMPILER"
     -DCMAKE_CXX_COMPILER="$CXX_COMPILER"
+    "${CCACHE_LAUNCHER_ARGS[@]}"
     -DCMAKE_C_FLAGS="$SANCOV_FLAGS"
     -DCMAKE_CXX_FLAGS="$SANCOV_FLAGS"
     -DCMAKE_BUILD_TYPE=RelWithDebInfo
@@ -232,6 +275,7 @@ SANCOV_TOOL_CMAKE_ARGS=(
     -G Ninja
     -DCMAKE_C_COMPILER="$C_COMPILER"
     -DCMAKE_CXX_COMPILER="$CXX_COMPILER"
+    "${CCACHE_LAUNCHER_ARGS[@]}"
     -DCMAKE_BUILD_TYPE=Release
     -DLLVM_TARGETS_TO_BUILD="$TARGETS"
     -DLLVM_PARALLEL_LINK_JOBS="$LINK_JOBS"
@@ -270,10 +314,27 @@ fi
 echo "  Link jobs:        $LINK_JOBS"
 echo "  Linker:           lld ($LLD)"
 echo "  Release sancov:   $SANCOV_TOOL_BUILD_DIR"
+echo "  ccache:           $([[ "$ENABLE_CCACHE" -eq 1 ]] && echo enabled || echo disabled)"
 echo
 
 echo "=== Instrumented tree (RelWithDebInfo + SanitizerCoverage, ninja all) ==="
 (
+    # The allowlist/ignorelist are passed to clang as plain file paths, not #include'd
+    # and not recorded in -MD dependency output, so ccache only hashes the path string
+    # unless we list them in extra_files_to_hash (CCACHE_EXTRAFILES). See ccache(1).
+    # Scope EXTRAFILES to this subshell so allowlist edits do not invalidate the
+    # Release sancov/helper tree, which does not use those files.
+    if [[ "$ENABLE_CCACHE" -eq 1 ]]; then
+        _ccache_extra_files="${ALLOWLIST}"
+        if [[ -n "$IGNORELIST" ]]; then
+            _ccache_extra_files+=":${IGNORELIST}"
+        fi
+        if [[ -n "${CCACHE_EXTRAFILES:-}" ]]; then
+            export CCACHE_EXTRAFILES="${CCACHE_EXTRAFILES}:${_ccache_extra_files}"
+        else
+            export CCACHE_EXTRAFILES="${_ccache_extra_files}"
+        fi
+    fi
     cd "$SANCOV_BUILD_DIR"
     cmake "${LLVM_CMAKE_ARGS[@]}" \
         "$LLVM_DIR/llvm"
@@ -309,6 +370,12 @@ if [[ "$enable_clang" -eq 1 ]]; then
         echo "Error: tools/clang/test/lit.site.cfg.py not found under $SANCOV_BUILD_DIR" >&2
         exit 1
     fi
+fi
+
+if [[ "$ENABLE_CCACHE" -eq 1 ]]; then
+    echo
+    echo "=== ccache stats ==="
+    ccache --show-stats
 fi
 
 echo "Done. Instrumented build at $SANCOV_BUILD_DIR"

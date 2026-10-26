@@ -117,7 +117,7 @@ You need a bootstrap LLVM bin directory (`clang`, `clang++`, `ld.lld`) and one *
 | **Bootstrap** | `clang`, `clang++`, `ld.lld` for compiling LLVM | Any LLVM install's `bin/` directory containing those tools |
 | **SanitizerCoverage** | Instrumented LLVM tree (`llc`, `opt`, `sancov`, …) | `./scripts/build-llvm-sancov.sh ./scripts/allowlist-amdgpu.txt llvm-project llvm-project/build-sancov --bootstrap-bin /path/to/llvm/bin` |
 
-`build-llvm-sancov.sh` builds one instrumented RelWithDebInfo tree (`ninja all`). Bootstrap supplies **clang/clang++/ld.lld**. The instrumented tree is usually built from a pinned llvm-project tag (default `llvmorg-22.1.8`) or a local checkout; that source revision is independent of the bootstrap version.
+`build-llvm-sancov.sh` builds one instrumented RelWithDebInfo tree (`ninja all`). Bootstrap supplies **clang/clang++/ld.lld**. The instrumented tree is usually built from a pinned llvm-project tag (default `llvmorg-22.1.8`) or a local checkout; that source revision is independent of the bootstrap version. Optional `--enable-ccache` uses ccache if installed.
 
 Allowlist presets:
 

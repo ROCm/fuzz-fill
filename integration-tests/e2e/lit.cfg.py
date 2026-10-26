@@ -48,4 +48,20 @@ if lit_config.params.get("e2e"):
             ("%e2e-bootstrap-bin", shlex.quote(_e2e_bootstrap))
         )
 
+# lit does not inherit the caller's env; forward these when set.
+for _env_var in (
+    "FUZZ_FILL_E2E_JOBS",
+    "FUZZ_FILL_E2E_CCACHE",
+    "FUZZ_FILL_E2E_CCACHE_COMPILER_CHECK_VERSION",
+    "CCACHE_DIR",
+    "CCACHE_MAXSIZE",
+    "CCACHE_COMPRESS",
+    "CCACHE_SLOPPINESS",
+    "CCACHE_COMPILERCHECK",
+    "CCACHE_EXTRAFILES",
+):
+    _env_val = os.environ.get(_env_var)
+    if _env_val is not None:
+        config.environment[_env_var] = _env_val
+
 lit_common.apply_gh_token_feature(config)
