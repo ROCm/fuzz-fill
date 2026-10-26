@@ -22,6 +22,8 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
                     stays at ninja_jobs.
   --enable-ccache   Route compilation through ccache (CMAKE_C/CXX_COMPILER_LAUNCHER=ccache).
                     Disabled by default. Fails if ccache is not installed.
+  --ccache-compiler-check-version
+                    With --enable-ccache, hash via '%compiler% --version' (off by default).
   ninja_jobs        Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
 
 Configures one RelWithDebInfo + SanitizerCoverage tree and builds ninja all.
@@ -44,6 +46,7 @@ ENABLE_PROJECTS=""
 LINK_JOBS="8"
 NINJA_JOBS=""
 ENABLE_CCACHE=0
+CCACHE_COMPILER_CHECK_VERSION=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -103,6 +106,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --enable-ccache)
             ENABLE_CCACHE=1
+            shift
+            ;;
+        --ccache-compiler-check-version)
+            CCACHE_COMPILER_CHECK_VERSION=1
             shift
             ;;
         --help|-h)
@@ -193,6 +200,11 @@ SANCOV_BUILD_DIR="$(realpath "$SANCOV_BUILD_DIR")"
 SANCOV_TOOL_BUILD_DIR="${SANCOV_BUILD_DIR}.sancov-release"
 
 CCACHE_LAUNCHER_ARGS=()
+if [[ "$CCACHE_COMPILER_CHECK_VERSION" -eq 1 && "$ENABLE_CCACHE" -ne 1 ]]; then
+    echo "Error: --ccache-compiler-check-version requires --enable-ccache" >&2
+    exit 1
+fi
+
 if [[ "$ENABLE_CCACHE" -eq 1 ]]; then
     if ! command -v ccache >/dev/null 2>&1; then
         echo "Error: --enable-ccache was passed but ccache is not installed" >&2
@@ -203,6 +215,11 @@ if [[ "$ENABLE_CCACHE" -eq 1 ]]; then
     # build), since it can't verify __DATE__/__TIME__ or #define usage across the PCH.
     # See ccache(1) PRECOMPILED HEADERS. Respect a caller-provided value if already set.
     export CCACHE_SLOPPINESS="${CCACHE_SLOPPINESS:-pch_defines,time_macros}"
+
+    if [[ "$CCACHE_COMPILER_CHECK_VERSION" -eq 1 ]]; then
+        # Prefer --version over mtime for apt.llvm.org nightlies. Keep a caller override.
+        export CCACHE_COMPILERCHECK="${CCACHE_COMPILERCHECK:-%compiler% --version}"
+    fi
 
     CCACHE_LAUNCHER_ARGS=(
         -DCMAKE_C_COMPILER_LAUNCHER=ccache

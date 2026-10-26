@@ -136,6 +136,7 @@ jobs:
             --bootstrap-bin "${LLVM_RELEASE_BIN}" \
             --enable-projects clang \
             --enable-ccache \
+            --ccache-compiler-check-version \
             "${FUZZ_FILL_E2E_JOBS}"
 
       - name: Show ccache stats
@@ -278,6 +279,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           FUZZ_FILL_E2E_BOOTSTRAP_BIN: ${{ env.LLVM_RELEASE_BIN }}
           FUZZ_FILL_E2E_CCACHE: "1"
+          FUZZ_FILL_E2E_CCACHE_COMPILER_CHECK_VERSION: "1"
         run: |
           source "${VENV_DIR}/bin/activate"
           # Lit buffers each test until it exits. The tests tee phases here so

@@ -52,10 +52,12 @@ if lit_config.params.get("e2e"):
 for _env_var in (
     "FUZZ_FILL_E2E_JOBS",
     "FUZZ_FILL_E2E_CCACHE",
+    "FUZZ_FILL_E2E_CCACHE_COMPILER_CHECK_VERSION",
     "CCACHE_DIR",
     "CCACHE_MAXSIZE",
     "CCACHE_COMPRESS",
     "CCACHE_SLOPPINESS",
+    "CCACHE_COMPILERCHECK",
     "CCACHE_EXTRAFILES",
 ):
     _env_val = os.environ.get(_env_var)
