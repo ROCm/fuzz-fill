@@ -255,8 +255,7 @@ def target_one(state, state_path, llvm_repo, number, backend_override=None):
         "llvm_repo": llvm_repo,
         "forced": True,
     }
-    for backend in backends:
-        state["runs"].pop(f"{number}:{backend}", None)
+    state["runs"].pop(str(number), None)
     state["candidates"] = [c for c in state["candidates"] if c["number"] != number] + [cand]
     save_state(state, state_path)
     log(f"forced candidate PR #{number} ({'/'.join(backends)}): {pr['title']}")
@@ -265,7 +264,7 @@ def target_one(state, state_path, llvm_repo, number, backend_override=None):
 # --- dispatch -------------------------------------------------------------
 
 
-def dispatch_one(fuzz_fill_repo, ref, llvm_repo, number, backend):
+def dispatch_one(fuzz_fill_repo, ref, llvm_repo, number):
     subprocess.run(
         [
             "gh", "workflow", "run", "pr-gap-analysis.yml",
@@ -273,15 +272,19 @@ def dispatch_one(fuzz_fill_repo, ref, llvm_repo, number, backend):
             "--ref", ref,
             "-f", f"pr_id={number}",
             "-f", f"github_repo={llvm_repo}",
-            "-f", f"backend_tests={backend}",
             "-f", "run_gap_filling=false",
         ],
         check=True,
     )
 
 
-def resolve_run_id(fuzz_fill_repo, number, backend, since_iso, known_ids, retries=12, delay=5):
-    marker = f"llvm#{number} ({backend})"
+def run_title_marker(number):
+    """Substring unique to this PR's workflow run-name (avoids llvm#1 matching llvm#12)."""
+    return f"llvm#{number} by"
+
+
+def resolve_run_id(fuzz_fill_repo, number, since_iso, known_ids, retries=12, delay=5):
+    marker = run_title_marker(number)
     for attempt in range(retries):
         time.sleep(delay)
         data = gh_api_json(
@@ -299,9 +302,9 @@ def resolve_run_id(fuzz_fill_repo, number, backend, since_iso, known_ids, retrie
     return None
 
 
-def list_prior_runs(fuzz_fill_repo, number, backend, per_page=100, max_pages=5):
-    """Completed, successful pr-gap-analysis.yml runs for this PR/backend, newest first."""
-    marker = f"llvm#{number} ({backend})"
+def list_prior_runs(fuzz_fill_repo, number, per_page=100, max_pages=5):
+    """Completed, successful pr-gap-analysis.yml runs for this PR, newest first."""
+    marker = run_title_marker(number)
     runs = []
     page = 1
     while page <= max_pages:
@@ -336,8 +339,8 @@ def fetch_artifact_text(fuzz_fill_repo, run_id, artifact_name):
             return f.read().strip()
 
 
-def find_cached_run(fuzz_fill_repo, number, backend, head_sha):
-    """Look for a prior successful run for this PR/backend that already analyzed
+def find_cached_run(fuzz_fill_repo, number, head_sha):
+    """Look for a prior successful run for this PR that already analyzed
     head_sha, so dispatch() can reuse its artifact instead of scheduling a new run.
 
     Returns the run_id to reuse, or None if no prior run matches. Warns (and skips
@@ -345,7 +348,7 @@ def find_cached_run(fuzz_fill_repo, number, backend, head_sha):
     convention this depends on ('gap-finding-pr<N>-<run_id>' / 'pr-head-pr<N>-<run_id>'),
     since that would otherwise make this check silently useless.
     """
-    for run in list_prior_runs(fuzz_fill_repo, number, backend):
+    for run in list_prior_runs(fuzz_fill_repo, number):
         run_id = run["id"]
         artifacts = gh_api_json(f"repos/{fuzz_fill_repo}/actions/runs/{run_id}/artifacts?per_page=100")
         names = {a["name"] for a in artifacts.get("artifacts", [])}
@@ -354,7 +357,7 @@ def find_cached_run(fuzz_fill_repo, number, backend, head_sha):
         unrecognized = {n for n in names if not FINDING_ARTIFACT_RE.match(n) and not PR_HEAD_ARTIFACT_RE.match(n)}
         if unrecognized:
             log(
-                f"warning: run {run_id} (PR #{number}, {backend}) has artifact(s) "
+                f"warning: run {run_id} (PR #{number}) has artifact(s) "
                 f"{sorted(unrecognized)} that don't match the expected "
                 f"'gap-finding-pr<N>-<run_id>' / 'pr-head-pr<N>-<run_id>' naming convention "
                 "-- has the workflow's artifact naming changed? skipping cache reuse for this run"
@@ -364,7 +367,7 @@ def find_cached_run(fuzz_fill_repo, number, backend, head_sha):
             continue
         if expected_head not in names:
             log(
-                f"warning: run {run_id} (PR #{number}, {backend}) has a gap-finding artifact "
+                f"warning: run {run_id} (PR #{number}) has a gap-finding artifact "
                 f"but no '{expected_head}' artifact to verify its analyzed commit -- skipping "
                 "cache reuse for this run"
             )
@@ -381,42 +384,41 @@ def dispatch(state, state_path, fuzz_fill_repo, ref, llvm_repo):
         number = cand["number"]
         head_sha = cand.get("head_sha")
         forced = cand.get("forced", False)
-        for backend in cand["backends"]:
-            key = f"{number}:{backend}"
-            if key in state["runs"]:
+        key = str(number)
+        if key in state["runs"]:
+            continue
+        if not forced and head_sha:
+            cached_run_id = find_cached_run(fuzz_fill_repo, number, head_sha)
+            if cached_run_id is not None:
+                log(
+                    f"PR #{number}: reusing artifact from run {cached_run_id} "
+                    f"(already analyzed {head_sha[:12]}), skipping dispatch"
+                )
+                known_ids.add(cached_run_id)
+                state["runs"][key] = {
+                    "run_id": cached_run_id,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "downloaded": False,
+                }
+                save_state(state, state_path)
                 continue
-            if not forced and head_sha:
-                cached_run_id = find_cached_run(fuzz_fill_repo, number, backend, head_sha)
-                if cached_run_id is not None:
-                    log(
-                        f"PR #{number} ({backend}): reusing artifact from run {cached_run_id} "
-                        f"(already analyzed {head_sha[:12]}), skipping dispatch"
-                    )
-                    known_ids.add(cached_run_id)
-                    state["runs"][key] = {
-                        "run_id": cached_run_id,
-                        "status": "completed",
-                        "conclusion": "success",
-                        "downloaded": False,
-                    }
-                    save_state(state, state_path)
-                    continue
-            since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            log(f"dispatching PR #{number} ({backend})")
-            dispatch_one(fuzz_fill_repo, ref, llvm_repo, number, backend)
-            run_id = resolve_run_id(fuzz_fill_repo, number, backend, since, known_ids)
-            if run_id is None:
-                log(f"  warning: could not resolve run id for {key}; check manually")
-                continue
-            known_ids.add(run_id)
-            state["runs"][key] = {
-                "run_id": run_id,
-                "status": "queued",
-                "conclusion": None,
-                "downloaded": False,
-            }
-            log(f"  run id: {run_id}")
-            save_state(state, state_path)
+        since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        log(f"dispatching PR #{number}")
+        dispatch_one(fuzz_fill_repo, ref, llvm_repo, number)
+        run_id = resolve_run_id(fuzz_fill_repo, number, since, known_ids)
+        if run_id is None:
+            log(f"  warning: could not resolve run id for {key}; check manually")
+            continue
+        known_ids.add(run_id)
+        state["runs"][key] = {
+            "run_id": run_id,
+            "status": "queued",
+            "conclusion": None,
+            "downloaded": False,
+        }
+        log(f"  run id: {run_id}")
+        save_state(state, state_path)
 
 
 # --- collect -----------------------------------------------------------
@@ -429,8 +431,8 @@ def collect(state, state_path, fuzz_fill_repo, artifacts_dir):
         if run.get("conclusion") != "success":
             log(f"skip {key}: run did not succeed (conclusion={run.get('conclusion')})")
             continue
-        number, backend = key.split(":")
-        dest = os.path.join(artifacts_dir, f"pr-{number}", backend)
+        number = key
+        dest = os.path.join(artifacts_dir, f"pr-{number}")
         os.makedirs(dest, exist_ok=True)
         name = f"gap-finding-pr{number}-{run['run_id']}"
         subprocess.run(
@@ -550,19 +552,17 @@ def render_stacked_pr_warning(number, base_ref, base_branch, base_pr):
     )
 
 
-def render_lit_failures_warning(warnings):
+def render_lit_failures_warning(message):
     # Same hidden-note treatment as render_drift_warning: visible in the raw
     # draft for whoever reviews it, stripped by GitHub if posted verbatim.
     lines = [
         "<!-- fuzz-fill internal note: do not post this block, GitHub hides "
         "HTML comments when rendering so it won't show up if you do, but "
-        "strip it if you're posting the body some other way. -->"
+        "strip it if you're posting the body some other way. -->",
+        "> [!WARNING]",
     ]
-    for backend, message in warnings:
-        lines.append("> [!WARNING]")
-        lines.append(f"> **{backend}**:")
-        for line in message.splitlines():
-            lines.append(f"> {line}" if line else ">")
+    for line in message.splitlines():
+        lines.append(f"> {line}" if line else ">")
     lines.append("<!-- end internal note -->\n")
     return "\n".join(lines)
 
@@ -572,27 +572,20 @@ def render_pr_comment(cand, state, out_dir, cache):
     lines. Returns the written path, or None if there was nothing to write.
     """
     number = cand["number"]
+    run = state["runs"].get(str(number))
+    if not run or not run.get("downloaded"):
+        return None
+    adir = run["artifact_dir"]
+    readme_path = os.path.join(adir, "README-finding.txt")
+    csv_path = os.path.join(adir, "out", "commit_lines_report", "target_lines_uncovered_pruned.csv")
+    if not os.path.isfile(csv_path):
+        return None
+    info = parse_readme(readme_path) if os.path.isfile(readme_path) else {}
+    pr_head = info.get("pr_head") or cand["head_sha"]
     entries = set()
-    pr_head = None
-    lit_warnings = []
-    for backend in cand["backends"]:
-        run = state["runs"].get(f"{number}:{backend}")
-        if not run or not run.get("downloaded"):
-            continue
-        adir = run["artifact_dir"]
-        readme_path = os.path.join(adir, "README-finding.txt")
-        csv_path = os.path.join(adir, "out", "commit_lines_report", "target_lines_uncovered_pruned.csv")
-        if not os.path.isfile(csv_path):
-            continue
-        info = parse_readme(readme_path) if os.path.isfile(readme_path) else {}
-        pr_head = info.get("pr_head") or cand["head_sha"]
-        with open(csv_path, newline="") as f:
-            for row in csv.DictReader(f):
-                entries.add((normalize_target_path(row["file"]), int(row["line"])))
-        warning_path = os.path.join(adir, "README-WARNING")
-        if os.path.isfile(warning_path):
-            with open(warning_path) as f:
-                lit_warnings.append((backend, f.read().strip()))
+    with open(csv_path, newline="") as f:
+        for row in csv.DictReader(f):
+            entries.add((normalize_target_path(row["file"]), int(row["line"])))
     if not entries or pr_head is None:
         return None
     uncovered = sorted(entries)
@@ -603,10 +596,13 @@ def render_pr_comment(cand, state, out_dir, cache):
     if live_head and live_head != pr_head:
         log(f"warning: PR #{number} has drifted (analyzed {pr_head[:12]}, now at {live_head[:12]})")
         text = render_drift_warning(number, pr_head, live_head) + text
-    if lit_warnings:
-        log(f"warning: PR #{number} had LIT test failures during analysis for: "
-            f"{', '.join(b for b, _ in lit_warnings)}")
-        text = render_lit_failures_warning(lit_warnings) + text
+    warning_path = os.path.join(adir, "README-WARNING")
+    if os.path.isfile(warning_path):
+        with open(warning_path) as f:
+            lit_message = f.read().strip()
+        if lit_message:
+            log(f"warning: PR #{number} had LIT test failures during analysis")
+            text = render_lit_failures_warning(lit_message) + text
     base_ref = live_pr["base_ref"] if live_pr else None
     if base_ref:
         base_branch = default_branch(llvm_repo, cache)
@@ -636,13 +632,12 @@ def comment(state, out_dir):
 
 
 def candidate_ready(state, cand):
-    """True once every backend run for this candidate has reached a terminal
-    state (completed, downloaded-or-not) -- i.e. there's nothing left to
-    wait for before writing this PR's comment, win or lose."""
-    for backend in cand["backends"]:
-        run = state["runs"].get(f"{cand['number']}:{backend}")
-        if run is not None and run.get("status") != "completed":
-            return False
+    """True once the run for this candidate has reached a terminal state
+    (completed, downloaded-or-not) -- i.e. there's nothing left to wait for
+    before writing this PR's comment, win or lose."""
+    run = state["runs"].get(str(cand["number"]))
+    if run is not None and run.get("status") != "completed":
+        return False
     return True
 
 

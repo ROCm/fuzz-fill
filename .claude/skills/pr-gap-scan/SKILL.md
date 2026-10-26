@@ -45,40 +45,40 @@ always safe; completed phases are skipped.
    "fuzz-fill", case-insensitive) and no commit has landed since that
    comment. Each kept candidate records its head SHA and which backend(s)
    it touches.
-2. **dispatch** — for each candidate PR x backend not forced (see
+2. **dispatch** — for each candidate PR not forced (see
    [pr-gap-check](../pr-gap-check/SKILL.md)), first checks whether a prior
-   successful run already analyzed this exact PR/commit/backend: it looks up
-   past `pr-gap-analysis.yml` runs matching this PR and backend, and for each
-   checks its `pr-head-pr<N>-<run_id>` artifact (published early in that run)
-   against the candidate's current head SHA. A match means the existing
+   successful run already analyzed this exact PR/commit: it looks up past
+   `pr-gap-analysis.yml` runs matching `llvm#<N> by` in the run title, and for
+   each checks its `pr-head-pr<N>-<run_id>` artifact (published early in that
+   run) against the candidate's current head SHA. A match means the existing
    `gap-finding-pr<N>-<run_id>` artifact is reused — no new job is scheduled.
    If a matching run's artifacts don't fit the expected
    `gap-finding-pr<N>-<run_id>` / `pr-head-pr<N>-<run_id>` naming (e.g. the
    workflow's artifact names changed), this logs a warning and falls back to
    scheduling a fresh run rather than silently skipping the check. Otherwise,
    triggers `pr-gap-analysis.yml` on `ROCm/fuzz-fill` via `gh workflow run`
-   with `run_gap_filling=false` (gap finding only, per the ask — no gap
-   filling) and resolves/records the new run ID.
+   once per PR (the workflow classifies scope with `--auto`) with
+   `run_gap_filling=false` (gap finding only, per the ask — no gap filling)
+   and resolves/records the new run ID.
 3. **process** — polls all dispatched runs, but doesn't wait for the whole
    batch: each polling cycle it refreshes run statuses, downloads (collects)
    the `gap-finding-pr<N>-<run_id>` artifact for any run that just completed
-   successfully, and immediately drafts the comment for any PR whose *every*
-   backend run has now reached a terminal state — without waiting on any
-   other PR's still-running jobs. It reads
-   `commit_lines_report/target_lines_uncovered_pruned.csv` from each artifact,
-   merges lines across backends for the same PR (already pruned by
-   gap-pruner in CI). If anything remains, re-checks the PR's *current*
-   head against the `pr_head` the artifact was actually analyzed against
-   (CI can take a long time — the PR may have gained new commits since it was
-   dispatched); if they differ, prepends a drift warning to the file. It also
-   checks each backend's artifact for a `README-WARNING` file (written by the
-   workflow when LIT tests failed during that backend's baseline coverage
-   run) and prepends a warning block for each affected backend if so. It also
-   re-fetches the PR's current base branch and, if it isn't the repo's
-   default branch, prepends a stacked-PR warning (see "Stacked PRs" below).
-   Then writes the draft comment for that PR to `--out-dir/pr-<N>.md` using
-   the template below. PRs with no uncovered lines get no file.
-   The loop keeps polling until every dispatched run is terminal.
+   successfully, and immediately drafts the comment for any PR whose run has
+   now reached a terminal state — without waiting on any other PR's
+   still-running jobs. It reads
+   `commit_lines_report/target_lines_uncovered_pruned.csv` from the artifact
+   (already pruned by gap-pruner in CI). If anything remains, re-checks the
+   PR's *current* head against the `pr_head` the artifact was actually
+   analyzed against (CI can take a long time — the PR may have gained new
+   commits since it was dispatched); if they differ, prepends a drift warning
+   to the file. It also checks the artifact for a `README-WARNING` file
+   (written by the workflow when LIT tests failed during baseline coverage)
+   and prepends a warning block if so. It also re-fetches the PR's current
+   base branch and, if it isn't the repo's default branch, prepends a
+   stacked-PR warning (see "Stacked PRs" below). Then writes the draft
+   comment for that PR to `--out-dir/pr-<N>.md` using the template below.
+   PRs with no uncovered lines get no file. The loop keeps polling until
+   every dispatched run is terminal.
 
 Run all three phases in one go with `run`, or step through them individually
 (useful for resuming or debugging). `collect` and `comment` also remain

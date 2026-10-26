@@ -7,7 +7,7 @@
 name: Codebase gap analysis
 run-name: >-
   ${{ github.event_name == 'workflow_dispatch'
-      && format('Codebase gap analysis - {0} ({1}) by {2}', inputs.llvm_ref, inputs.backend_tests, github.actor)
+      && format('Codebase gap analysis - {0} by {1}', inputs.llvm_ref, github.actor)
       || 'Codebase gap analysis' }}
 
 on:
@@ -26,13 +26,6 @@ on:
         required: false
         type: string
         default: main
-      backend_tests:
-        description: Backend test slice for LIT coverage
-        required: true
-        type: choice
-        options:
-          - amdgpu
-          - spirv
       run_candidate_tests:
         description: Run candidate tests after baseline gap finding
         required: false
@@ -97,9 +90,8 @@ env:
   DEBIAN_FRONTEND: noninteractive
   WORK_ROOT: /work
   ARTIFACT_DIR: /work/artifact
-  LLVM_RELEASE_VERSION: "22.1.8"
-  LLVM_RELEASE_DIR: /work/llvm-release
-  LLVM_RELEASE_BIN: /work/llvm-release/bin
+  LLVM_APT_MAJOR: "24"
+  LLVM_RELEASE_BIN: /usr/lib/llvm-24/bin
   MAIN_LLVM_DIR: /work/llvm-main
   MAIN_BUILD_DIR: /work/build-sancov-main
   MAIN_BUILD_BIN: /work/build-sancov-main/bin
@@ -126,7 +118,6 @@ jobs:
     env:
       INPUT_GITHUB_REPO: ${{ inputs.github_repo }}
       INPUT_LLVM_REF: ${{ inputs.llvm_ref }}
-      INPUT_BACKEND_TESTS: ${{ inputs.backend_tests }}
       INPUT_CANDIDATE_N: ${{ inputs.candidate_n }}
     steps:
       - name: Checkout fuzz-fill
@@ -140,27 +131,8 @@ jobs:
       - name: Install CMake
         run: ./scripts/image/install-cmake.sh
 
-      - name: Restore LLVM release bootstrap binaries
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache-llvm-release
-        with:
-          path: ${{ env.LLVM_RELEASE_DIR }}
-          key: fuzz-fill-llvm-release-${{ env.LLVM_RELEASE_VERSION }}
-
-      - name: Download LLVM release bootstrap binaries
-        if: steps.cache-llvm-release.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p "${LLVM_RELEASE_DIR}"
-          curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_RELEASE_VERSION}/LLVM-${LLVM_RELEASE_VERSION}-Linux-X64.tar.xz" \
-            | tar -xJ --strip-components=1 -C "${LLVM_RELEASE_DIR}"
-
-      - name: Resolve allowlist
-        id: allowlist
-        run: |
-          case "${INPUT_BACKEND_TESTS}" in
-            spirv) echo "path=scripts/allowlist-spirv.txt" >> "${GITHUB_OUTPUT}" ;;
-            *) echo "path=scripts/allowlist-amdgpu.txt" >> "${GITHUB_OUTPUT}" ;;
-          esac
+      - name: Install apt.llvm.org bootstrap
+        run: ./scripts/image/install-llvm-apt.sh "${LLVM_APT_MAJOR}"
 
       - name: Checkout llvm main
         run: |
@@ -176,24 +148,24 @@ jobs:
         id: cache-ccache
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: fuzz-fill-llvm-sancov-ccache-${{ env.LLVM_RELEASE_VERSION }}-${{ github.run_id }}
+          key: fuzz-fill-llvm-sancov-ccache-codebase-${{ env.LLVM_APT_MAJOR }}-${{ github.run_id }}
           restore-keys: |
-            fuzz-fill-llvm-sancov-ccache-${{ env.LLVM_RELEASE_VERSION }}-
+            fuzz-fill-llvm-sancov-ccache-codebase-${{ env.LLVM_APT_MAJOR }}-
 
       - name: Reset ccache stats for this run
         run: ccache --zero-stats
 
       - name: Build instrumented LLVM for main
-        env:
-          ALLOWLIST_PATH: ${{ steps.allowlist.outputs.path }}
         run: |
           ./scripts/build-llvm-sancov.sh \
-            "${ALLOWLIST_PATH}" \
+            scripts/allowlist-llvm-clang.txt \
             "${MAIN_LLVM_DIR}" \
             "${MAIN_BUILD_DIR}" \
             --bootstrap-bin "${LLVM_RELEASE_BIN}" \
-            --ignorelist scripts/ignorelist-amdgpu.txt \
+            --targets all \
+            --enable-projects clang \
             --enable-ccache \
+            --ccache-compiler-check-version \
             "$(nproc)"
 
       - name: Show ccache stats
@@ -227,7 +199,8 @@ jobs:
             --llvm-repo "${MAIN_LLVM_DIR}" \
             --llvm-bin "${MAIN_BUILD_BIN}" \
             --instrumented-bin-dir "${MAIN_BUILD_BIN}" \
-            --backend-tests "${INPUT_BACKEND_TESTS}" \
+            --tests llvm/test \
+            --tests clang/test \
             -j "$(nproc)"
 
       - name: Write finding README
@@ -238,7 +211,10 @@ jobs:
             echo "github_repo: ${INPUT_GITHUB_REPO}"
             echo "llvm_ref: ${INPUT_LLVM_REF}"
             echo "main_head: $(cat "${MAIN_COMMIT_FILE}")"
-            echo "backend_tests: ${INPUT_BACKEND_TESTS}"
+            echo "allowlist: scripts/allowlist-llvm-clang.txt"
+            echo "targets: all"
+            echo "enable_projects: clang"
+            echo "tests: llvm/test,clang/test"
             echo "requested_at: ${requested_at}"
             echo "workflow_run: ${GITHUB_RUN_ID}"
           } > /work/README-finding.txt
@@ -282,11 +258,7 @@ jobs:
         if: inputs.run_candidate_tests && steps.uncovered.outputs.has_uncovered_lines == 'true'
         id: corpus
         run: |
-          case "${INPUT_BACKEND_TESTS}" in
-            spirv) subdir="spirv64-amd-amdhsa" ;;
-            *) subdir="amdgcn-amd-amdhsa" ;;
-          esac
-          echo "dir=${CORPUS_ROOT}/${subdir}" >> "${GITHUB_OUTPUT}"
+          echo "dir=${CORPUS_ROOT}/amdgcn-amd-amdhsa" >> "${GITHUB_OUTPUT}"
 
       - name: Resolve candidate-test settings
         if: inputs.run_candidate_tests && steps.uncovered.outputs.has_uncovered_lines == 'true'
@@ -325,15 +297,8 @@ jobs:
             echo "csv=${CUSTOM_LLC_COMMANDS_CSV}" >> "${GITHUB_OUTPUT}"
             echo "Using ${#llc_commands[@]} custom llc flag variant(s) from workflow inputs."
           else
-            case "${INPUT_BACKEND_TESTS}" in
-              amdgpu)
-                echo "csv=${GITHUB_WORKSPACE}/scripts/candidate-test-settings-amdgpu-o-global-isel.csv" \
-                  >> "${GITHUB_OUTPUT}"
-                ;;
-              *)
-                echo "csv=" >> "${GITHUB_OUTPUT}"
-                ;;
-            esac
+            echo "csv=${GITHUB_WORKSPACE}/scripts/candidate-test-settings-amdgpu-o-global-isel.csv" \
+              >> "${GITHUB_OUTPUT}"
           fi
 
       - name: Run candidate tests
@@ -376,7 +341,6 @@ jobs:
             echo "github_repo: ${INPUT_GITHUB_REPO}"
             echo "llvm_ref: ${INPUT_LLVM_REF}"
             echo "main_head: $(cat "${MAIN_COMMIT_FILE}")"
-            echo "backend_tests: ${INPUT_BACKEND_TESTS}"
             echo "corpus_dir: ${CORPUS_DIR}"
             echo "settings_csv: ${SETTINGS_CSV:-default (-O0..-O3)}"
             echo "candidate_n: ${INPUT_CANDIDATE_N:-all}"
