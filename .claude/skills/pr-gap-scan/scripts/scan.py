@@ -44,9 +44,24 @@ BACKEND_LABELS = {
 
 # Expected artifact naming from pr-gap-analysis.yml -- used to detect a
 # reusable prior run's artifacts, and to notice if the workflow's naming
-# convention has drifted out from under this check.
-FINDING_ARTIFACT_RE = re.compile(r"^gap-finding-pr(\d+)-(\d+)$")
+# convention has drifted out from under this check. Finding runs always
+# upload results (user-facing report) and raw (all baseline CSVs).
+FINDING_RESULTS_ARTIFACT_RE = re.compile(r"^gap-finding-results-pr(\d+)-(\d+)$")
+FINDING_RAW_ARTIFACT_RE = re.compile(r"^gap-finding-raw-pr(\d+)-(\d+)$")
 PR_HEAD_ARTIFACT_RE = re.compile(r"^pr-head-pr(\d+)-(\d+)$")
+
+
+def _is_expected_artifact_name(name):
+    return bool(
+        FINDING_RESULTS_ARTIFACT_RE.match(name)
+        or FINDING_RAW_ARTIFACT_RE.match(name)
+        or PR_HEAD_ARTIFACT_RE.match(name)
+    )
+
+
+def _finding_artifact_name(number, run_id, *, raw=False):
+    prefix = "gap-finding-raw-pr" if raw else "gap-finding-results-pr"
+    return f"{prefix}{number}-{run_id}"
 
 # gap-finding-pr.sh builds inside the container at this path, and
 # target_lines_uncovered_pruned.csv's `file` column reflects that absolute build
@@ -345,25 +360,28 @@ def find_cached_run(fuzz_fill_repo, number, head_sha):
 
     Returns the run_id to reuse, or None if no prior run matches. Warns (and skips
     that run for reuse purposes) if a run's artifacts don't match the naming
-    convention this depends on ('gap-finding-pr<N>-<run_id>' / 'pr-head-pr<N>-<run_id>'),
-    since that would otherwise make this check silently useless.
+    convention this depends on ('gap-finding-{results,raw}-pr<N>-<run_id>' /
+    'pr-head-pr<N>-<run_id>'), since that would otherwise make this check
+    silently useless.
     """
     for run in list_prior_runs(fuzz_fill_repo, number):
         run_id = run["id"]
         artifacts = gh_api_json(f"repos/{fuzz_fill_repo}/actions/runs/{run_id}/artifacts?per_page=100")
         names = {a["name"] for a in artifacts.get("artifacts", [])}
-        expected_finding = f"gap-finding-pr{number}-{run_id}"
+        expected_results = _finding_artifact_name(number, run_id)
+        expected_raw = _finding_artifact_name(number, run_id, raw=True)
         expected_head = f"pr-head-pr{number}-{run_id}"
-        unrecognized = {n for n in names if not FINDING_ARTIFACT_RE.match(n) and not PR_HEAD_ARTIFACT_RE.match(n)}
+        unrecognized = {n for n in names if not _is_expected_artifact_name(n)}
         if unrecognized:
             log(
                 f"warning: run {run_id} (PR #{number}) has artifact(s) "
                 f"{sorted(unrecognized)} that don't match the expected "
-                f"'gap-finding-pr<N>-<run_id>' / 'pr-head-pr<N>-<run_id>' naming convention "
-                "-- has the workflow's artifact naming changed? skipping cache reuse for this run"
+                f"'gap-finding-{{results,raw}}-pr<N>-<run_id>' / 'pr-head-pr<N>-<run_id>' "
+                "naming convention -- has the workflow's artifact naming changed? "
+                "skipping cache reuse for this run"
             )
             continue
-        if expected_finding not in names:
+        if expected_results not in names and expected_raw not in names:
             continue
         if expected_head not in names:
             log(
@@ -434,11 +452,38 @@ def collect(state, state_path, fuzz_fill_repo, artifacts_dir):
         number = key
         dest = os.path.join(artifacts_dir, f"pr-{number}")
         os.makedirs(dest, exist_ok=True)
-        name = f"gap-finding-pr{number}-{run['run_id']}"
-        subprocess.run(
-            ["gh", "run", "download", str(run["run_id"]), "-R", fuzz_fill_repo, "-n", name, "-D", dest],
-            check=True,
-        )
+        # Prefer results; fall back to raw if results is missing.
+        results_name = _finding_artifact_name(number, run["run_id"])
+        raw_name = _finding_artifact_name(number, run["run_id"], raw=True)
+        downloaded = False
+        for name in (results_name, raw_name):
+            result = subprocess.run(
+                [
+                    "gh",
+                    "run",
+                    "download",
+                    str(run["run_id"]),
+                    "-R",
+                    fuzz_fill_repo,
+                    "-n",
+                    name,
+                    "-D",
+                    dest,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                downloaded = True
+                log(f"downloaded {name} -> {dest}")
+                break
+            log(f"  note: could not download {name} ({result.stderr.strip() or result.stdout.strip()})")
+        if not downloaded:
+            raise RuntimeError(
+                f"failed to download gap-finding artifact for PR #{number} "
+                f"(tried {results_name} and {raw_name})"
+            )
         run["downloaded"] = True
         run["artifact_dir"] = dest
         save_state(state, state_path)

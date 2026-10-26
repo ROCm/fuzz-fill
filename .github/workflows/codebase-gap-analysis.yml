@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
 # Manual baseline gap finding and candidate-test gap filling for llvm/llvm-project main.
-# Produces two downloadable artifacts: baseline gap-finding CSVs and candidate-test results.
+# Finding always uploads results (user-facing report) and raw (all baseline
+# CSVs); candidate-test results upload when enabled.
 
 name: Codebase gap analysis
 run-name: >-
@@ -90,6 +91,7 @@ env:
   DEBIAN_FRONTEND: noninteractive
   WORK_ROOT: /work
   ARTIFACT_DIR: /work/artifact
+  ARTIFACT_RAW_DIR: /work/artifact-raw
   LLVM_APT_MAJOR: "24"
   LLVM_RELEASE_BIN: /usr/lib/llvm-24/bin
   MAIN_LLVM_DIR: /work/llvm-main
@@ -219,20 +221,33 @@ jobs:
             echo "workflow_run: ${GITHUB_RUN_ID}"
           } > /work/README-finding.txt
 
-      - name: Stage finding artifact
+      - name: Stage finding artifacts
         run: |
           chmod +x .github/scripts/codebase-gap-artifact.sh
-          .github/scripts/codebase-gap-artifact.sh finding \
+          .github/scripts/codebase-gap-artifact.sh finding-results \
             --out-dir "${OUT_DIR}" \
             --main-commit "${MAIN_COMMIT_FILE}" \
             --readme /work/README-finding.txt
           .github/scripts/codebase-gap-artifact.sh finalize
+          ARTIFACT_DIR="${ARTIFACT_RAW_DIR}" .github/scripts/codebase-gap-artifact.sh finding-raw \
+            --out-dir "${OUT_DIR}" \
+            --main-commit "${MAIN_COMMIT_FILE}" \
+            --readme /work/README-finding.txt
+          ARTIFACT_DIR="${ARTIFACT_RAW_DIR}" .github/scripts/codebase-gap-artifact.sh finalize
 
-      - name: Upload gap finding artifact
+      - name: Upload gap finding results artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: gap-finding-codebase-${{ inputs.llvm_ref }}-${{ github.run_id }}
+          name: gap-finding-results-codebase-${{ inputs.llvm_ref }}-${{ github.run_id }}
           path: ${{ env.ARTIFACT_DIR }}
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload gap finding raw artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gap-finding-raw-codebase-${{ inputs.llvm_ref }}-${{ github.run_id }}
+          path: ${{ env.ARTIFACT_RAW_DIR }}
           retention-days: 7
           if-no-files-found: error
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Stage, strip, and verify PR gap-analysis workflow artifacts.
-# Usage: pr-gap-artifact.sh <finding|filling> [options]
+# Usage: pr-gap-artifact.sh <finding-results|finding-raw|filling> [options]
+# "finding-results" is the user-facing report; "finding-raw" keeps all baseline CSVs.
 
 set -euo pipefail
 
@@ -10,42 +11,28 @@ WORK_ROOT="${WORK_ROOT:-/work}"
 usage() {
     cat <<EOF
 Usage:
-  $(basename "$0") finding --out-dir <path> --squash-commit <path> [--readme <path>]
+  $(basename "$0") finding-results --out-dir <path> --squash-commit <path> [--readme <path>]
+  $(basename "$0") finding-raw --out-dir <path> --squash-commit <path> [--readme <path>]
   $(basename "$0") filling --gap-fill-dir <path> --target-lines-csv <path> [--manifest <path>] [--readme <path>]
   $(basename "$0") finalize
 EOF
 }
 
-stage_finding() {
-    local out_dir="" squash_commit="" readme=""
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --out-dir) out_dir="$2"; shift 2 ;;
-            --squash-commit) squash_commit="$2"; shift 2 ;;
-            --readme) readme="$2"; shift 2 ;;
-            *) echo "error: unknown option: $1" >&2; exit 2 ;;
-        esac
-    done
+_copy_finding_common() {
+    local out_dir="$1" squash_commit="$2" readme="$3"
 
-    [[ -n "$out_dir" && -n "$squash_commit" ]] || { usage >&2; exit 2; }
-
-    rm -rf "${ARTIFACT_DIR}"
     mkdir -p \
         "${ARTIFACT_DIR}/out/baseline" \
         "${ARTIFACT_DIR}/out/added-lines" \
         "${ARTIFACT_DIR}/out/commit_lines_report"
 
     while IFS= read -r -d '' csv; do
-        cp "${csv}" "${ARTIFACT_DIR}/out/baseline/"
-    done < <(find "${out_dir}/baseline" -maxdepth 1 -type f -name '*.csv' -print0)
-
-    while IFS= read -r -d '' csv; do
         cp "${csv}" "${ARTIFACT_DIR}/out/added-lines/"
-    done < <(find "${out_dir}/added-lines" -maxdepth 1 -type f -name '*.csv' -print0)
+    done < <(find "${out_dir}/added-lines" -maxdepth 1 -type f -name '*.csv' -print0 2>/dev/null || true)
 
     while IFS= read -r -d '' csv; do
         cp "${csv}" "${ARTIFACT_DIR}/out/commit_lines_report/"
-    done < <(find "${out_dir}/commit_lines_report" -maxdepth 1 -type f -name '*.csv' -print0)
+    done < <(find "${out_dir}/commit_lines_report" -maxdepth 1 -type f -name '*.csv' -print0 2>/dev/null || true)
 
     cp "${squash_commit}" "${ARTIFACT_DIR}/squash-commit"
 
@@ -59,6 +46,53 @@ stage_finding() {
     if [[ -f "${out_dir}/baseline/lit_failures.json" ]]; then
         cp "${out_dir}/baseline/lit_failures.json" "${ARTIFACT_DIR}/out/baseline/lit_failures.json"
     fi
+    if [[ -f "${out_dir}/baseline/timings.csv" ]]; then
+        cp "${out_dir}/baseline/timings.csv" "${ARTIFACT_DIR}/out/baseline/timings.csv"
+    fi
+}
+
+# Metadata + coverage report only (no per-tool address/line-point maps).
+stage_finding_results() {
+    local out_dir="" squash_commit="" readme=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --out-dir) out_dir="$2"; shift 2 ;;
+            --squash-commit) squash_commit="$2"; shift 2 ;;
+            --readme) readme="$2"; shift 2 ;;
+            *) echo "error: unknown option: $1" >&2; exit 2 ;;
+        esac
+    done
+
+    [[ -n "$out_dir" && -n "$squash_commit" ]] || { usage >&2; exit 2; }
+
+    rm -rf "${ARTIFACT_DIR}"
+    _copy_finding_common "${out_dir}" "${squash_commit}" "${readme}"
+
+    while IFS= read -r -d '' csv; do
+        cp "${csv}" "${ARTIFACT_DIR}/out/baseline/"
+    done < <(find "${out_dir}/baseline" -maxdepth 1 -type f -name 'line_coverage*.csv' -print0)
+}
+
+# All baseline CSVs (per-tool maps); for deep dives / debugging.
+stage_finding_raw() {
+    local out_dir="" squash_commit="" readme=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --out-dir) out_dir="$2"; shift 2 ;;
+            --squash-commit) squash_commit="$2"; shift 2 ;;
+            --readme) readme="$2"; shift 2 ;;
+            *) echo "error: unknown option: $1" >&2; exit 2 ;;
+        esac
+    done
+
+    [[ -n "$out_dir" && -n "$squash_commit" ]] || { usage >&2; exit 2; }
+
+    rm -rf "${ARTIFACT_DIR}"
+    _copy_finding_common "${out_dir}" "${squash_commit}" "${readme}"
+
+    while IFS= read -r -d '' csv; do
+        cp "${csv}" "${ARTIFACT_DIR}/out/baseline/"
+    done < <(find "${out_dir}/baseline" -maxdepth 1 -type f -name '*.csv' -print0)
 }
 
 stage_filling() {
@@ -116,7 +150,8 @@ cmd="${1:-}"
 shift || true
 
 case "$cmd" in
-    finding) stage_finding "$@" ;;
+    finding-results) stage_finding_results "$@" ;;
+    finding-raw) stage_finding_raw "$@" ;;
     filling) stage_filling "$@" ;;
     finalize) finalize ;;
     *) usage >&2; exit 2 ;;

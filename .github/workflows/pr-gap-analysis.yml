@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
 # Manual PR gap finding and gap filling for llvm/llvm-project pull requests.
-# Produces two downloadable artifacts: gap-finding CSVs and gap-filling results.
+# Finding always uploads results (user-facing report) and raw (all baseline
+# CSVs); filling uploads candidate-test results when enabled.
 
 name: PR gap analysis
 run-name: >-
@@ -87,6 +88,7 @@ env:
   DEBIAN_FRONTEND: noninteractive
   WORK_ROOT: /work
   ARTIFACT_DIR: /work/artifact
+  ARTIFACT_RAW_DIR: /work/artifact-raw
   LLVM_APT_MAJOR: "24"
   LLVM_RELEASE_BIN: /usr/lib/llvm-24/bin
   LLVM_MIRROR_DIR: /work/llvm-mirror
@@ -306,20 +308,33 @@ jobs:
             echo "workflow_run: ${GITHUB_RUN_ID}"
           } > /work/README-finding.txt
 
-      - name: Stage finding artifact
+      - name: Stage finding artifacts
         run: |
           chmod +x .github/scripts/pr-gap-artifact.sh
-          .github/scripts/pr-gap-artifact.sh finding \
+          .github/scripts/pr-gap-artifact.sh finding-results \
             --out-dir "${OUT_DIR}" \
             --squash-commit "${SQUASH_COMMIT_FILE}" \
             --readme /work/README-finding.txt
           .github/scripts/pr-gap-artifact.sh finalize
+          ARTIFACT_DIR="${ARTIFACT_RAW_DIR}" .github/scripts/pr-gap-artifact.sh finding-raw \
+            --out-dir "${OUT_DIR}" \
+            --squash-commit "${SQUASH_COMMIT_FILE}" \
+            --readme /work/README-finding.txt
+          ARTIFACT_DIR="${ARTIFACT_RAW_DIR}" .github/scripts/pr-gap-artifact.sh finalize
 
-      - name: Upload gap finding artifact
+      - name: Upload gap finding results artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: gap-finding-pr${{ inputs.pr_id }}-${{ github.run_id }}
+          name: gap-finding-results-pr${{ inputs.pr_id }}-${{ github.run_id }}
           path: ${{ env.ARTIFACT_DIR }}
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload gap finding raw artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gap-finding-raw-pr${{ inputs.pr_id }}-${{ github.run_id }}
+          path: ${{ env.ARTIFACT_RAW_DIR }}
           retention-days: 7
           if-no-files-found: error
 
