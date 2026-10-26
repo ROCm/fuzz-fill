@@ -146,9 +146,13 @@ jobs:
       - name: Checkout llvm main
         run: |
           rm -rf "${MAIN_LLVM_DIR}"
-          git clone --depth 1 --branch "${INPUT_LLVM_REF}" \
-            "https://github.com/${INPUT_GITHUB_REPO}.git" \
-            "${MAIN_LLVM_DIR}"
+          mkdir -p "${MAIN_LLVM_DIR}"
+          git -C "${MAIN_LLVM_DIR}" init
+          git -C "${MAIN_LLVM_DIR}" remote add origin \
+            "https://github.com/${INPUT_GITHUB_REPO}.git"
+          # Works for branch/tag names and full commit SHAs (unlike --branch).
+          git -C "${MAIN_LLVM_DIR}" fetch --depth 1 origin "${INPUT_LLVM_REF}"
+          git -C "${MAIN_LLVM_DIR}" checkout --detach FETCH_HEAD
           git -C "${MAIN_LLVM_DIR}" rev-parse HEAD > "${MAIN_COMMIT_FILE}"
           echo "Checked out ${INPUT_GITHUB_REPO}@${INPUT_LLVM_REF}: $(cat "${MAIN_COMMIT_FILE}")"
 
