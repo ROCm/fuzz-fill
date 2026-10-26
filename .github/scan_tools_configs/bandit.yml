@@ -30,3 +30,7 @@ exclude_dirs:
   - dist
   - node_modules
   - __pycache__
+
+# B101 (assert_used) is the standard assertion style in pytest test functions.
+skips:
+  - B101

@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _SCRIPT_DIR.parent
 _TRIVY_RUNNER_PATH = _SCRIPT_DIR / "github_actions" / "scan_tools" / "trivy.py"
-_CONFIG_PATH = _REPO_ROOT / "trivy.yaml"
+_CONFIG_PATH = _REPO_ROOT / ".github" / "scan_tools_configs" / "trivy.yml"
 _DEFAULT_OUTPUT_DIR = _REPO_ROOT / "sbom"
 _SUPPORTED_FORMATS: dict[str, str] = {
     "cyclonedx": "cdx.json",
@@ -81,7 +81,7 @@ def _default_output_path(fmt: str, repo_root: Path) -> Path:
 def _resolve_config_path() -> Path:
     if not _CONFIG_PATH.is_file():
         raise FileNotFoundError(
-            f"trivy config not found at '{_CONFIG_PATH}'. Run from the repo root."
+            f"trivy config not found at '{_CONFIG_PATH}'."
         )
     return _CONFIG_PATH
 

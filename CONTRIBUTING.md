@@ -32,7 +32,7 @@ When you create a pull request, target the **`main`** branch.
 1. Identify the issue you want to address (open a [GitHub Issue](../../issues) first if one does not exist).
 2. Create a branch from `main`, make your changes, and run the relevant tests locally (see [Running tests](#running-tests)).
 3. Target the **`main`** branch when opening the pull request.
-4. Ensure all CI workflows pass. Pull requests run security scans (gitleaks, zizmor, bandit, and trivy).
+4. Ensure all CI workflows pass. Pull requests run the ROCm security baseline scan.
 5. Submit your PR and work with the reviewer or maintainer to get it approved.
 
 Keep changes focused and update [README.md](README.md) when you change user-facing behaviour. Add or update tests under `tests/` or `integration-tests/` as appropriate. Do not commit generated artifacts, large corpora, or local build trees.
