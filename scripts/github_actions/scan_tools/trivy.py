@@ -4,7 +4,7 @@
 """Run trivy for the current checkout.
 
 - Download + cache the pinned `trivy` release binary and verify it.
-- Require `trivy.yaml` at the repo root (hard error if missing).
+- Require `.github/scan_tools_configs/trivy.yml` (hard error if missing).
 - Derive change sets from the GitHub event for changed/all scans; in
   'changed' mode scan the whole subtree when any audited file changed
   (trivy needs the full tree to resolve deps / cross-file IaC), else
@@ -60,7 +60,7 @@ _SUPPORTED_FORMATS: dict[str, str] = {
     "github": "github.json",
 }
 _TRIVY_VERSION = "0.70.0"
-_CONFIG_PATH = "trivy.yaml"
+_CONFIG_PATH = ".github/scan_tools_configs/trivy.yml"
 # Ascending severity order; threshold comparisons rely on it. Trivy has a
 # CRITICAL tier (unlike bandit/zizmor); UNKNOWN never satisfies a threshold.
 _SEVERITY_ORDER: tuple[str, ...] = ("LOW", "MEDIUM", "HIGH", "CRITICAL")
@@ -76,7 +76,7 @@ _DOWNLOAD_TIMEOUT_SECONDS = 60
 # Diff filter for 'changed' mode: dependency manifests/lockfiles (drive
 # vuln) plus container/IaC sources (drive misconfig). Broad globs like
 # **/*.yaml are excluded so unrelated YAML changes don't defeat the
-# no-op fast path; trivy_main.yml runs 'all' to catch the rest.
+# no-op fast path. A full scan is a separate invocation.
 _AUDITED_PATTERNS: tuple[str, ...] = (
     # Python
     "**/pyproject.toml", "pyproject.toml",
@@ -107,7 +107,7 @@ _AUDITED_PATTERNS: tuple[str, ...] = (
     # Terraform
     "**/*.tf", "**/*.tfvars", "**/*.tf.json",
     # The trivy config itself, so config-only PRs still trigger a run.
-    "trivy.yaml", "trivy.yml",
+    ".github/scan_tools_configs/trivy.yml",
 )
 
 
