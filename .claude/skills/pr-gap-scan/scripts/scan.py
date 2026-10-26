@@ -45,7 +45,7 @@ BACKEND_LABELS = {
 # Expected artifact naming from pr-gap-analysis.yml -- used to detect a
 # reusable prior run's artifacts, and to notice if the workflow's naming
 # convention has drifted out from under this check. Finding runs always
-# upload results (user-facing report) and raw (all baseline CSVs).
+# upload results; raw (all baseline CSVs) is opt-in via upload_raw.
 FINDING_RESULTS_ARTIFACT_RE = re.compile(r"^gap-finding-results-pr(\d+)-(\d+)$")
 FINDING_RAW_ARTIFACT_RE = re.compile(r"^gap-finding-raw-pr(\d+)-(\d+)$")
 PR_HEAD_ARTIFACT_RE = re.compile(r"^pr-head-pr(\d+)-(\d+)$")
@@ -359,7 +359,7 @@ def find_cached_run(fuzz_fill_repo, number, head_sha):
 
     Returns the run_id to reuse, or None if no prior run matches. Warns (and skips
     that run for reuse purposes) if a run's artifacts don't match the naming
-    convention this depends on ('gap-finding-{results,raw}-pr<N>-<run_id>' /
+    convention this depends on ('gap-finding-results-pr<N>-<run_id>' /
     'pr-head-pr<N>-<run_id>'), since that would otherwise make this check
     silently useless.
     """
@@ -368,19 +368,18 @@ def find_cached_run(fuzz_fill_repo, number, head_sha):
         artifacts = gh_api_json(f"repos/{fuzz_fill_repo}/actions/runs/{run_id}/artifacts?per_page=100")
         names = {a["name"] for a in artifacts.get("artifacts", [])}
         expected_results = _finding_artifact_name(number, run_id)
-        expected_raw = _finding_artifact_name(number, run_id, raw=True)
         expected_head = f"pr-head-pr{number}-{run_id}"
         unrecognized = {n for n in names if not _is_expected_artifact_name(n)}
         if unrecognized:
             log(
                 f"warning: run {run_id} (PR #{number}) has artifact(s) "
                 f"{sorted(unrecognized)} that don't match the expected "
-                f"'gap-finding-{{results,raw}}-pr<N>-<run_id>' / 'pr-head-pr<N>-<run_id>' "
+                f"'gap-finding-results-pr<N>-<run_id>' / 'pr-head-pr<N>-<run_id>' "
                 "naming convention -- has the workflow's artifact naming changed? "
                 "skipping cache reuse for this run"
             )
             continue
-        if expected_results not in names and expected_raw not in names:
+        if expected_results not in names:
             continue
         if expected_head not in names:
             log(

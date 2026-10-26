@@ -51,21 +51,22 @@ always safe; completed phases are skipped.
    `pr-gap-analysis.yml` runs matching `llvm#<N> by` in the run title, and for
    each checks its `pr-head-pr<N>-<run_id>` artifact (published early in that
    run) against the candidate's current head SHA. A match means the existing
-   `gap-finding-{results,raw}-pr<N>-<run_id>` artifact is reused — no new job
-   is scheduled. If a matching run's artifacts don't fit the expected
-   `gap-finding-{results,raw}-pr<N>-<run_id>` / `pr-head-pr<N>-<run_id>`
-   naming (e.g. the workflow's artifact names changed), this logs a warning
-   and falls back to scheduling a fresh run rather than silently skipping the
-   check. Otherwise, triggers `pr-gap-analysis.yml` on `ROCm/fuzz-fill` via
+   `gap-finding-results-pr<N>-<run_id>` artifact is reused — no new job is
+   scheduled (optional `gap-finding-raw-…` is ignored for reuse). If a matching
+   run's artifacts don't fit the expected
+   `gap-finding-results-pr<N>-<run_id>` / `pr-head-pr<N>-<run_id>` naming (e.g.
+   the workflow's artifact names changed), this logs a warning and falls back
+   to scheduling a fresh run rather than silently skipping the check.
+   Otherwise, triggers `pr-gap-analysis.yml` on `ROCm/fuzz-fill` via
    `gh workflow run` once per PR (the workflow is gap-finding only and
    classifies scope with `--auto`) and resolves/records the new run ID.
 3. **process** — polls all dispatched runs, but doesn't wait for the whole
    batch: each polling cycle it refreshes run statuses, downloads (collects)
    the user-facing `gap-finding-results-pr<N>-<run_id>` artifact (falls back
-   to `gap-finding-raw-pr<N>-<run_id>` only if results is missing) for any
-   run that just completed successfully, and immediately drafts the comment
-   for any PR whose run has now reached a terminal state — without waiting on
-   any other PR's still-running jobs. It reads
+   to opt-in `gap-finding-raw-pr<N>-<run_id>` only if results is missing) for
+   any run that just completed successfully, and immediately drafts the
+   comment for any PR whose run has now reached a terminal state — without
+   waiting on any other PR's still-running jobs. It reads
    `commit_lines_report/target_lines_uncovered_pruned.csv` from the artifact
    (already pruned by gap-pruner in CI). If anything remains, re-checks the
    PR's *current* head against the `pr_head` the artifact was actually
