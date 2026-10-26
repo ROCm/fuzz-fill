@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stage, strip, and verify PR gap-analysis workflow artifacts.
-# Usage: pr-gap-artifact.sh <finding-results|finding-raw|filling> [options]
+# Usage: pr-gap-artifact.sh <finding-results|finding-raw> [options]
 # "finding-results" is the user-facing report; "finding-raw" keeps all baseline CSVs.
 
 set -euo pipefail
@@ -13,7 +13,6 @@ usage() {
 Usage:
   $(basename "$0") finding-results --out-dir <path> --squash-commit <path> [--readme <path>]
   $(basename "$0") finding-raw --out-dir <path> --squash-commit <path> [--readme <path>]
-  $(basename "$0") filling --gap-fill-dir <path> --target-lines-csv <path> [--manifest <path>] [--readme <path>]
   $(basename "$0") finalize
 EOF
 }
@@ -95,37 +94,6 @@ stage_finding_raw() {
     done < <(find "${out_dir}/baseline" -maxdepth 1 -type f -name '*.csv' -print0)
 }
 
-stage_filling() {
-    local gap_fill_dir="" target_lines_csv="" manifest="" readme=""
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --gap-fill-dir) gap_fill_dir="$2"; shift 2 ;;
-            --target-lines-csv) target_lines_csv="$2"; shift 2 ;;
-            --manifest) manifest="$2"; shift 2 ;;
-            --readme) readme="$2"; shift 2 ;;
-            *) echo "error: unknown option: $1" >&2; exit 2 ;;
-        esac
-    done
-
-    [[ -n "$gap_fill_dir" && -n "$target_lines_csv" ]] || { usage >&2; exit 2; }
-
-    rm -rf "${ARTIFACT_DIR}"
-    mkdir -p "${ARTIFACT_DIR}/gap-fill-pr/incremental"
-
-    cp "${gap_fill_dir}/incremental/new_coverage.csv" \
-        "${ARTIFACT_DIR}/gap-fill-pr/incremental/new_coverage.csv"
-    cp "${target_lines_csv}" "${ARTIFACT_DIR}/$(basename "${target_lines_csv}")"
-
-    if [[ -n "$manifest" && -f "$manifest" ]]; then
-        mkdir -p "${ARTIFACT_DIR}/gap-fill-pr/candidate_tests"
-        cp "${manifest}" "${ARTIFACT_DIR}/gap-fill-pr/candidate_tests/candidate_test_manifest.csv"
-    fi
-
-    if [[ -n "$readme" ]]; then
-        cp "${readme}" "${ARTIFACT_DIR}/README-filling.txt"
-    fi
-}
-
 finalize() {
     find "${ARTIFACT_DIR}" -type f \( -name '*.sancov' -o -name '*.symcov' \) -print -delete
 
@@ -152,7 +120,6 @@ shift || true
 case "$cmd" in
     finding-results) stage_finding_results "$@" ;;
     finding-raw) stage_finding_raw "$@" ;;
-    filling) stage_filling "$@" ;;
     finalize) finalize ;;
     *) usage >&2; exit 2 ;;
 esac

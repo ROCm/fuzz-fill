@@ -287,7 +287,6 @@ def dispatch_one(fuzz_fill_repo, ref, llvm_repo, number):
             "--ref", ref,
             "-f", f"pr_id={number}",
             "-f", f"github_repo={llvm_repo}",
-            "-f", "run_gap_filling=false",
         ],
         check=True,
     )

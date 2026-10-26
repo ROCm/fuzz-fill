@@ -57,9 +57,8 @@ always safe; completed phases are skipped.
    naming (e.g. the workflow's artifact names changed), this logs a warning
    and falls back to scheduling a fresh run rather than silently skipping the
    check. Otherwise, triggers `pr-gap-analysis.yml` on `ROCm/fuzz-fill` via
-   `gh workflow run` once per PR (the workflow classifies scope with `--auto`)
-   with `run_gap_filling=false` (gap finding only, per the ask — no gap
-   filling) and resolves/records the new run ID.
+   `gh workflow run` once per PR (the workflow is gap-finding only and
+   classifies scope with `--auto`) and resolves/records the new run ID.
 3. **process** — polls all dispatched runs, but doesn't wait for the whole
    batch: each polling cycle it refreshes run statuses, downloads (collects)
    the user-facing `gap-finding-results-pr<N>-<run_id>` artifact (falls back
@@ -267,8 +266,8 @@ this PR's head commit) has no way to catch it.
   branch of `ROCm/fuzz-fill` (`--ref` default). Update the default (or pass
   `--ref main`) once `pr-gap-analysis.yml` merges to `main`.
 - "Uncovered lines" always come from the gap-**finding** artifact
-  (`out/commit_lines_report/target_lines_uncovered_pruned.csv`); gap filling is
-  intentionally skipped (`run_gap_filling=false`) per the ask.
+  (`out/commit_lines_report/target_lines_uncovered_pruned.csv`). The CI workflow
+  is finding-only (no gap filling).
 
 ## Prerequisites
 
