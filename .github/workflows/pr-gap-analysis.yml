@@ -33,6 +33,13 @@ on:
         required: false
         type: boolean
         default: true
+      allow_inline:
+        description: >-
+          Allow inlining in the instrumented LLVM build (passes --allow-inline
+          to build-llvm-sancov.sh). Off by default so the build keeps -fno-inline.
+        required: false
+        type: boolean
+        default: false
       llc_command_1:
         description: >-
           Optional llc flag variant 1 for gap filling (flags only, not the llc
@@ -236,6 +243,7 @@ jobs:
         env:
           SCOPE_BACKENDS: ${{ steps.scope.outputs.backends }}
           SCOPE_ALLOWLIST: ${{ steps.scope.outputs.allowlist }}
+          ALLOW_INLINE: ${{ inputs.allow_inline }}
         run: |
           build_args=(
             "${SCOPE_ALLOWLIST}"
@@ -251,6 +259,9 @@ jobs:
               build_args+=(--enable-projects clang)
               ;;
           esac
+          if [[ "${ALLOW_INLINE}" == "true" ]]; then
+            build_args+=(--allow-inline)
+          fi
           build_args+=("$(nproc)")
           ./scripts/build-llvm-sancov.sh "${build_args[@]}"
 
@@ -301,6 +312,7 @@ jobs:
             echo "gap_scope_tests: ${{ steps.scope.outputs.tests }}"
             echo "gap_scope_allowlist: ${{ steps.scope.outputs.allowlist }}"
             echo "gap_scope_reason: ${{ steps.scope.outputs.reason }}"
+            echo "allow_inline: ${{ inputs.allow_inline }}"
             echo "pr_head: ${pr_head}"
             echo "pr_head_ref: ${pr_head_ref}"
             echo "squash_commit: $(cat "${SQUASH_COMMIT_FILE}")"

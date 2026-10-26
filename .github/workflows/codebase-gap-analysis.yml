@@ -32,6 +32,13 @@ on:
         required: false
         type: boolean
         default: true
+      allow_inline:
+        description: >-
+          Allow inlining in the instrumented LLVM build (passes --allow-inline
+          to build-llvm-sancov.sh). Off by default so the build keeps -fno-inline.
+        required: false
+        type: boolean
+        default: false
       candidate_n:
         description: Limit candidate tests to the first N inputs (empty = all)
         required: false
@@ -158,17 +165,24 @@ jobs:
         run: ccache --zero-stats
 
       - name: Build instrumented LLVM for main
+        env:
+          ALLOW_INLINE: ${{ inputs.allow_inline }}
         run: |
-          ./scripts/build-llvm-sancov.sh \
-            scripts/allowlist-llvm-clang.txt \
-            "${MAIN_LLVM_DIR}" \
-            "${MAIN_BUILD_DIR}" \
-            --bootstrap-bin "${LLVM_RELEASE_BIN}" \
-            --targets all \
-            --enable-projects clang \
-            --enable-ccache \
-            --ccache-compiler-check-version \
-            "$(nproc)"
+          build_args=(
+            scripts/allowlist-llvm-clang.txt
+            "${MAIN_LLVM_DIR}"
+            "${MAIN_BUILD_DIR}"
+            --bootstrap-bin "${LLVM_RELEASE_BIN}"
+            --targets all
+            --enable-projects clang
+            --enable-ccache
+            --ccache-compiler-check-version
+          )
+          if [[ "${ALLOW_INLINE}" == "true" ]]; then
+            build_args+=(--allow-inline)
+          fi
+          build_args+=("$(nproc)")
+          ./scripts/build-llvm-sancov.sh "${build_args[@]}"
 
       - name: Show ccache stats
         if: always()
@@ -217,6 +231,7 @@ jobs:
             echo "targets: all"
             echo "enable_projects: clang"
             echo "tests: llvm/test,clang/test"
+            echo "allow_inline: ${{ inputs.allow_inline }}"
             echo "requested_at: ${requested_at}"
             echo "workflow_run: ${GITHUB_RUN_ID}"
           } > /work/README-finding.txt
