@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Gap finding (PR-specific): baseline -> added_lines -> target-lines.
 #
-# Produces commit_lines_report/target_lines_uncovered.csv — added source lines
-# the baseline still does not cover.
+# Produces commit_lines_report/target_lines_coverage_summary.csv and
+# target_lines_uncovered.csv (PR-added lines the baseline still does not cover).
 
 set -euo pipefail
 
@@ -156,6 +156,8 @@ run_gap_finding_pr "$output_dir" "$commit_rev" "$LLVM_REPO" "${lit_filters[@]}"
 
 report="${output_dir}/commit_lines_report/target_lines_uncovered.csv"
 pruned_report="${output_dir}/commit_lines_report/target_lines_uncovered_pruned.csv"
+summary_report="${output_dir}/commit_lines_report/target_lines_coverage_summary.csv"
 echo "Uncovered PR target lines: ${report}"
 echo "Uncovered PR target lines (pruned): ${pruned_report}"
+echo "PR target lines coverage summary: ${summary_report}"
 emit_lit_failures_warning "$output_dir" "target_lines_uncovered.csv"

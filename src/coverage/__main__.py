@@ -15,7 +15,6 @@ from coverage.constants import (
     DEFAULT_MIN_CANDIDATE_TESTS_BATCH_SIZE,
     DEFAULT_NEW_COVERAGE_CSV,
     DEFAULT_SOURCE_CODE_FILTER,
-    DEFAULT_TARGET_LINES_REPORT,
     DEFAULT_TIMINGS_FILE,
 )
 
@@ -99,8 +98,8 @@ def main():
     p_target_lines = sub.add_parser(
         "target-lines",
         help=(
-            "List target-lines CSV rows whose ``(file, line)`` appears in "
-            "``line_coverage_uncovered.csv`` from ``coverage baseline`` (no lit re-run)."
+            "Intersect a target-lines CSV with ``line_coverage_summary.csv`` "
+            "(no lit re-run); write summary and uncovered reports."
         ),
     )
     p_html_report = sub.add_parser(
@@ -304,13 +303,10 @@ def main():
     )
 
     p_target_lines.add_argument(
-        "--line-coverage-uncovered-csv",
+        "--summary",
         type=existing_file_path,
         required=True,
-        help=(
-            "Baseline uncovered lines CSV (``file``, ``line`` columns; output of "
-            "``coverage baseline`` as ``line_coverage_uncovered.csv``)."
-        ),
+        help="Path to line_coverage_summary.csv from coverage baseline.",
     )
     p_target_lines.add_argument(
         "--llvm-repo",
@@ -506,17 +502,15 @@ def main():
             args.llvm_repo, FUZZ_FILL_LLVM_REPO, flag_name="--llvm-repo"
         )
         logger.info(
-            "checking target lines from CSV against baseline uncovered lines "
+            "checking target lines from CSV against baseline line coverage "
             "(no lit re-run)"
         )
         with log_timing(logger, "target-lines"):
-            args.output_dir.mkdir(parents=True, exist_ok=True)
-            report_path = args.output_dir / DEFAULT_TARGET_LINES_REPORT
             run_target_lines_check(
-                line_coverage_uncovered_csv=args.line_coverage_uncovered_csv,
+                summary_csv=args.summary,
                 llvm_repo=args.llvm_repo,
                 target_lines_csv=args.target_lines_csv,
-                report_path=report_path,
+                output_dir=args.output_dir,
                 commit_check=args.commit_check,
                 source_text_check=args.source_text_check,
             )

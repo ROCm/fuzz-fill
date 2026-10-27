@@ -14,7 +14,7 @@
 # RUN: %gap-pruner %t/baseline/line_coverage_uncovered.csv --output %t/baseline/line_coverage_uncovered_pruned.csv
 # RUN: %coverage candidate-test --output-dir %t/gap-fill/candidate_tests --llc %sancov-llc --candidate-tests-dir %S/fixtures/coverage-new-tests --n 1
 # RUN: %coverage incremental --output-dir %t/gap-fill/incremental --sancov %sancov --line-coverage-uncovered-csv %t/baseline/line_coverage_uncovered.csv --llc-address-line-map-csv %t/baseline/llc_address_line_map.csv --candidate-tests-output-dir %t/gap-fill/candidate_tests
-# RUN: %coverage target-lines --output-dir %t/target_lines --line-coverage-uncovered-csv %t/baseline/line_coverage_uncovered.csv --llvm-repo %llvm-repo --target-lines-csv %S/fixtures/target-lines-sample.csv
+# RUN: %coverage target-lines --output-dir %t/target_lines --summary %t/baseline/line_coverage_summary.csv --llvm-repo %llvm-repo --target-lines-csv %S/fixtures/target-lines-sample.csv
 # RUN: %gap-pruner %t/target_lines/target_lines_uncovered.csv --output %t/target_lines/target_lines_pruned.csv
 
 # RUN: test -f %t/baseline/line_coverage_summary.csv
@@ -25,6 +25,7 @@
 # RUN: test -f %t/baseline/llc_line_point_summary.csv
 # RUN: test -f %t/baseline/line_coverage_uncovered_pruned.csv
 # RUN: test -f %t/gap-fill/incremental/new_coverage.csv
+# RUN: test -f %t/target_lines/target_lines_coverage_summary.csv
 # RUN: test -f %t/target_lines/target_lines_uncovered.csv
 # RUN: test -f %t/target_lines/target_lines_pruned.csv
 

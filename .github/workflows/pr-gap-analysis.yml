@@ -169,6 +169,7 @@ jobs:
             "${OUT_DIR}/commit_lines_report"
           echo "file,line,text" > "${OUT_DIR}/commit_lines_report/target_lines_uncovered.csv"
           echo "file,line,text" > "${OUT_DIR}/commit_lines_report/target_lines_uncovered_pruned.csv"
+          echo "file,line,coverage" > "${OUT_DIR}/commit_lines_report/target_lines_coverage_summary.csv"
           echo "gap-scope: skip (rule ${{ steps.scope.outputs.rule }}): ${{ steps.scope.outputs.reason }}"
 
       - name: Restore ccache
@@ -243,6 +244,40 @@ jobs:
             --commit "$(cat "${SQUASH_COMMIT_FILE}")" \
             --auto \
             -j "$(nproc)"
+
+      - name: Write HTML coverage report
+        if: steps.scope.outputs.action == 'run'
+        env:
+          SCOPE_BACKENDS: ${{ steps.scope.outputs.backends }}
+          SCOPE_TESTS: ${{ steps.scope.outputs.tests }}
+          SCOPE_ALLOWLIST: ${{ steps.scope.outputs.allowlist }}
+        run: |
+          source "${VENV_DIR}/bin/activate"
+          pr_head_ref="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.ref')"
+          projects="none"
+          case "$(basename "${SCOPE_ALLOWLIST}")" in
+            allowlist-clang.txt|allowlist-llvm-clang.txt)
+              projects="clang"
+              ;;
+          esac
+          html_args=(
+            --summary "${OUT_DIR}/commit_lines_report/target_lines_coverage_summary.csv"
+            --output-dir "${OUT_DIR}/commit_lines_report/html"
+            --strip-prefix "${PR_LLVM_DIR}"
+            --github-repo "${INPUT_GITHUB_REPO}"
+            --llvm-ref "PR #${INPUT_PR_ID} (${pr_head_ref})"
+            --commit "$(cat "${SQUASH_COMMIT_FILE}")"
+            --projects "${projects}"
+            --backends "${SCOPE_BACKENDS}"
+          )
+          if [[ -n "${SCOPE_TESTS}" ]]; then
+            IFS=',' read -r -a suites <<< "${SCOPE_TESTS}"
+            for suite in "${suites[@]}"; do
+              [[ -n "${suite}" ]] || continue
+              html_args+=(--tests "${suite}")
+            done
+          fi
+          python -m coverage html-report "${html_args[@]}"
 
       - name: Write finding README
         run: |
