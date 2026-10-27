@@ -124,18 +124,29 @@ class WriteHtmlReportTest(unittest.TestCase):
             )
             self.assertIn('href="../../../index.html"', high_page)
             self.assertIn('id="jump-next"', high_page)
-            self.assertIn("Next uncovered", high_page)
+            self.assertIn('id="jump-bar"', high_page)
+            self.assertIn('data-mode="uncovered"', high_page)
+            self.assertIn('data-mode="partially"', high_page)
+            self.assertIn('data-mode="covered"', high_page)
+            self.assertIn('data-mode="instrumented"', high_page)
+            self.assertIn("<kbd>n</kbd> next", high_page)
+            self.assertIn("<kbd>j</kbd> previous", high_page)
+            self.assertIn("<kbd>m</kbd> mode", high_page)
             self.assertIn("div.line.not-covered", high_page)
+            self.assertIn("div.line.partially-covered", high_page)
+            self.assertIn("div.line.covered", high_page)
 
             # Line 5 is uninstrumented: present with no status class.
             self.assertIn('id="L5" class="line"', high_page)
 
-            # File with no uncovered lines omits the jump bar, but still
-            # gets gutter click handling (center instead of jump-to-top).
+            # Covered-only file still gets the jump bar (covered + instrumented).
             low_page = (
                 out / "llvm" / "lib" / "Foo" / "Low.cpp.html"
             ).read_text(encoding="utf-8")
-            self.assertNotIn('id="jump-next"', low_page)
+            self.assertIn('id="jump-next"', low_page)
+            self.assertIn('data-mode="covered"', low_page)
+            self.assertIn('data-mode="instrumented"', low_page)
+            self.assertNotIn('data-mode="uncovered"', low_page)
             self.assertIn("a.gutter", low_page)
             self.assertIn('block: "center"', low_page)
             self.assertIn("jump-flash", low_page)

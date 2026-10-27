@@ -138,7 +138,13 @@ SHARED_CSS = """\
     .jump-bar button {
       font: inherit; cursor: pointer; padding: 0.2rem 0.55rem;
     }
+    .jump-bar button.mode-active {
+      background: #2563eb; color: #fff; border-color: #1d4ed8;
+    }
     .jump-bar .hint { color: #666; font-size: 0.9rem; }
+    .jump-bar .mode-group {
+      display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center;
+    }
     /* Current target: left rail (does not fight coverage fills). */
     .line.jump-current {
       box-shadow: inset 3px 0 0 #2563eb;
@@ -201,49 +207,118 @@ SOURCE_PAGE_SCRIPT = """\
     });
   });
 
-  const uncovered = Array.from(
-    document.querySelectorAll("div.line.not-covered")
-  );
+  const bar = document.getElementById("jump-bar");
+  if (!bar) return;
+
+  const modes = [
+    {
+      id: "uncovered",
+      label: "uncovered",
+      lines: Array.from(document.querySelectorAll("div.line.not-covered")),
+    },
+    {
+      id: "partially",
+      label: "partially",
+      lines: Array.from(
+        document.querySelectorAll("div.line.partially-covered")
+      ),
+    },
+    {
+      id: "covered",
+      label: "covered",
+      lines: Array.from(document.querySelectorAll("div.line.covered")),
+    },
+    {
+      id: "instrumented",
+      label: "instrumented",
+      lines: Array.from(
+        document.querySelectorAll(
+          "div.line.covered, div.line.partially-covered, div.line.not-covered"
+        )
+      ),
+    },
+  ].filter((m) => m.lines.length > 0);
+
+  if (!modes.length) return;
+
   const status = document.getElementById("jump-status");
   const nextBtn = document.getElementById("jump-next");
   const prevBtn = document.getElementById("jump-prev");
+  const modeBtns = Array.from(bar.querySelectorAll("button[data-mode]"));
+  let modeIdx = 0;
+  // Prefer uncovered when present.
+  for (let i = 0; i < modes.length; i++) {
+    if (modes[i].id === "uncovered") { modeIdx = i; break; }
+  }
   let idx = -1;
+
+  function lines() { return modes[modeIdx].lines; }
 
   function setStatus() {
     if (!status) return;
+    const m = modes[modeIdx];
     status.textContent = (idx < 0)
-      ? (uncovered.length + " uncovered")
-      : ((idx + 1) + " / " + uncovered.length);
+      ? (m.lines.length + " " + m.label)
+      : ((idx + 1) + " / " + m.lines.length + " " + m.label);
+  }
+
+  function setModeActive() {
+    const id = modes[modeIdx].id;
+    for (const btn of modeBtns) {
+      btn.classList.toggle("mode-active", btn.dataset.mode === id);
+    }
+    setStatus();
+  }
+
+  function syncIdxToCurrent() {
+    if (!current) { idx = -1; return; }
+    const i = lines().indexOf(current);
+    idx = i;
+  }
+
+  function setMode(nextIdx) {
+    if (!modes.length) return;
+    modeIdx = ((nextIdx % modes.length) + modes.length) % modes.length;
+    syncIdxToCurrent();
+    setModeActive();
   }
 
   function go(delta) {
-    if (!uncovered.length) return;
+    const list = lines();
+    if (!list.length) return;
     if (idx < 0) {
       const mid = window.scrollY + window.innerHeight / 2;
       let best = 0;
       let bestDist = Infinity;
-      for (let i = 0; i < uncovered.length; i++) {
-        const top = uncovered[i].getBoundingClientRect().top + window.scrollY;
+      for (let i = 0; i < list.length; i++) {
+        const top = list[i].getBoundingClientRect().top + window.scrollY;
         const dist = Math.abs(top - mid);
         if (dist < bestDist) { bestDist = dist; best = i; }
       }
       idx = best - (delta > 0 ? 1 : -1);
     }
-    idx = (idx + delta + uncovered.length) % uncovered.length;
-    focusLine(uncovered[idx]);
+    idx = (idx + delta + list.length) % list.length;
+    focusLine(list[idx]);
     setStatus();
   }
 
   if (nextBtn) nextBtn.addEventListener("click", () => go(1));
   if (prevBtn) prevBtn.addEventListener("click", () => go(-1));
-  if (uncovered.length) {
-    document.addEventListener("keydown", (ev) => {
-      if (ev.target && /INPUT|TEXTAREA|SELECT/.test(ev.target.tagName)) return;
-      if (ev.key === "n") { ev.preventDefault(); go(1); }
-      else if (ev.key === "j") { ev.preventDefault(); go(-1); }
+  for (const btn of modeBtns) {
+    btn.addEventListener("click", () => {
+      const i = modes.findIndex((m) => m.id === btn.dataset.mode);
+      if (i >= 0) setMode(i);
     });
-    setStatus();
   }
+
+  document.addEventListener("keydown", (ev) => {
+    if (ev.target && /INPUT|TEXTAREA|SELECT/.test(ev.target.tagName)) return;
+    if (ev.key === "n") { ev.preventDefault(); go(1); }
+    else if (ev.key === "j") { ev.preventDefault(); go(-1); }
+    else if (ev.key === "m") { ev.preventDefault(); setMode(modeIdx + 1); }
+  });
+
+  setModeActive();
 
   const hash = location.hash.replace(/^#/, "");
   if (hash) {
@@ -251,7 +326,7 @@ SOURCE_PAGE_SCRIPT = """\
     if (el) {
       // Re-center after the browser's initial hash jump-to-top.
       focusLine(el);
-      idx = uncovered.indexOf(el);
+      syncIdxToCurrent();
       setStatus();
     }
   }
@@ -450,12 +525,12 @@ def _render_source_page(
     index_href: str,
 ) -> str:
     rows: list[str] = []
-    uncovered = 0
+    counts = {"covered": 0, "partially": 0, "uncovered": 0}
     for line_no, line in enumerate(source_text.splitlines(), start=1):
         status = line_status.get(line_no)
         status_cls = STATUS_TO_CLASS.get(status, "") if status else ""
-        if status == "uncovered":
-            uncovered += 1
+        if status in counts:
+            counts[status] += 1
         classes = "line " + status_cls if status_cls else "line"
         # Do not put newlines between rows — they show up as blank gaps.
         escaped = html.escape(line.rstrip("\n"), quote=False) or "&nbsp;"
@@ -465,13 +540,39 @@ def _render_source_page(
             f'<span class="code">{escaped}</span></div>'
         )
     body = "".join(rows)
-    if uncovered:
+    instrumented = counts["covered"] + counts["partially"] + counts["uncovered"]
+    if instrumented:
+        mode_btns: list[str] = []
+        if counts["uncovered"]:
+            mode_btns.append(
+                '<button type="button" data-mode="uncovered">uncovered</button>'
+            )
+        if counts["partially"]:
+            mode_btns.append(
+                '<button type="button" data-mode="partially">partially</button>'
+            )
+        if counts["covered"]:
+            mode_btns.append(
+                '<button type="button" data-mode="covered">covered</button>'
+            )
+        mode_btns.append(
+            '<button type="button" data-mode="instrumented">instrumented</button>'
+        )
+        if counts["uncovered"]:
+            default_label, default_count = "uncovered", counts["uncovered"]
+        elif counts["partially"]:
+            default_label, default_count = "partially", counts["partially"]
+        elif counts["covered"]:
+            default_label, default_count = "covered", counts["covered"]
+        else:
+            default_label, default_count = "instrumented", instrumented
         jump_bar = f"""\
-  <div class="jump-bar">
-    <button type="button" id="jump-prev">Previous uncovered</button>
-    <button type="button" id="jump-next">Next uncovered</button>
-    <span id="jump-status" class="hint">{uncovered} uncovered</span>
-    <span class="hint">Keys: <kbd>n</kbd> next, <kbd>j</kbd> previous</span>
+  <div class="jump-bar" id="jump-bar">
+    <button type="button" id="jump-prev">Previous</button>
+    <button type="button" id="jump-next">Next</button>
+    <span id="jump-status" class="hint">{default_count} {default_label}</span>
+    <span class="mode-group">{"".join(mode_btns)}</span>
+    <span class="hint">Keys: <kbd>n</kbd> next, <kbd>j</kbd> previous, <kbd>m</kbd> mode</span>
   </div>
 """
     else:
