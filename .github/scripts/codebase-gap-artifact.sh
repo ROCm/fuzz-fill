@@ -59,6 +59,11 @@ stage_finding_results() {
     while IFS= read -r -d '' csv; do
         cp "${csv}" "${ARTIFACT_DIR}/out/baseline/"
     done < <(find "${out_dir}/baseline" -maxdepth 1 -type f -name 'line_coverage*.csv' -print0)
+
+    if [[ -d "${out_dir}/baseline/html" ]]; then
+        mkdir -p "${ARTIFACT_DIR}/out/baseline/html"
+        cp -a "${out_dir}/baseline/html/." "${ARTIFACT_DIR}/out/baseline/html/"
+    fi
 }
 
 # All baseline CSVs (per-tool maps); for deep dives / debugging.

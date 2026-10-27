@@ -20,6 +20,7 @@ from coverage.constants import (
 )
 
 from coverage.analyser import CoverageAnalyzer
+from coverage.html_report import write_html_report
 from coverage.min_candidate_tests import MinCandidateTestsSelector
 from coverage.target_lines_check import run_target_lines_check
 from fuzz_fill.env import (
@@ -79,7 +80,10 @@ def main():
 
     sub = parser.add_subparsers(
         dest="subcmd",
-        metavar="{baseline,candidate-test,incremental,min-candidate-tests,target-lines}",
+        metavar=(
+            "{baseline,candidate-test,incremental,min-candidate-tests,"
+            "target-lines,html-report}"
+        ),
         required=True,
     )
     p_baseline = sub.add_parser("baseline")
@@ -99,12 +103,20 @@ def main():
             "``line_coverage_uncovered.csv`` from ``coverage baseline`` (no lit re-run)."
         ),
     )
+    p_html_report = sub.add_parser(
+        "html-report",
+        help=(
+            "Write a self-contained HTML coverage report from "
+            "``line_coverage_summary.csv`` (source pages with three-way coloring)."
+        ),
+    )
 
     add_shared_arguments(p_baseline)
     add_shared_arguments(p_candidate_test)
     add_shared_arguments(p_incremental)
     add_shared_arguments(p_min_candidate_tests)
     add_shared_arguments(p_target_lines)
+    add_shared_arguments(p_html_report)
 
     p_baseline.add_argument(
         "--sancov",
@@ -336,6 +348,63 @@ def main():
         ),
     )
 
+    p_html_report.add_argument(
+        "--summary",
+        type=existing_file_path,
+        required=True,
+        help="Path to line_coverage_summary.csv from coverage baseline.",
+    )
+    p_html_report.add_argument(
+        "--strip-prefix",
+        type=Path,
+        default=None,
+        help=(
+            "Strip this directory prefix from CSV file paths when naming HTML "
+            "pages (typically the LLVM checkout used for the baseline)."
+        ),
+    )
+    p_html_report.add_argument(
+        "--github-repo",
+        default=None,
+        help="Source repository for this run (shown on the index).",
+    )
+    p_html_report.add_argument(
+        "--llvm-ref",
+        default=None,
+        help="Branch, tag, or commit-ish checked out (shown on the index).",
+    )
+    p_html_report.add_argument(
+        "--commit",
+        default=None,
+        help="Resolved commit SHA for this run (shown on the index).",
+    )
+    p_html_report.add_argument(
+        "--projects",
+        default=None,
+        help=(
+            "Extra LLVM_ENABLE_PROJECTS for this run (shown on the index), "
+            "e.g. clang. Use an empty value or 'none' when LLVM-only."
+        ),
+    )
+    p_html_report.add_argument(
+        "--backends",
+        default=None,
+        help=(
+            "LLVM_TARGETS_TO_BUILD for this run (shown on the index), "
+            "e.g. X86;AMDGPU or all."
+        ),
+    )
+    p_html_report.add_argument(
+        "--tests",
+        action="append",
+        default=None,
+        metavar="SUITE",
+        help=(
+            "Lit suite used for this run (shown on the index). Repeatable, "
+            "e.g. --tests llvm/test --tests clang/test."
+        ),
+    )
+
     args = parser.parse_args()
     configure_logging(
         args.log_level,
@@ -451,6 +520,27 @@ def main():
                 commit_check=args.commit_check,
                 source_text_check=args.source_text_check,
             )
+
+    elif args.subcmd == "html-report":
+        strip = args.strip_prefix.resolve() if args.strip_prefix is not None else None
+        logger.info(
+            "writing HTML coverage report from %s into %s",
+            args.summary,
+            args.output_dir,
+        )
+        with log_timing(logger, "html-report"):
+            write_html_report(
+                summary_csv=args.summary,
+                output_dir=args.output_dir,
+                strip_prefix=strip,
+                github_repo=args.github_repo,
+                llvm_ref=args.llvm_ref,
+                commit=args.commit,
+                projects=args.projects,
+                backends=args.backends,
+                tests=args.tests,
+            )
+            logger.info("wrote HTML coverage report to %s", args.output_dir)
 
     else:
         logger.error("unknown subcommand: %s", args.subcmd)

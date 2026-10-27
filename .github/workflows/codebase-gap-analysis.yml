@@ -187,6 +187,25 @@ jobs:
             "${test_args[@]}" \
             -j "$(nproc)"
 
+      - name: Write HTML coverage report
+        run: |
+          source "${VENV_DIR}/bin/activate"
+          html_args=(
+            --summary "${OUT_DIR}/baseline/line_coverage_summary.csv"
+            --output-dir "${OUT_DIR}/baseline/html"
+            --strip-prefix "${MAIN_LLVM_DIR}"
+            --github-repo "${INPUT_GITHUB_REPO}"
+            --llvm-ref "${INPUT_LLVM_REF}"
+            --commit "$(cat "${MAIN_COMMIT_FILE}")"
+            --projects "${SCOPE_ENABLE_PROJECTS:-none}"
+            --backends "${INPUT_TARGETS}"
+            --tests llvm/test
+          )
+          if [[ -n "${SCOPE_ENABLE_PROJECTS}" ]]; then
+            html_args+=(--tests clang/test)
+          fi
+          python -m coverage html-report "${html_args[@]}"
+
       - name: Write finding README
         run: |
           requested_at="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq '.created_at')"
