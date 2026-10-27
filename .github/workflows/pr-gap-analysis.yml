@@ -1,0 +1,305 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# Manual PR gap finding for llvm/llvm-project pull requests.
+# Always uploads results (user-facing report); raw (all baseline CSVs) is opt-in.
+
+name: PR gap analysis
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+      && format('PR gap analysis - llvm#{0} by {1}', inputs.pr_id, github.actor)
+      || 'PR gap analysis' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_id:
+        description: llvm/llvm-project pull request number
+        required: true
+        type: number
+      github_repo:
+        description: GitHub repository hosting the PR
+        required: false
+        type: string
+        default: llvm/llvm-project
+      allow_inline:
+        description: >-
+          Allow inlining in the instrumented LLVM build (passes --allow-inline
+          to build-llvm-sancov.sh). Off by default so the build keeps -fno-inline.
+        required: false
+        type: boolean
+        default: false
+      upload_raw:
+        description: Upload raw baseline CSVs (large; off by default)
+        required: false
+        type: boolean
+        default: false
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  WORK_ROOT: /work
+  ARTIFACT_DIR: /work/artifact
+  ARTIFACT_RAW_DIR: /work/artifact-raw
+  LLVM_APT_MAJOR: "24"
+  LLVM_RELEASE_BIN: /usr/lib/llvm-24/bin
+  LLVM_MIRROR_DIR: /work/llvm-mirror
+  PR_LLVM_DIR: /work/pr-llvm
+  PR_BUILD_DIR: /work/build-sancov
+  PR_BUILD_BIN: /work/build-sancov/bin
+  OUT_DIR: /work/out
+  SQUASH_COMMIT_FILE: /work/squash-commit
+  VENV_DIR: /work/fuzz-fill-venv
+  GH_TOKEN: ${{ github.token }}
+  CCACHE_DIR: /work/ccache
+  CCACHE_MAXSIZE: 3G
+  CCACHE_COMPRESS: "true"
+
+jobs:
+  pr-gap-analysis:
+    name: PR gap analysis
+    runs-on: aws-linux-scale-rocm-medium
+    timeout-minutes: 180
+    container:
+      image: ubuntu:24.04
+    env:
+      INPUT_PR_ID: ${{ inputs.pr_id }}
+      INPUT_GITHUB_REPO: ${{ inputs.github_repo }}
+    steps:
+      - name: Checkout fuzz-fill
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install apt packages
+        run: ./scripts/image/install-apt-packages.sh all
+
+      - name: Install CMake
+        run: ./scripts/image/install-cmake.sh
+
+      - name: Install apt.llvm.org bootstrap
+        run: ./scripts/image/install-llvm-apt.sh "${LLVM_APT_MAJOR}"
+
+      - name: Install gh
+        run: |
+          if ! command -v gh >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y gh
+          fi
+
+      - name: Resolve PR head and base early
+        run: |
+          mkdir -p /work/pr-head
+          gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.sha' \
+            > /work/pr-head/pr-head.txt
+          gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.base.sha' \
+            > /work/pr-head/pr-base.txt
+
+      - name: Upload PR head artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr-head-pr${{ inputs.pr_id }}-${{ github.run_id }}
+          path: /work/pr-head/pr-head.txt
+
+      - name: Compute mirror cache key
+        id: mirror-cache-key
+        run: |
+          echo "week=$(date -u +%G-%V)" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore filtered llvm-project mirror
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache-mirror
+        with:
+          path: ${{ env.LLVM_MIRROR_DIR }}
+          key: fuzz-fill-llvm-mirror-${{ steps.mirror-cache-key.outputs.week }}
+          restore-keys: |
+            fuzz-fill-llvm-mirror-
+
+      - name: Clone filtered llvm-project mirror
+        if: steps.cache-mirror.outputs.cache-matched-key == ''
+        run: |
+          git clone --filter=blob:none "https://github.com/${INPUT_GITHUB_REPO}.git" "${LLVM_MIRROR_DIR}"
+
+      - name: Save filtered llvm-project mirror
+        if: steps.cache-mirror.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.LLVM_MIRROR_DIR }}
+          key: ${{ steps.cache-mirror.outputs.cache-primary-key }}
+
+      - name: Warm mirror for PR
+        run: |
+          ./scripts/warm-llvm-mirror-for-pr.sh "${LLVM_MIRROR_DIR}" \
+            --pr-id "${INPUT_PR_ID}" \
+            --github-repo "${INPUT_GITHUB_REPO}" \
+            --base-sha "$(cat /work/pr-head/pr-base.txt)"
+
+      - name: Prepare PR llvm tree
+        run: |
+          ./scripts/prepare-pr-llvm.sh \
+            --pr-id "${INPUT_PR_ID}" \
+            --dest "${PR_LLVM_DIR}" \
+            --github-repo "${INPUT_GITHUB_REPO}" \
+            --reference "${LLVM_MIRROR_DIR}" \
+            --partial-reference \
+            --no-self-contained \
+            --squash-commit-file "${SQUASH_COMMIT_FILE}"
+
+      - name: Classify scope
+        id: scope
+        run: |
+          PYTHONPATH=src python3 -m gap_scope \
+            --llvm-repo "${PR_LLVM_DIR}" \
+            --commit "$(cat "${SQUASH_COMMIT_FILE}")" \
+            | tee -a "${GITHUB_OUTPUT}"
+
+      - name: Write empty finding report on skip
+        if: steps.scope.outputs.action == 'skip'
+        run: |
+          mkdir -p \
+            "${OUT_DIR}/baseline" \
+            "${OUT_DIR}/added-lines" \
+            "${OUT_DIR}/commit_lines_report"
+          echo "file,line,text" > "${OUT_DIR}/commit_lines_report/target_lines_uncovered.csv"
+          echo "file,line,text" > "${OUT_DIR}/commit_lines_report/target_lines_uncovered_pruned.csv"
+          echo "gap-scope: skip (rule ${{ steps.scope.outputs.rule }}): ${{ steps.scope.outputs.reason }}"
+
+      - name: Restore ccache
+        if: steps.scope.outputs.action == 'run'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache-ccache
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: fuzz-fill-llvm-sancov-ccache-pr-${{ env.LLVM_APT_MAJOR }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-fill-llvm-sancov-ccache-pr-${{ env.LLVM_APT_MAJOR }}-
+
+      - name: Reset ccache stats for this run
+        if: steps.scope.outputs.action == 'run'
+        run: ccache --zero-stats
+
+      - name: Build instrumented LLVM for PR
+        if: steps.scope.outputs.action == 'run'
+        env:
+          SCOPE_BACKENDS: ${{ steps.scope.outputs.backends }}
+          SCOPE_ALLOWLIST: ${{ steps.scope.outputs.allowlist }}
+          ALLOW_INLINE: ${{ inputs.allow_inline }}
+        run: |
+          build_args=(
+            "${SCOPE_ALLOWLIST}"
+            "${PR_LLVM_DIR}"
+            "${PR_BUILD_DIR}"
+            --bootstrap-bin "${LLVM_RELEASE_BIN}"
+            --targets "${SCOPE_BACKENDS}"
+            --enable-ccache
+            --ccache-compiler-check-version
+          )
+          case "$(basename "${SCOPE_ALLOWLIST}")" in
+            allowlist-clang.txt|allowlist-llvm-clang.txt)
+              build_args+=(--enable-projects clang)
+              ;;
+          esac
+          if [[ "${ALLOW_INLINE}" == "true" ]]; then
+            build_args+=(--allow-inline)
+          fi
+          build_args+=("$(nproc)")
+          ./scripts/build-llvm-sancov.sh "${build_args[@]}"
+
+      - name: Show ccache stats
+        if: always() && steps.scope.outputs.action == 'run'
+        run: ccache --show-stats -v
+
+      - name: Save ccache
+        if: always() && steps.scope.outputs.action == 'run'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.cache-ccache.outputs.cache-primary-key }}
+
+      - name: Install fuzz-fill venv
+        if: steps.scope.outputs.action == 'run'
+        run: |
+          python3 -m venv "${VENV_DIR}"
+          "${VENV_DIR}/bin/pip" install --no-cache-dir -e "${GITHUB_WORKSPACE}"
+
+      - name: Run gap finding
+        if: steps.scope.outputs.action == 'run'
+        env:
+          LIT_ALLOW_FAILURES: "1"
+        run: |
+          source "${VENV_DIR}/bin/activate"
+          ./scripts/gap-finding-pr.sh \
+            --output-dir "${OUT_DIR}" \
+            --llvm-repo "${PR_LLVM_DIR}" \
+            --llvm-bin "${PR_BUILD_BIN}" \
+            --instrumented-bin-dir "${PR_BUILD_BIN}" \
+            --commit "$(cat "${SQUASH_COMMIT_FILE}")" \
+            --auto \
+            -j "$(nproc)"
+
+      - name: Write finding README
+        run: |
+          pr_head="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.sha')"
+          pr_head_ref="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.ref')"
+          requested_at="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq '.created_at')"
+          {
+            echo "PR gap finding report"
+            echo "pr_id: ${INPUT_PR_ID}"
+            echo "github_repo: ${INPUT_GITHUB_REPO}"
+            echo "gap_scope_action: ${{ steps.scope.outputs.action }}"
+            echo "gap_scope_rule: ${{ steps.scope.outputs.rule }}"
+            echo "gap_scope_backends: ${{ steps.scope.outputs.backends }}"
+            echo "gap_scope_tests: ${{ steps.scope.outputs.tests }}"
+            echo "gap_scope_allowlist: ${{ steps.scope.outputs.allowlist }}"
+            echo "gap_scope_reason: ${{ steps.scope.outputs.reason }}"
+            echo "allow_inline: ${{ inputs.allow_inline }}"
+            echo "upload_raw: ${{ inputs.upload_raw }}"
+            echo "pr_head: ${pr_head}"
+            echo "pr_head_ref: ${pr_head_ref}"
+            echo "squash_commit: $(cat "${SQUASH_COMMIT_FILE}")"
+            echo "requested_at: ${requested_at}"
+            echo "workflow_run: ${GITHUB_RUN_ID}"
+          } > /work/README-finding.txt
+
+      - name: Stage finding results artifact
+        run: |
+          chmod +x .github/scripts/pr-gap-artifact.sh
+          .github/scripts/pr-gap-artifact.sh finding-results \
+            --out-dir "${OUT_DIR}" \
+            --squash-commit "${SQUASH_COMMIT_FILE}" \
+            --readme /work/README-finding.txt
+          .github/scripts/pr-gap-artifact.sh finalize
+
+      - name: Stage finding raw artifact
+        if: inputs.upload_raw
+        run: |
+          chmod +x .github/scripts/pr-gap-artifact.sh
+          ARTIFACT_DIR="${ARTIFACT_RAW_DIR}" .github/scripts/pr-gap-artifact.sh finding-raw \
+            --out-dir "${OUT_DIR}" \
+            --squash-commit "${SQUASH_COMMIT_FILE}" \
+            --readme /work/README-finding.txt
+          ARTIFACT_DIR="${ARTIFACT_RAW_DIR}" .github/scripts/pr-gap-artifact.sh finalize
+
+      - name: Upload gap finding results artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gap-finding-results-pr${{ inputs.pr_id }}-${{ github.run_id }}
+          path: ${{ env.ARTIFACT_DIR }}
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload gap finding raw artifact
+        if: inputs.upload_raw
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gap-finding-raw-pr${{ inputs.pr_id }}-${{ github.run_id }}
+          path: ${{ env.ARTIFACT_RAW_DIR }}
+          retention-days: 7
+          if-no-files-found: error

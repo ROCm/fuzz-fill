@@ -24,6 +24,7 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
                     Disabled by default. Fails if ccache is not installed.
   --ccache-compiler-check-version
                     With --enable-ccache, hash via '%compiler% --version' (off by default).
+  --allow-inline    Do not pass -fno-inline to the instrumented build (off by default).
   ninja_jobs        Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
 
 Configures one RelWithDebInfo + SanitizerCoverage tree and builds ninja all.
@@ -47,6 +48,7 @@ LINK_JOBS="8"
 NINJA_JOBS=""
 ENABLE_CCACHE=0
 CCACHE_COMPILER_CHECK_VERSION=0
+ALLOW_INLINE=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -110,6 +112,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --ccache-compiler-check-version)
             CCACHE_COMPILER_CHECK_VERSION=1
+            shift
+            ;;
+        --allow-inline)
+            ALLOW_INLINE=1
             shift
             ;;
         --help|-h)
@@ -227,7 +233,10 @@ if [[ "$ENABLE_CCACHE" -eq 1 ]]; then
     )
 fi
 
-SANCOV_FLAGS="-fno-inline -fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=${INSTRUMENTATION_MODE},trace-pc-guard"
+SANCOV_FLAGS="-fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=${INSTRUMENTATION_MODE},trace-pc-guard"
+if [[ "$ALLOW_INLINE" -ne 1 ]]; then
+    SANCOV_FLAGS="-fno-inline ${SANCOV_FLAGS}"
+fi
 if [[ -n "$IGNORELIST" ]]; then
     SANCOV_FLAGS+=" -fsanitize-coverage-ignorelist=$IGNORELIST"
 fi
@@ -315,6 +324,7 @@ echo "  Link jobs:        $LINK_JOBS"
 echo "  Linker:           lld ($LLD)"
 echo "  Release sancov:   $SANCOV_TOOL_BUILD_DIR"
 echo "  ccache:           $([[ "$ENABLE_CCACHE" -eq 1 ]] && echo enabled || echo disabled)"
+echo "  -fno-inline:      $([[ "$ALLOW_INLINE" -eq 1 ]] && echo omitted || echo enabled)"
 echo
 
 echo "=== Instrumented tree (RelWithDebInfo + SanitizerCoverage, ninja all) ==="

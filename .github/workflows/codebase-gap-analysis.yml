@@ -1,0 +1,222 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# Manual baseline gap finding for llvm/llvm-project.
+# Always uploads results (user-facing report); raw (all baseline CSVs) is opt-in.
+
+name: Codebase gap analysis
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+      && format('Codebase gap analysis - {0} by {1}', inputs.llvm_ref, github.actor)
+      || 'Codebase gap analysis' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      github_repo:
+        description: GitHub repository to clone
+        required: false
+        type: string
+        default: llvm/llvm-project
+      llvm_ref:
+        description: Branch, tag, or commit to checkout (default main HEAD)
+        required: false
+        type: string
+        default: main
+      allow_inline:
+        description: >-
+          Allow inlining in the instrumented LLVM build (passes --allow-inline
+          to build-llvm-sancov.sh). Off by default so the build keeps -fno-inline.
+        required: false
+        type: boolean
+        default: false
+      upload_raw:
+        description: Upload raw baseline CSVs (large; off by default)
+        required: false
+        type: boolean
+        default: false
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  WORK_ROOT: /work
+  ARTIFACT_DIR: /work/artifact
+  ARTIFACT_RAW_DIR: /work/artifact-raw
+  LLVM_APT_MAJOR: "24"
+  LLVM_RELEASE_BIN: /usr/lib/llvm-24/bin
+  MAIN_LLVM_DIR: /work/llvm-main
+  MAIN_BUILD_DIR: /work/build-sancov-main
+  MAIN_BUILD_BIN: /work/build-sancov-main/bin
+  OUT_DIR: /work/out
+  MAIN_COMMIT_FILE: /work/main-commit
+  VENV_DIR: /work/fuzz-fill-venv
+  GH_TOKEN: ${{ github.token }}
+  CCACHE_DIR: /work/ccache
+  CCACHE_MAXSIZE: 3G
+  CCACHE_COMPRESS: "true"
+
+jobs:
+  codebase-gap-analysis:
+    name: Codebase gap analysis
+    runs-on: aws-linux-scale-rocm-medium
+    timeout-minutes: 180
+    container:
+      image: ubuntu:24.04
+    env:
+      INPUT_GITHUB_REPO: ${{ inputs.github_repo }}
+      INPUT_LLVM_REF: ${{ inputs.llvm_ref }}
+    steps:
+      - name: Checkout fuzz-fill
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install apt packages
+        run: ./scripts/image/install-apt-packages.sh all
+
+      - name: Install CMake
+        run: ./scripts/image/install-cmake.sh
+
+      - name: Install apt.llvm.org bootstrap
+        run: ./scripts/image/install-llvm-apt.sh "${LLVM_APT_MAJOR}"
+
+      - name: Checkout llvm main
+        run: |
+          rm -rf "${MAIN_LLVM_DIR}"
+          mkdir -p "${MAIN_LLVM_DIR}"
+          git -C "${MAIN_LLVM_DIR}" init
+          git -C "${MAIN_LLVM_DIR}" remote add origin \
+            "https://github.com/${INPUT_GITHUB_REPO}.git"
+          # Works for branch/tag names and full commit SHAs (unlike --branch).
+          git -C "${MAIN_LLVM_DIR}" fetch --depth 1 origin "${INPUT_LLVM_REF}"
+          git -C "${MAIN_LLVM_DIR}" checkout --detach FETCH_HEAD
+          git -C "${MAIN_LLVM_DIR}" rev-parse HEAD > "${MAIN_COMMIT_FILE}"
+          echo "Checked out ${INPUT_GITHUB_REPO}@${INPUT_LLVM_REF}: $(cat "${MAIN_COMMIT_FILE}")"
+
+      - name: Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache-ccache
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: fuzz-fill-llvm-sancov-ccache-codebase-${{ env.LLVM_APT_MAJOR }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-fill-llvm-sancov-ccache-codebase-${{ env.LLVM_APT_MAJOR }}-
+
+      - name: Reset ccache stats for this run
+        run: ccache --zero-stats
+
+      - name: Build instrumented LLVM for main
+        env:
+          ALLOW_INLINE: ${{ inputs.allow_inline }}
+        run: |
+          build_args=(
+            scripts/allowlist-llvm-clang.txt
+            "${MAIN_LLVM_DIR}"
+            "${MAIN_BUILD_DIR}"
+            --bootstrap-bin "${LLVM_RELEASE_BIN}"
+            --targets all
+            --enable-projects clang
+            --enable-ccache
+            --ccache-compiler-check-version
+          )
+          if [[ "${ALLOW_INLINE}" == "true" ]]; then
+            build_args+=(--allow-inline)
+          fi
+          build_args+=("$(nproc)")
+          ./scripts/build-llvm-sancov.sh "${build_args[@]}"
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache --show-stats -v
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.cache-ccache.outputs.cache-primary-key }}
+
+      - name: Install gh
+        run: |
+          if ! command -v gh >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y gh
+          fi
+
+      - name: Install fuzz-fill venv
+        run: |
+          python3 -m venv "${VENV_DIR}"
+          "${VENV_DIR}/bin/pip" install --no-cache-dir -e "${GITHUB_WORKSPACE}"
+
+      - name: Run baseline gap finding
+        run: |
+          source "${VENV_DIR}/bin/activate"
+          ./scripts/gap-finding-baseline.sh \
+            --output-dir "${OUT_DIR}" \
+            --llvm-repo "${MAIN_LLVM_DIR}" \
+            --llvm-bin "${MAIN_BUILD_BIN}" \
+            --instrumented-bin-dir "${MAIN_BUILD_BIN}" \
+            --tests llvm/test \
+            --tests clang/test \
+            -j "$(nproc)"
+
+      - name: Write finding README
+        run: |
+          requested_at="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq '.created_at')"
+          {
+            echo "Codebase baseline gap finding report"
+            echo "github_repo: ${INPUT_GITHUB_REPO}"
+            echo "llvm_ref: ${INPUT_LLVM_REF}"
+            echo "main_head: $(cat "${MAIN_COMMIT_FILE}")"
+            echo "allowlist: scripts/allowlist-llvm-clang.txt"
+            echo "targets: all"
+            echo "enable_projects: clang"
+            echo "tests: llvm/test,clang/test"
+            echo "allow_inline: ${{ inputs.allow_inline }}"
+            echo "upload_raw: ${{ inputs.upload_raw }}"
+            echo "requested_at: ${requested_at}"
+            echo "workflow_run: ${GITHUB_RUN_ID}"
+          } > /work/README-finding.txt
+
+      - name: Stage finding results artifact
+        run: |
+          chmod +x .github/scripts/codebase-gap-artifact.sh
+          .github/scripts/codebase-gap-artifact.sh finding-results \
+            --out-dir "${OUT_DIR}" \
+            --main-commit "${MAIN_COMMIT_FILE}" \
+            --readme /work/README-finding.txt
+          .github/scripts/codebase-gap-artifact.sh finalize
+
+      - name: Stage finding raw artifact
+        if: inputs.upload_raw
+        run: |
+          chmod +x .github/scripts/codebase-gap-artifact.sh
+          ARTIFACT_DIR="${ARTIFACT_RAW_DIR}" .github/scripts/codebase-gap-artifact.sh finding-raw \
+            --out-dir "${OUT_DIR}" \
+            --main-commit "${MAIN_COMMIT_FILE}" \
+            --readme /work/README-finding.txt
+          ARTIFACT_DIR="${ARTIFACT_RAW_DIR}" .github/scripts/codebase-gap-artifact.sh finalize
+
+      - name: Upload gap finding results artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gap-finding-results-codebase-${{ inputs.llvm_ref }}-${{ github.run_id }}
+          path: ${{ env.ARTIFACT_DIR }}
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload gap finding raw artifact
+        if: inputs.upload_raw
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gap-finding-raw-codebase-${{ inputs.llvm_ref }}-${{ github.run_id }}
+          path: ${{ env.ARTIFACT_RAW_DIR }}
+          retention-days: 7
+          if-no-files-found: error
