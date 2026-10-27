@@ -23,6 +23,18 @@ on:
         required: false
         type: string
         default: main
+      targets:
+        description: Semicolon-separated LLVM_TARGETS_TO_BUILD
+        required: false
+        type: string
+        default: all
+      enable_clang:
+        description: >-
+          Build and test Clang with the instrumented LLVM tree. Clang is the
+          only project this workflow can enable. On by default.
+        required: false
+        type: boolean
+        default: true
       allow_inline:
         description: >-
           Allow inlining in the instrumented LLVM build (passes --allow-inline
@@ -72,6 +84,9 @@ jobs:
     env:
       INPUT_GITHUB_REPO: ${{ inputs.github_repo }}
       INPUT_LLVM_REF: ${{ inputs.llvm_ref }}
+      INPUT_TARGETS: ${{ inputs.targets }}
+      SCOPE_ALLOWLIST: "${{ inputs.enable_clang && 'scripts/allowlist-llvm-clang.txt' || 'scripts/allowlist-llvm.txt' }}"
+      SCOPE_ENABLE_PROJECTS: "${{ inputs.enable_clang && 'clang' || '' }}"
     steps:
       - name: Checkout fuzz-fill
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -117,15 +132,17 @@ jobs:
           ALLOW_INLINE: ${{ inputs.allow_inline }}
         run: |
           build_args=(
-            scripts/allowlist-llvm-clang.txt
+            "${SCOPE_ALLOWLIST}"
             "${MAIN_LLVM_DIR}"
             "${MAIN_BUILD_DIR}"
             --bootstrap-bin "${LLVM_RELEASE_BIN}"
-            --targets all
-            --enable-projects clang
+            --targets "${INPUT_TARGETS}"
             --enable-ccache
             --ccache-compiler-check-version
           )
+          if [[ -n "${SCOPE_ENABLE_PROJECTS}" ]]; then
+            build_args+=(--enable-projects "${SCOPE_ENABLE_PROJECTS}")
+          fi
           if [[ "${ALLOW_INLINE}" == "true" ]]; then
             build_args+=(--allow-inline)
           fi
@@ -158,27 +175,34 @@ jobs:
       - name: Run baseline gap finding
         run: |
           source "${VENV_DIR}/bin/activate"
+          test_args=(--tests llvm/test)
+          if [[ -n "${SCOPE_ENABLE_PROJECTS}" ]]; then
+            test_args+=(--tests clang/test)
+          fi
           ./scripts/gap-finding-baseline.sh \
             --output-dir "${OUT_DIR}" \
             --llvm-repo "${MAIN_LLVM_DIR}" \
             --llvm-bin "${MAIN_BUILD_BIN}" \
             --instrumented-bin-dir "${MAIN_BUILD_BIN}" \
-            --tests llvm/test \
-            --tests clang/test \
+            "${test_args[@]}" \
             -j "$(nproc)"
 
       - name: Write finding README
         run: |
           requested_at="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq '.created_at')"
+          tests="llvm/test"
+          if [[ -n "${SCOPE_ENABLE_PROJECTS}" ]]; then
+            tests="${tests},clang/test"
+          fi
           {
             echo "Codebase baseline gap finding report"
             echo "github_repo: ${INPUT_GITHUB_REPO}"
             echo "llvm_ref: ${INPUT_LLVM_REF}"
             echo "main_head: $(cat "${MAIN_COMMIT_FILE}")"
-            echo "allowlist: scripts/allowlist-llvm-clang.txt"
-            echo "targets: all"
-            echo "enable_projects: clang"
-            echo "tests: llvm/test,clang/test"
+            echo "allowlist: ${SCOPE_ALLOWLIST}"
+            echo "targets: ${INPUT_TARGETS}"
+            echo "enable_projects: ${SCOPE_ENABLE_PROJECTS:-<none>}"
+            echo "tests: ${tests}"
             echo "allow_inline: ${{ inputs.allow_inline }}"
             echo "upload_raw: ${{ inputs.upload_raw }}"
             echo "requested_at: ${requested_at}"
