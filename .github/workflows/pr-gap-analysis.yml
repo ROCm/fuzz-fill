@@ -34,6 +34,11 @@ on:
         required: false
         type: boolean
         default: false
+      generate_html:
+        description: Generate and upload a separate HTML coverage artifact
+        required: false
+        type: boolean
+        default: true
 
 defaults:
   run:
@@ -246,7 +251,7 @@ jobs:
             -j "$(nproc)"
 
       - name: Write HTML coverage report
-        if: steps.scope.outputs.action == 'run'
+        if: inputs.generate_html && steps.scope.outputs.action == 'run'
         env:
           SCOPE_BACKENDS: ${{ steps.scope.outputs.backends }}
           SCOPE_TESTS: ${{ steps.scope.outputs.tests }}
@@ -296,6 +301,7 @@ jobs:
             echo "gap_scope_reason: ${{ steps.scope.outputs.reason }}"
             echo "allow_inline: ${{ inputs.allow_inline }}"
             echo "upload_raw: ${{ inputs.upload_raw }}"
+            echo "generate_html: ${{ inputs.generate_html }}"
             echo "pr_head: ${pr_head}"
             echo "pr_head_ref: ${pr_head_ref}"
             echo "squash_commit: $(cat "${SQUASH_COMMIT_FILE}")"
@@ -336,5 +342,15 @@ jobs:
         with:
           name: gap-finding-raw-pr${{ inputs.pr_id }}-${{ github.run_id }}
           path: ${{ env.ARTIFACT_RAW_DIR }}
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload HTML coverage report
+        if: inputs.generate_html && steps.scope.outputs.action == 'run'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: html-coverage-pr${{ inputs.pr_id }}-${{ github.run_id }}
+          path: ${{ env.OUT_DIR }}/commit_lines_report/html
+          compression-level: 9
           retention-days: 7
           if-no-files-found: error
