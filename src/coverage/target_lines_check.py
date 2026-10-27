@@ -1,4 +1,4 @@
-"""Compare target-lines CSV against baseline uncovered line coverage."""
+"""Intersect a target-lines CSV with a baseline ``line_coverage_summary.csv``."""
 
 from __future__ import annotations
 
@@ -6,13 +6,16 @@ import csv
 from functools import lru_cache
 from pathlib import Path
 
-from coverage.line_coverage_summary import load_uncovered_lines_csv
+from coverage.constants import (
+    DEFAULT_TARGET_LINES_COVERAGE_SUMMARY,
+    DEFAULT_TARGET_LINES_REPORT,
+)
+from coverage.line_coverage_summary import load_line_coverage_summary
 from coverage.revision_check import check_revision_consistency
 from fuzz_fill.log import get_logger
 
 logger = get_logger("coverage.target_lines")
 
-# Number of mismatching locations listed in the source-text check error.
 MISMATCH_SAMPLE_SIZE = 10
 
 
@@ -44,49 +47,44 @@ def _source_text_mismatches(sym_file: str, line_no: int, text: str) -> bool:
 
 def run_target_lines_check(
     *,
-    line_coverage_uncovered_csv: Path,
+    summary_csv: Path,
     llvm_repo: Path,
     target_lines_csv: Path,
-    report_path: Path,
+    output_dir: Path,
     commit_check: bool = True,
     source_text_check: bool = True,
 ) -> None:
     """
-    Emit target source lines that appear in ``line_coverage_uncovered.csv``.
+    Emit PR/target lines that appear in ``summary_csv``.
 
-    A line is listed only when its matched ``(file, line)`` is present in the
-    baseline uncovered CSV produced by ``coverage baseline``.
+    Writes ``target_lines_coverage_summary.csv`` (``file``, ``line``, ``coverage``)
+    for every matched target line, and ``target_lines_uncovered.csv``
+    (``file``, ``line``, ``text``) for those with ``coverage == uncovered``.
 
-    Two checks guard against comparing line numbers across different trees:
-    ``commit_check`` compares the revisions recorded by the earlier stages, and
-    ``source_text_check`` compares each target line against the source on disk,
-    which also catches uncommitted changes. Both are enabled by default and
-    abort the run.
-
-    The report uses the same uncovered-lines contract as ``coverage baseline``:
-    columns ``file`` and ``line`` with absolute paths matching the baseline
-    summary / LLC address map. An optional ``text`` column preserves the source
-    line for review.
+    ``commit_check`` and ``source_text_check`` are enabled by default and abort
+    when revisions or on-disk source text disagree with the target-lines CSV.
     """
     if commit_check:
         check_revision_consistency(
             llvm_repo=llvm_repo,
-            baseline_dir=line_coverage_uncovered_csv.parent,
+            baseline_dir=summary_csv.parent,
             target_lines_dir=target_lines_csv.parent,
         )
 
-    uncovered_lines = load_uncovered_lines_csv(line_coverage_uncovered_csv)
-    summary_files: set[str] = {file for file, _ in uncovered_lines}
+    coverage_by_line, _ = load_line_coverage_summary(summary_csv)
+    summary_files: set[str] = {file for file, _ in coverage_by_line}
 
     llvm_repo = llvm_repo.resolve()
-    report_path.parent.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = output_dir / DEFAULT_TARGET_LINES_COVERAGE_SUMMARY
+    uncovered_path = output_dir / DEFAULT_TARGET_LINES_REPORT
 
+    summary_rows: list[dict[str, str]] = []
     uncovered_rows: list[dict[str, str]] = []
-    # Locations of the first few mismatches, for the error message.
     mismatch_sample: list[str] = []
     stats = {
         "reported": 0,
-        "not_in_uncovered_list": 0,
+        "not_in_summary": 0,
         "source_mismatch": 0,
         "unknown_file": 0,
     }
@@ -120,13 +118,12 @@ def run_target_lines_check(
                 stats["unknown_file"] += 1
                 continue
 
-            if (sym_file, line_no) not in uncovered_lines:
-                stats["not_in_uncovered_list"] += 1
+            status = coverage_by_line.get((sym_file, line_no))
+            if status is None:
+                stats["not_in_summary"] += 1
                 continue
 
             if _source_text_mismatches(sym_file, line_no, text):
-                # Text differs: baseline and commit come from different trees,
-                # so the line-number match is coincidental, not a real gap.
                 stats["source_mismatch"] += 1
                 if len(mismatch_sample) < MISMATCH_SAMPLE_SIZE:
                     mismatch_sample.append(f"{sym_file}:{line_no}")
@@ -134,13 +131,21 @@ def run_target_lines_check(
                     continue
 
             stats["reported"] += 1
-            uncovered_rows.append(
+            summary_rows.append(
                 {
                     "file": sym_file,
                     "line": str(line_no),
-                    "text": text,
+                    "coverage": status,
                 }
             )
+            if status == "uncovered":
+                uncovered_rows.append(
+                    {
+                        "file": sym_file,
+                        "line": str(line_no),
+                        "text": text,
+                    }
+                )
 
     mismatched = stats["source_mismatch"]
     if source_text_check and mismatched:
@@ -155,21 +160,27 @@ def run_target_lines_check(
             "against that tree, or pass --no-source-text-check to skip this check."
         )
 
-    fieldnames = ["file", "line", "text"]
-    with report_path.open("w", encoding="utf-8", newline="") as out:
-        w = csv.DictWriter(out, fieldnames=fieldnames)
-        w.writeheader()
-        w.writerows(uncovered_rows)
+    with summary_path.open("w", encoding="utf-8", newline="") as out:
+        writer = csv.DictWriter(out, fieldnames=["file", "line", "coverage"])
+        writer.writeheader()
+        writer.writerows(summary_rows)
 
-    total_in = stats["reported"] + stats["not_in_uncovered_list"] + stats["unknown_file"]
+    with uncovered_path.open("w", encoding="utf-8", newline="") as out:
+        writer = csv.DictWriter(out, fieldnames=["file", "line", "text"])
+        writer.writeheader()
+        writer.writerows(uncovered_rows)
+
+    total_in = stats["reported"] + stats["not_in_summary"] + stats["unknown_file"]
     logger.info(
-        "wrote %s (%d uncovered rows of %d target lines). "
-        "reported=%d not_in_uncovered_list=%d unknown_file=%d source_mismatch=%d",
-        report_path,
+        "wrote %s (%d rows) and %s (%d uncovered) of %d target lines. "
+        "reported=%d not_in_summary=%d unknown_file=%d source_mismatch=%d",
+        summary_path,
+        len(summary_rows),
+        uncovered_path,
         len(uncovered_rows),
         total_in,
         stats["reported"],
-        stats["not_in_uncovered_list"],
+        stats["not_in_summary"],
         stats["unknown_file"],
         stats["source_mismatch"],
     )

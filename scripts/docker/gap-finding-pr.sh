@@ -109,7 +109,9 @@ fi
 docker_gap_finding_prepare_and_run docker_env
 
 report="${output_dir}/commit_lines_report/target_lines_uncovered.csv"
+summary_report="${output_dir}/commit_lines_report/target_lines_coverage_summary.csv"
 echo "Wrote ${report}"
+echo "PR target lines coverage summary: ${summary_report}"
 echo "Image: ${image_ref}"
 echo "LIT suites: ${tests[*]}"
 if [[ ${#lit_filters[@]} -gt 0 ]]; then

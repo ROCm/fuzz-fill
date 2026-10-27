@@ -195,8 +195,8 @@ Under `$OUTPUT_DIR/baseline/`:
 
 | Path | Contents |
 |------|----------|
-| `line_coverage_summary.csv` | Per-line baseline coverage: `covered`, `partially`, or `uncovered` |
-| `line_coverage_uncovered.csv` | **Main gap list** — input to `target-lines` and downstream gap filling |
+| `line_coverage_summary.csv` | Per-line baseline coverage (`covered` / `partially` / `uncovered`); input to `target-lines` and `html-report` |
+| `line_coverage_uncovered.csv` | **Main gap list** — input to downstream gap filling |
 | `<tool>_address_line_map.csv` | Per-tool address-to-line map (e.g. `llc_address_line_map.csv`) |
 | `<tool>_line_point_summary.csv` | Per-tool covered/all points per `(file, line)` |
 | `lit_failures.json` | Failed LIT tests (`name`, `code`, `output`, `elapsed`) |
@@ -215,12 +215,12 @@ Under `$OUTPUT_DIR/baseline/`:
 
 ```text
 added-lines  →  baseline  →  target-lines
-(from git)     (LIT run)     (uncovered added lines)
+(from git)     (LIT run)     (intersect with summary)
 ```
 
 1. **`added-lines`** — parse `git show` for a commit and list every line added on the right-hand side of the diff.
 2. **`baseline`** — same baseline run as [gap finding (baseline)](#gap-finding-baseline).
-3. **`target-lines`** — include each added line whose `(file, line)` appears in `line_coverage_uncovered.csv`.
+3. **`target-lines`** — intersect added lines with `line_coverage_summary.csv`; write `target_lines_coverage_summary.csv` and `target_lines_uncovered.csv`.
 
 Step 3 does **not** re-run LIT; you can repeat it with different `added-lines.csv` inputs while baseline artifacts remain valid.
 
@@ -284,6 +284,7 @@ Under `$OUTPUT_DIR`:
 | `baseline/line_coverage_uncovered.csv` | Baseline uncovered lines |
 | `baseline/llc_address_line_map.csv` | LLC map from the baseline run |
 | `baseline/lit_failures.json` | Failed LIT tests from baseline |
+| `commit_lines_report/target_lines_coverage_summary.csv` | PR-added lines present in the baseline summary (`file`, `line`, `coverage`) |
 | `commit_lines_report/target_lines_uncovered.csv` | **Main result** — PR-added lines still uncovered (`file`, `line`, optional `text`; absolute paths) |
 
 ---
@@ -411,7 +412,7 @@ The scripts above call these modules. Use `--help` on any command for the full f
 | `python -m coverage baseline` | Baseline LIT coverage (gap finding) |
 | `python -m coverage candidate-test` | Coverage from a fuzz-generated test corpus (gap filling) |
 | `python -m coverage incremental` | Suite gaps filled by fuzz tests (gap filling) |
-| `python -m coverage target-lines` | PR added lines vs `line_coverage_uncovered.csv` |
+| `python -m coverage target-lines` | PR added lines vs `line_coverage_summary.csv` (`--summary`) |
 | `python -m added_lines` | Lines added by a git commit |
 | `python -m reduce` | Single-case testcase reduction (`--config`) |
 | `python -m reduce batch-from-coverage` | Scaffold (and optionally run) reduction for the first N gap-fill hits |
@@ -425,7 +426,7 @@ PR gap finding output and baseline gap lists both use an uncovered-lines CSV wit
 | `line_coverage_uncovered.csv` | Baseline gap list |
 | `target_lines_uncovered.csv` | PR-added lines still uncovered; same `file`/`line` schema, optional `text` |
 
-PR gap finding input to `target-lines` remains `added-lines.csv` (`path`, `line_no`, `text` with git-relative paths). The **output** report uses the shared contract above.
+PR gap finding input to `target-lines` remains `added-lines.csv` (`path`, `line_no`, `text` with git-relative paths). The uncovered output uses the shared contract above.
 
 ### `coverage baseline` filters
 

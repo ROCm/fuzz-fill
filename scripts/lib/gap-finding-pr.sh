@@ -45,7 +45,7 @@ run_gap_finding_pr() {
     local -a target_args=(
         python -m coverage target-lines
         --output-dir "$target_lines_dir"
-        --line-coverage-uncovered-csv "${baseline_dir}/line_coverage_uncovered.csv"
+        --summary "${baseline_dir}/line_coverage_summary.csv"
         --target-lines-csv "${added_lines_dir}/added-lines.csv"
     )
     if [[ -n "$llvm_repo" ]]; then

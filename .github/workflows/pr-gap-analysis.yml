@@ -34,6 +34,11 @@ on:
         required: false
         type: boolean
         default: false
+      generate_html:
+        description: Generate and upload a separate HTML coverage artifact
+        required: false
+        type: boolean
+        default: true
 
 defaults:
   run:
@@ -169,6 +174,7 @@ jobs:
             "${OUT_DIR}/commit_lines_report"
           echo "file,line,text" > "${OUT_DIR}/commit_lines_report/target_lines_uncovered.csv"
           echo "file,line,text" > "${OUT_DIR}/commit_lines_report/target_lines_uncovered_pruned.csv"
+          echo "file,line,coverage" > "${OUT_DIR}/commit_lines_report/target_lines_coverage_summary.csv"
           echo "gap-scope: skip (rule ${{ steps.scope.outputs.rule }}): ${{ steps.scope.outputs.reason }}"
 
       - name: Restore ccache
@@ -244,6 +250,40 @@ jobs:
             --auto \
             -j "$(nproc)"
 
+      - name: Write HTML coverage report
+        if: inputs.generate_html && steps.scope.outputs.action == 'run'
+        env:
+          SCOPE_BACKENDS: ${{ steps.scope.outputs.backends }}
+          SCOPE_TESTS: ${{ steps.scope.outputs.tests }}
+          SCOPE_ALLOWLIST: ${{ steps.scope.outputs.allowlist }}
+        run: |
+          source "${VENV_DIR}/bin/activate"
+          pr_head_ref="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.ref')"
+          projects="none"
+          case "$(basename "${SCOPE_ALLOWLIST}")" in
+            allowlist-clang.txt|allowlist-llvm-clang.txt)
+              projects="clang"
+              ;;
+          esac
+          html_args=(
+            --summary "${OUT_DIR}/commit_lines_report/target_lines_coverage_summary.csv"
+            --output-dir "${OUT_DIR}/commit_lines_report/html"
+            --strip-prefix "${PR_LLVM_DIR}"
+            --github-repo "${INPUT_GITHUB_REPO}"
+            --llvm-ref "PR #${INPUT_PR_ID} (${pr_head_ref})"
+            --commit "$(cat "${SQUASH_COMMIT_FILE}")"
+            --projects "${projects}"
+            --backends "${SCOPE_BACKENDS}"
+          )
+          if [[ -n "${SCOPE_TESTS}" ]]; then
+            IFS=',' read -r -a suites <<< "${SCOPE_TESTS}"
+            for suite in "${suites[@]}"; do
+              [[ -n "${suite}" ]] || continue
+              html_args+=(--tests "${suite}")
+            done
+          fi
+          python -m coverage html-report "${html_args[@]}"
+
       - name: Write finding README
         run: |
           pr_head="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.sha')"
@@ -261,6 +301,7 @@ jobs:
             echo "gap_scope_reason: ${{ steps.scope.outputs.reason }}"
             echo "allow_inline: ${{ inputs.allow_inline }}"
             echo "upload_raw: ${{ inputs.upload_raw }}"
+            echo "generate_html: ${{ inputs.generate_html }}"
             echo "pr_head: ${pr_head}"
             echo "pr_head_ref: ${pr_head_ref}"
             echo "squash_commit: $(cat "${SQUASH_COMMIT_FILE}")"
@@ -301,5 +342,15 @@ jobs:
         with:
           name: gap-finding-raw-pr${{ inputs.pr_id }}-${{ github.run_id }}
           path: ${{ env.ARTIFACT_RAW_DIR }}
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload HTML coverage report
+        if: inputs.generate_html && steps.scope.outputs.action == 'run'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: html-coverage-pr${{ inputs.pr_id }}-${{ github.run_id }}
+          path: ${{ env.OUT_DIR }}/commit_lines_report/html
+          compression-level: 9
           retention-days: 7
           if-no-files-found: error

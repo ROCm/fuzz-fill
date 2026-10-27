@@ -22,6 +22,7 @@ DEFAULT_MIN_CANDIDATE_TESTS_SOURCE_FILES_CSV = "min_candidate_tests_source_files
 DEFAULT_MIN_CANDIDATE_TESTS_BATCH_SIZE = 1000
 DEFAULT_NEW_COVERAGE_CSV = "new_coverage.csv"
 DEFAULT_TARGET_LINES_REPORT = "target_lines_uncovered.csv"
+DEFAULT_TARGET_LINES_COVERAGE_SUMMARY = "target_lines_coverage_summary.csv"
 DEFAULT_LIT_FAILURES_REPORT = "lit_failures.json"
 DEFAULT_TIMINGS_FILE = "timings.csv"
 

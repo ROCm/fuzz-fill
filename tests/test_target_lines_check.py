@@ -1,4 +1,4 @@
-"""End-to-end unit tests for target-lines filtering via uncovered baseline CSV."""
+"""Unit tests for target-lines filtering via baseline summary CSV."""
 
 from __future__ import annotations
 
@@ -7,11 +7,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from coverage.constants import DEFAULT_LINE_COVERAGE_UNCOVERED_FILE
+from coverage.constants import (
+    DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
+    DEFAULT_TARGET_LINES_COVERAGE_SUMMARY,
+    DEFAULT_TARGET_LINES_REPORT,
+)
 from coverage.target_lines_check import run_target_lines_check
 
 REL = "llvm/lib/Target/AMDGPU/Foo.cpp"
-ABS = "/llvm/llvm/lib/Target/AMDGPU/Foo.cpp"
 
 
 def _write_csv(path: Path, rows: list[list[object]]) -> None:
@@ -22,42 +25,42 @@ def _write_csv(path: Path, rows: list[list[object]]) -> None:
 def _run_source_mismatch_check(
     root: Path, source_text: str, target_text: str, source_text_check: bool = True
 ) -> list[dict[str, str]]:
-    """Run target-lines with one uncovered ``Foo.cpp:2`` row and return the report rows.
-
-    ``source_text`` is written to ``Foo.cpp`` on disk; ``target_text`` is the
-    ``text`` column of the single target-lines row at line 2.
-    """
+    """Run target-lines with one uncovered ``Foo.cpp:2`` row."""
     baseline = root / "baseline"
     baseline.mkdir()
+    out = root / "out"
 
     source_file = root / "Foo.cpp"
     source_file.write_text(source_text, encoding="utf-8")
 
-    uncovered_csv = baseline / DEFAULT_LINE_COVERAGE_UNCOVERED_FILE
-    _write_csv(uncovered_csv, [["file", "line"], [str(source_file), 2]])
+    summary_csv = baseline / DEFAULT_LINE_COVERAGE_SUMMARY_FILE
+    _write_csv(
+        summary_csv,
+        [["file", "line", "coverage"], [str(source_file), 2, "uncovered"]],
+    )
 
     target_csv = root / "target.csv"
     _write_csv(target_csv, [["path", "line_no", "text"], ["Foo.cpp", 2, target_text]])
 
-    report = root / "target_lines_uncovered.csv"
     run_target_lines_check(
-        line_coverage_uncovered_csv=uncovered_csv,
+        summary_csv=summary_csv,
         llvm_repo=root,
         target_lines_csv=target_csv,
-        report_path=report,
+        output_dir=out,
         source_text_check=source_text_check,
     )
 
-    with report.open(newline="", encoding="utf-8") as f:
+    with (out / DEFAULT_TARGET_LINES_REPORT).open(newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
 
 
 class RunTargetLinesCheckTest(unittest.TestCase):
-    def test_only_uncovered_lines_written_to_report(self) -> None:
+    def test_summary_and_uncovered_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             baseline = root / "baseline"
             baseline.mkdir()
+            out = root / "out"
 
             source_file = root / REL
             source_file.parent.mkdir(parents=True)
@@ -70,13 +73,15 @@ class RunTargetLinesCheckTest(unittest.TestCase):
             )
             abs_path = str(source_file)
 
-            uncovered_csv = baseline / DEFAULT_LINE_COVERAGE_UNCOVERED_FILE
+            summary_csv = baseline / DEFAULT_LINE_COVERAGE_SUMMARY_FILE
             _write_csv(
-                uncovered_csv,
+                summary_csv,
                 [
-                    ["file", "line"],
-                    [abs_path, 30],
-                    [abs_path, 40],
+                    ["file", "line", "coverage"],
+                    [abs_path, 10, "covered"],
+                    [abs_path, 20, "partially"],
+                    [abs_path, 30, "uncovered"],
+                    [abs_path, 40, "uncovered"],
                 ],
             )
 
@@ -85,8 +90,8 @@ class RunTargetLinesCheckTest(unittest.TestCase):
                 target_csv,
                 [
                     ["path", "line_no", "text"],
-                    [REL, 10, "covered line"],
-                    [REL, 20, "partial line"],
+                    [REL, 10, "line 10"],
+                    [REL, 20, "line 20"],
                     [REL, 30, "uncovered line"],
                     [REL, 40, "uncovered line 2"],
                     [REL, 999, "not instrumented"],
@@ -94,22 +99,41 @@ class RunTargetLinesCheckTest(unittest.TestCase):
                 ],
             )
 
-            report = root / "target_lines_uncovered.csv"
             run_target_lines_check(
-                line_coverage_uncovered_csv=uncovered_csv,
+                summary_csv=summary_csv,
                 llvm_repo=root / "llvm_repo",
                 target_lines_csv=target_csv,
-                report_path=report,
+                output_dir=out,
             )
 
-            with report.open(newline="", encoding="utf-8") as f:
-                rows = list(csv.DictReader(f))
+            with (out / DEFAULT_TARGET_LINES_COVERAGE_SUMMARY).open(
+                newline="", encoding="utf-8"
+            ) as f:
+                summary_rows = list(csv.DictReader(f))
+            with (out / DEFAULT_TARGET_LINES_REPORT).open(
+                newline="", encoding="utf-8"
+            ) as f:
+                uncovered_rows = list(csv.DictReader(f))
 
-            reported = {(row["file"], int(row["line"])) for row in rows}
-            self.assertEqual(reported, {(abs_path, 30), (abs_path, 40)})
-            self.assertEqual({row["text"] for row in rows}, {"uncovered line", "uncovered line 2"})
+            self.assertEqual(
+                [(r["file"], int(r["line"]), r["coverage"]) for r in summary_rows],
+                [
+                    (abs_path, 10, "covered"),
+                    (abs_path, 20, "partially"),
+                    (abs_path, 30, "uncovered"),
+                    (abs_path, 40, "uncovered"),
+                ],
+            )
+            self.assertEqual(
+                {(r["file"], int(r["line"])) for r in uncovered_rows},
+                {(abs_path, 30), (abs_path, 40)},
+            )
+            self.assertEqual(
+                {r["text"] for r in uncovered_rows},
+                {"uncovered line", "uncovered line 2"},
+            )
 
-    def test_missing_uncovered_csv_raises_systemexit(self) -> None:
+    def test_missing_summary_csv_raises_systemexit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             target_csv = root / "target.csv"
@@ -117,10 +141,10 @@ class RunTargetLinesCheckTest(unittest.TestCase):
 
             with self.assertRaises(SystemExit):
                 run_target_lines_check(
-                    line_coverage_uncovered_csv=root / "missing.csv",
+                    summary_csv=root / "missing.csv",
                     llvm_repo=root / "llvm_repo",
                     target_lines_csv=target_csv,
-                    report_path=root / "out.csv",
+                    output_dir=root / "out",
                 )
 
     def test_line_text_mismatch_against_baseline_source_is_an_error(self) -> None:
@@ -135,24 +159,24 @@ class RunTargetLinesCheckTest(unittest.TestCase):
 
     def test_line_text_mismatch_reported_when_check_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            rows = _run_source_mismatch_check(
+            uncovered = _run_source_mismatch_check(
                 Path(tmp),
                 source_text="line one\nold second line\nline three\n",
                 target_text="new second line",
                 source_text_check=False,
             )
-            self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["line"], "2")
+            self.assertEqual(len(uncovered), 1)
+            self.assertEqual(uncovered[0]["line"], "2")
 
     def test_line_text_match_against_baseline_source_is_reported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            rows = _run_source_mismatch_check(
+            uncovered = _run_source_mismatch_check(
                 Path(tmp),
                 source_text="line one\nshared second line\nline three\n",
                 target_text="shared second line",
             )
-            self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["line"], "2")
+            self.assertEqual(len(uncovered), 1)
+            self.assertEqual(uncovered[0]["line"], "2")
 
     def test_blank_target_text_against_nonblank_source_is_an_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -166,13 +190,13 @@ class RunTargetLinesCheckTest(unittest.TestCase):
 
     def test_blank_target_text_against_blank_source_is_reported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            rows = _run_source_mismatch_check(
+            uncovered = _run_source_mismatch_check(
                 Path(tmp),
                 source_text="line one\n\nline three\n",
                 target_text="",
             )
-            self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["line"], "2")
+            self.assertEqual(len(uncovered), 1)
+            self.assertEqual(uncovered[0]["line"], "2")
 
 
 if __name__ == "__main__":

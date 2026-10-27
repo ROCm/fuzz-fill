@@ -15,11 +15,11 @@ from coverage.constants import (
     DEFAULT_MIN_CANDIDATE_TESTS_BATCH_SIZE,
     DEFAULT_NEW_COVERAGE_CSV,
     DEFAULT_SOURCE_CODE_FILTER,
-    DEFAULT_TARGET_LINES_REPORT,
     DEFAULT_TIMINGS_FILE,
 )
 
 from coverage.analyser import CoverageAnalyzer
+from coverage.html_report import write_html_report
 from coverage.min_candidate_tests import MinCandidateTestsSelector
 from coverage.target_lines_check import run_target_lines_check
 from fuzz_fill.env import (
@@ -79,7 +79,10 @@ def main():
 
     sub = parser.add_subparsers(
         dest="subcmd",
-        metavar="{baseline,candidate-test,incremental,min-candidate-tests,target-lines}",
+        metavar=(
+            "{baseline,candidate-test,incremental,min-candidate-tests,"
+            "target-lines,html-report}"
+        ),
         required=True,
     )
     p_baseline = sub.add_parser("baseline")
@@ -95,8 +98,15 @@ def main():
     p_target_lines = sub.add_parser(
         "target-lines",
         help=(
-            "List target-lines CSV rows whose ``(file, line)`` appears in "
-            "``line_coverage_uncovered.csv`` from ``coverage baseline`` (no lit re-run)."
+            "Intersect a target-lines CSV with ``line_coverage_summary.csv`` "
+            "(no lit re-run); write summary and uncovered reports."
+        ),
+    )
+    p_html_report = sub.add_parser(
+        "html-report",
+        help=(
+            "Write a self-contained HTML coverage report from "
+            "``line_coverage_summary.csv`` (source pages with three-way coloring)."
         ),
     )
 
@@ -105,6 +115,7 @@ def main():
     add_shared_arguments(p_incremental)
     add_shared_arguments(p_min_candidate_tests)
     add_shared_arguments(p_target_lines)
+    add_shared_arguments(p_html_report)
 
     p_baseline.add_argument(
         "--sancov",
@@ -292,13 +303,10 @@ def main():
     )
 
     p_target_lines.add_argument(
-        "--line-coverage-uncovered-csv",
+        "--summary",
         type=existing_file_path,
         required=True,
-        help=(
-            "Baseline uncovered lines CSV (``file``, ``line`` columns; output of "
-            "``coverage baseline`` as ``line_coverage_uncovered.csv``)."
-        ),
+        help="Path to line_coverage_summary.csv from coverage baseline.",
     )
     p_target_lines.add_argument(
         "--llvm-repo",
@@ -333,6 +341,63 @@ def main():
         help=(
             "Fail when a target line differs from the source on disk at that "
             "line number (default: enabled)."
+        ),
+    )
+
+    p_html_report.add_argument(
+        "--summary",
+        type=existing_file_path,
+        required=True,
+        help="Path to line_coverage_summary.csv from coverage baseline.",
+    )
+    p_html_report.add_argument(
+        "--strip-prefix",
+        type=Path,
+        default=None,
+        help=(
+            "Strip this directory prefix from CSV file paths when naming HTML "
+            "pages (typically the LLVM checkout used for the baseline)."
+        ),
+    )
+    p_html_report.add_argument(
+        "--github-repo",
+        default=None,
+        help="Source repository for this run (shown on the index).",
+    )
+    p_html_report.add_argument(
+        "--llvm-ref",
+        default=None,
+        help="Branch, tag, or commit-ish checked out (shown on the index).",
+    )
+    p_html_report.add_argument(
+        "--commit",
+        default=None,
+        help="Resolved commit SHA for this run (shown on the index).",
+    )
+    p_html_report.add_argument(
+        "--projects",
+        default=None,
+        help=(
+            "Extra LLVM_ENABLE_PROJECTS for this run (shown on the index), "
+            "e.g. clang. Use an empty value or 'none' when LLVM-only."
+        ),
+    )
+    p_html_report.add_argument(
+        "--backends",
+        default=None,
+        help=(
+            "LLVM_TARGETS_TO_BUILD for this run (shown on the index), "
+            "e.g. X86;AMDGPU or all."
+        ),
+    )
+    p_html_report.add_argument(
+        "--tests",
+        action="append",
+        default=None,
+        metavar="SUITE",
+        help=(
+            "Lit suite used for this run (shown on the index). Repeatable, "
+            "e.g. --tests llvm/test --tests clang/test."
         ),
     )
 
@@ -437,20 +502,39 @@ def main():
             args.llvm_repo, FUZZ_FILL_LLVM_REPO, flag_name="--llvm-repo"
         )
         logger.info(
-            "checking target lines from CSV against baseline uncovered lines "
+            "checking target lines from CSV against baseline line coverage "
             "(no lit re-run)"
         )
         with log_timing(logger, "target-lines"):
-            args.output_dir.mkdir(parents=True, exist_ok=True)
-            report_path = args.output_dir / DEFAULT_TARGET_LINES_REPORT
             run_target_lines_check(
-                line_coverage_uncovered_csv=args.line_coverage_uncovered_csv,
+                summary_csv=args.summary,
                 llvm_repo=args.llvm_repo,
                 target_lines_csv=args.target_lines_csv,
-                report_path=report_path,
+                output_dir=args.output_dir,
                 commit_check=args.commit_check,
                 source_text_check=args.source_text_check,
             )
+
+    elif args.subcmd == "html-report":
+        strip = args.strip_prefix.resolve() if args.strip_prefix is not None else None
+        logger.info(
+            "writing HTML coverage report from %s into %s",
+            args.summary,
+            args.output_dir,
+        )
+        with log_timing(logger, "html-report"):
+            write_html_report(
+                summary_csv=args.summary,
+                output_dir=args.output_dir,
+                strip_prefix=strip,
+                github_repo=args.github_repo,
+                llvm_ref=args.llvm_ref,
+                commit=args.commit,
+                projects=args.projects,
+                backends=args.backends,
+                tests=args.tests,
+            )
+            logger.info("wrote HTML coverage report to %s", args.output_dir)
 
     else:
         logger.error("unknown subcommand: %s", args.subcmd)
