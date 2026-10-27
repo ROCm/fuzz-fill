@@ -26,16 +26,23 @@ always safe; completed phases are skipped.
    `llvm/llvm-project` carrying that backend's auto-applied label
    (`backend:AMDGPU` / `backend:SPIR-V` — see `.github/new-prs-labeler.yml`
    in that repo), most-recently-updated first, and keeps the first
-   `--limit` (default 20) **per backend** whose changed files actually touch
-   `llvm/lib/Target/AMDGPU/` or `llvm/lib/Target/SPIRV/` — i.e. up to 20
-   AMDGPU PRs and up to 20 SPIRV PRs, not 20 total. Searching by label
-   avoids paying for a `/pulls/<n>/files` call on every open PR in the
-   repo — only PRs GitHub already labeled as touching the backend get one,
-   which is what makes discovery fast; the label's glob is broader than the
-   exact path match (e.g. `backend:AMDGPU` fires on any `*amdgpu*` path
-   anywhere in the repo), so that files call still runs per labeled PR to
-   confirm and pin down the exact backend(s), which also weeds out the
-   occasional label false-positive. Pass one or more `--backend
+   `--limit` (default 20) **per backend** that `--auto` would actually
+   analyze — i.e. up to 20 AMDGPU PRs and up to 20 SPIRV PRs, not 20 total.
+   Searching by label avoids paying for a `/pulls/<n>/files` call on every
+   open PR in the repo — only PRs GitHub already labeled as touching the
+   backend get one, which is what makes discovery fast and is what keeps
+   the scan aimed at AMDGPU and SPIRV. The label's glob is broad (e.g.
+   `backend:AMDGPU` fires on any `*amdgpu*` path anywhere in the repo), so
+   the files call still runs per labeled PR. It no longer requires
+   `llvm/lib/Target/AMDGPU/` or `llvm/lib/Target/SPIRV/`. A PR is kept when
+   any changed file outside the test trees sits under `llvm/lib/` or
+   `clang/lib/` (the same rule `--auto` uses to decide to run: gap-scope
+   rules 1–3). Test-only, docs-only, and other rule-4 PRs are dropped,
+   because CI would classify them as skip. When a kept PR does edit
+   `llvm/lib/Target/AMDGPU/` or `llvm/lib/Target/SPIRV/`, those paths decide
+   which backend quotas it counts against. Otherwise it counts against the
+   backend label(s) it carries, so a `clang/lib` or other `llvm/lib` change
+   on an AMDGPU- or SPIRV-labeled PR is still found. Pass one or more `--backend
    {amdgpu,spirv}` to scan only that backend (default: both). A PR touching
    both backends counts against both quotas, but only lists the backend(s)
    that still had room when it was found (so a backend past its limit
@@ -106,6 +113,26 @@ python3 .claude/skills/pr-gap-scan/scripts/scan.py run \
   --out-dir "$COMMENTS"
 ```
 
+With no `--category` / `--backend` / `--group`, discovery defaults to
+`amdgpu` and `spirv` (20 each). To process several categories in one run —
+each with its own `--limit`, overlapping PRs kept once — pass repeatable
+`--category` flags:
+
+```bash
+python3 .claude/skills/pr-gap-scan/scripts/scan.py run \
+  --state "$STATE" \
+  --limit 20 \
+  --category amdgpu --category spirv --category llvm --category clang \
+  --artifacts-dir "$ARTIFACTS" \
+  --out-dir "$COMMENTS"
+```
+
+`--backend` and `--group` remain aliases (`--backend amdgpu` ≡
+`--category amdgpu`; `--group llvm` ≡ `--category llvm`) and may be mixed.
+For llvm-only or clang-only scans, prefer
+[pr-gap-scan-llvm](../pr-gap-scan-llvm/SKILL.md) /
+[pr-gap-scan-clang](../pr-gap-scan-clang/SKILL.md).
+
 The `$(date ...)` above is just so a fresh invocation lands in a new
 directory; to resume a specific in-flight scan, reuse its existing
 `--state` path instead of generating a new one.
@@ -116,8 +143,8 @@ Step-by-step equivalent (same effect, useful when you want to inspect
 ```bash
 SCAN=.claude/skills/pr-gap-scan/scripts/scan.py
 python3 "$SCAN" discover --state "$STATE" --limit 20
-# Or, to scan only one backend (e.g. asked to "just check AMDGPU"):
-python3 "$SCAN" discover --state "$STATE" --limit 20 --backend amdgpu
+# Or, to scan only one category (e.g. asked to "just check AMDGPU"):
+python3 "$SCAN" discover --state "$STATE" --limit 20 --category amdgpu
 python3 "$SCAN" dispatch --state "$STATE"
 python3 "$SCAN" process  --state "$STATE" --artifacts-dir "$ARTIFACTS" \
   --out-dir "$COMMENTS" --poll-interval 60
@@ -131,21 +158,13 @@ harmless).
 
 ### After the run
 
-The comment files under `--out-dir` are **drafts only** — nothing gets
-posted automatically. Check whether the file has a drift warning, a LIT test
-failure warning, or a stacked-PR warning at the top first (see below); if it
-does, re-run the analysis (drift), double-check the failing tests (LIT), or
-confirm the base branch/PR is settled (stacked) before trusting the
-findings. Otherwise, review each `pr-<N>.md`, and if it looks right, post it
-yourself:
-
-```bash
-gh pr comment <N> -R llvm/llvm-project --body-file "$COMMENTS/pr-<N>.md"
-```
-
-Posting is a visible, hard-to-fully-undo action on someone else's PR —
-always confirm with the user before running `gh pr comment`, even if the
-scan itself ran unattended.
+The comment files under `--out-dir` are **local drafts only**. The agent does
+not post them to GitHub, does not run `gh pr comment`, and does not offer to
+publish them. Check whether the file has a drift warning, a LIT test failure
+warning, or a stacked-PR warning at the top first (see below); if it does,
+re-run the analysis (drift), double-check the failing tests (LIT), or confirm
+the base branch/PR is settled (stacked) before trusting the findings.
+Otherwise, review each `pr-<N>.md` and leave the drafts for the user.
 
 ## Comment template
 
@@ -170,19 +189,18 @@ GitHub autolinks bare hex commit SHAs to the commit page on its own, and
 backticks would suppress that. Permalinks use the full 40-char SHA (the
 PR's head commit, from `README-finding.txt`'s `pr_head`, not the squashed
 commit `gap-finding-pr.sh` builds against). The title line above the message
-is generated from the PR's own title/URL and should be stripped if you post
-the file's body as-is with `gh pr comment --body-file` — it's there for the
-person reading the draft, not for the PR itself.
+is generated from the PR's own title/URL for whoever opens the draft; it is
+not part of the review body itself.
 
 If the PR has picked up new commits since the artifact's `pr_head` (checked
 live at comment-writing time), the file gets an extra block prepended above
-the message, wrapped in `<!-- -->` so GitHub hides it if the file is ever
-posted verbatim, but still visible to whoever opens the raw file:
+the message, wrapped in `<!-- -->` so it stays out of a rendered GitHub
+comment if the raw file is ever used elsewhere:
 
 ```
-<!-- fuzz-fill internal note: do not post this block, GitHub hides HTML comments when rendering so it won't show up if you do, but strip it if you're posting the body some other way. -->
+<!-- fuzz-fill internal note: strip this block before using the body elsewhere. -->
 > [!WARNING]
-> PR #<N> has drifted since this analysis ran. It was analyzed against commit `<short>` (`<full>`), but the PR's current tip is `<short>` (`<full>`). The uncovered lines below may be stale -- re-run the analysis (pr-gap-check's `target` subcommand forces a fresh run) before posting.
+> PR #<N> has drifted since this analysis ran. It was analyzed against commit `<short>` (`<full>`), but the PR's current tip is `<short>` (`<full>`). The uncovered lines below may be stale -- re-run the analysis (pr-gap-check's `target` subcommand forces a fresh run) before trusting these findings.
 <!-- end internal note -->
 ```
 
@@ -193,7 +211,7 @@ file into the artifact if so), the file gets another hidden block, one
 `[!WARNING]` per affected backend:
 
 ```
-<!-- fuzz-fill internal note: do not post this block, GitHub hides HTML comments when rendering so it won't show up if you do, but strip it if you're posting the body some other way. -->
+<!-- fuzz-fill internal note: strip this block before using the body elsewhere. -->
 > [!WARNING]
 > **amdgpu**:
 > WARNING: 3 LIT test(s) failed during the baseline run (e.g., failed a check, timed out, unresolved, or unexpectedly passed).
@@ -206,16 +224,16 @@ file into the artifact if so), the file gets another hidden block, one
 
 This means the coverage baseline may be incomplete — some of the "uncovered"
 lines below could actually be covered by a test that failed for an unrelated
-reason. Treat findings alongside this warning with extra skepticism before
-posting; the artifact's `out/baseline/lit_failures.json` has the full list
-of failing tests if you want to check further.
+reason. Treat findings alongside this warning with extra skepticism; the
+artifact's `out/baseline/lit_failures.json` has the full list of failing
+tests if you want to check further.
 
 Finally, if the PR is **stacked** (see below), the file gets a third hidden
 block, placed above the other two since it's a structural fact about the PR
 rather than an analysis-run caveat:
 
 ```
-<!-- fuzz-fill internal note: do not post this block, GitHub hides HTML comments when rendering so it won't show up if you do, but strip it if you're posting the body some other way. -->
+<!-- fuzz-fill internal note: strip this block before using the body elsewhere. -->
 > [!WARNING]
 > PR #<N> looks stacked: its base branch is `<base_ref>`, not the repository's default branch (`<default_branch>`), which is itself still-open PR #<M> ('<title>'). The gap analysis only considered lines unique to this PR (diffed against its merge-base), but that merge-base will move if the base branch gets amended or rebased before it merges -- which can invalidate this analysis without this PR's own head commit ever changing, so the drift check (which only compares this PR's own head commit) wouldn't catch it. Confirm the base PR/branch is settled before trusting these findings.
 <!-- end internal note -->
@@ -247,17 +265,19 @@ this PR's head commit) has no way to catch it.
 
 - Only **open** PRs are scanned (draft PRs included) — merged/closed PRs
   aren't actionable for a "please add a test" comment.
-- "Introduces changes in the backend" is matched on source paths
-  `llvm/lib/Target/AMDGPU/` and `llvm/lib/Target/SPIRV/` only (not test
-  directories) — that's what determines whether the backend build is
-  exercised at all.
+- AMDGPU vs SPIRV membership comes from the auto-applied labels, not from
+  a path prefix. The files check only asks whether `--auto` would run:
+  some non-test path under `llvm/lib/` or `clang/lib/`. Test directories
+  are ignored, same as gap-scope. `llvm/lib/Target/AMDGPU/` and
+  `llvm/lib/Target/SPIRV/` still attribute quota when those dirs are
+  actually edited; other analyzable files fall back to the PR's labels.
 - Discovery relies on `llvm/llvm-project`'s auto-labeler
   (`.github/new-prs-labeler.yml`) having already applied `backend:AMDGPU` /
   `backend:SPIR-V` to a PR before it's scanned. The labeler's globs are
-  broader than the exact path match above (e.g. `backend:AMDGPU` also fires
-  on some non-AMDGPU changes), so the files-based path check still runs on
-  every labeled candidate to confirm a real hit — but a PR could in theory
-  be missed for one scan pass if the labeler hasn't run yet (it's typically
+  broader than the Target directories (e.g. `backend:AMDGPU` also fires on
+  tests and on `clang/lib` paths), so the files check still runs on every
+  labeled candidate to drop rule-4 skips — but a PR could in theory be
+  missed for one scan pass if the labeler hasn't run yet (it's typically
   near-instant, and a later scan picks it up once the label lands).
 - The already-commented filter matches any comment (any author) whose body
   contains "fuzz-fill" case-insensitively — adjust

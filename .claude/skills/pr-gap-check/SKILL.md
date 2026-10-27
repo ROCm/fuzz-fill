@@ -49,11 +49,13 @@ python3 "$SCAN" run \
   --out-dir "$COMMENTS"
 ```
 
-Backend(s) are auto-detected from the PR's changed files (same
-`llvm/lib/Target/AMDGPU/` / `llvm/lib/Target/SPIRV/` path match as
-pr-gap-scan). If the PR doesn't touch those paths — or you want to force a
-specific backend regardless — pass one or more `--backend {amdgpu,spirv}`
-flags explicitly:
+The PR is accepted when `--auto` would run it: some non-test change under
+`llvm/lib/` or `clang/lib/`, not only `llvm/lib/Target/AMDGPU/` or
+`llvm/lib/Target/SPIRV/`. Those Target paths, when present, are what get
+recorded as the PR's backend(s); otherwise the PR's `backend:AMDGPU` /
+`backend:SPIR-V` labels are used. If `--auto` would skip (tests, docs, and
+other non-lib changes only), pass one or more `--backend {amdgpu,spirv}`
+flags to dispatch anyway:
 
 ```bash
 python3 "$SCAN" run --state "$STATE" --pr <N> --backend amdgpu \
@@ -70,8 +72,7 @@ python3 "$SCAN" process  --state "$STATE" --artifacts-dir "$ARTIFACTS" \
   --out-dir "$COMMENTS" --poll-interval 60
 ```
 
-Output is `$COMMENTS/pr-<N>.md` if the PR has uncovered
-lines, or nothing if it doesn't. As with pr-gap-scan, this is a **draft only**
-— review it and post it yourself with `gh pr comment <N> -R llvm/llvm-project
---body-file "$COMMENTS/pr-<N>.md"`; always confirm with the user before
-posting to someone else's PR.
+Output is `$COMMENTS/pr-<N>.md` if the PR has uncovered lines, or nothing if
+it doesn't. As with pr-gap-scan, this is a **local draft only**. The agent
+does not post it to GitHub, does not run `gh pr comment`, and does not offer
+to publish it — leave the file for the user to review.
