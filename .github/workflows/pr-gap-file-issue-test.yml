@@ -35,6 +35,7 @@ jobs:
       actions: write
     env:
       GH_TOKEN: ${{ github.token }}
+      ACTOR: ${{ github.actor }}
       PR_ID: "232795"
       GITHUB_REPO: llvm/llvm-project
     steps:
@@ -106,7 +107,7 @@ jobs:
       - name: File or comment on fuzz-fill issue
         run: |
           .github/scripts/pr-gap-file-issue.sh \
-            --actor "${{ github.actor }}" \
+            --actor "$ACTOR" \
             --repo "${{ github.repository }}" \
             --artifact-dir "${RUNNER_TEMP}/gap-finding-results" \
             --run-id "${{ github.run_id }}" \
