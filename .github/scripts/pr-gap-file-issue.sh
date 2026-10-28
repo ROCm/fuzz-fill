@@ -83,7 +83,10 @@ if [[ -z "$pr_id" || -z "$github_repo" || -z "$pr_head" ]]; then
     exit 1
 fi
 
-tracking_key="Tracking-PR: ${github_repo}/pull/${pr_id}"
+# redirect.github.com so GitHub does not autolink this into a backlink on the target PR.
+# The plain path is the form already written on earlier issues; keep matching it.
+tracking_key="Tracking-PR: https://redirect.github.com/${github_repo}/pull/${pr_id}"
+legacy_tracking_key="Tracking-PR: ${github_repo}/pull/${pr_id}"
 workflow_run_key="Workflow-Run: ${RUN_ID}"
 short_sha="${pr_head:0:12}"
 issue_title="PR Analysis: ${github_repo} pull ${pr_id}"
@@ -159,8 +162,8 @@ find_open_issue() {
                 oldest="$match"
             fi
         done < <(
-            printf '%s' "$batch" | jq -r --arg key "$tracking_key" \
-                '.[] | select((.body // "") | contains($key)) | .number'
+            printf '%s' "$batch" | jq -r --arg key "$tracking_key" --arg legacy "$legacy_tracking_key" \
+                '.[] | select((.body // "") | contains($key) or contains($legacy)) | .number'
         )
         if [[ "$len" -lt "$per_page" ]]; then
             break
@@ -287,7 +290,7 @@ build_body() {
     body+=">"$'\n'
     body+="> fuzz-fill finds coverage gaps in the analyzed change using SanitizerCoverage instrumentation and it may not report every uncovered line. Failures in the LLVM test suite could potentially also leave the coverage analysis incomplete."$'\n'
     body+=">"$'\n'
-    body+="> Separately, in rare instances, some reported gaps may not be true gaps when a special LLVM configuration we do not enable would unlock particular tests that cover the gap (for example building an extra runtime). That is uncommon for typical PRs: we usually build all backends (and Clang when necessary) and run the full test suite. Broader build support is possible — tell us if that would help."$'\n'
+    body+="> Some reported gaps are covered only by a build setting we may leave off, such as an extra runtime. That is uncommon for typical PRs: we usually build all backends (and Clang when necessary) and run the full test suite. Broader build support is possible — tell us if that would help."$'\n'
     body+=$'\n'
 
     body+="${tracking_key}"$'\n'
