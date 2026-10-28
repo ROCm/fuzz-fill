@@ -1,0 +1,113 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# Smoke test for pr-gap-file-issue.sh. Does not build LLVM.
+# Hardcoded for llvm/llvm-project pull 232795 (head 7d05aa64ada6, one
+# uncovered line from the 2026-10-27 gap-finding run). The HTML artifact
+# is a stub.
+#
+# The pull_request trigger only exists so GitHub will run this file before
+# it is on main. REMOVE that trigger, and this workflow, once filing has
+# been checked.
+
+name: PR gap issue filing test
+run-name: PR gap issue filing test - llvm/llvm-project pull 232795 by ${{ github.actor }}
+
+on:
+  # Temporary. REMOVE once this file is on main.
+  pull_request:
+    paths:
+      - .github/workflows/pr-gap-file-issue-test.yml
+      - .github/scripts/pr-gap-file-issue.sh
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  file-test-issue:
+    name: File test issue
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_ID: "232795"
+      GITHUB_REPO: llvm/llvm-project
+    steps:
+      - name: Checkout fuzz-fill
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Stage stub gap-finding results
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/gap-finding-results"
+          mkdir -p "${stage}/out/commit_lines_report" "${RUNNER_TEMP}/html"
+          {
+            echo "PR gap finding report"
+            echo "pr_id: ${PR_ID}"
+            echo "github_repo: ${GITHUB_REPO}"
+            echo "gap_scope_action: run"
+            echo "generate_html: true"
+            echo "pr_head: 7d05aa64ada65194dfa70b68921b7020e0fd6e2b"
+            echo "pr_head_ref: users/mgcarrasco/nsdi-debug-lexical-discriminator"
+            echo "workflow_run: ${GITHUB_RUN_ID}"
+          } > "${stage}/README-finding.txt"
+          {
+            echo "file,line,text"
+            echo "/work/pr-llvm/llvm/lib/Target/SPIRV/SPIRVNonSemanticDebugHandler.cpp,1133,    return EmitResult<PreparedScope>::failure(Parent);"
+          } > "${stage}/out/commit_lines_report/target_lines_uncovered_pruned.csv"
+          echo "<!DOCTYPE html><title>filing test</title><p>stub HTML report</p>" \
+            > "${RUNNER_TEMP}/html/index.html"
+
+      - name: Upload stub results artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gap-finding-results-pr232795-${{ github.run_id }}
+          path: ${{ runner.temp }}/gap-finding-results
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload stub HTML coverage report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: html-coverage-pr232795-${{ github.run_id }}
+          path: ${{ runner.temp }}/html
+          compression-level: 9
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Wait until artifacts are listed
+        run: |
+          set -euo pipefail
+          results_name="gap-finding-results-pr${PR_ID}-${GITHUB_RUN_ID}"
+          html_name="html-coverage-pr${PR_ID}-${GITHUB_RUN_ID}"
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            listed="$(
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+                --jq '[.artifacts[] | select(.expired == false) | .name] | join("\n")'
+            )"
+            if printf '%s\n' "$listed" | grep -Fxq "$results_name" \
+                && printf '%s\n' "$listed" | grep -Fxq "$html_name"; then
+              echo "artifacts listed:"
+              printf '%s\n' "$listed"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "error: stub artifacts were not listed for this run" >&2
+          exit 1
+
+      - name: File or comment on fuzz-fill issue
+        run: |
+          .github/scripts/pr-gap-file-issue.sh \
+            --actor "${{ github.actor }}" \
+            --repo "${{ github.repository }}" \
+            --artifact-dir "${RUNNER_TEMP}/gap-finding-results" \
+            --run-id "${{ github.run_id }}" \
+            --server-url "${{ github.server_url }}"

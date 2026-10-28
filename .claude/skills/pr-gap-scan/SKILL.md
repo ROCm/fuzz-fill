@@ -166,6 +166,11 @@ re-run the analysis (drift), double-check the failing tests (LIT), or confirm
 the base branch/PR is settled (stacked) before trusting the findings.
 Otherwise, review each `pr-<N>.md` and leave the drafts for the user.
 
+Separately, a successful `pr-gap-analysis.yml` run may open or comment on a
+`pr-analysis-result` issue on fuzz-fill (internal tracking with artifact
+links). That issue is not an LLVM review comment and does not satisfy the
+already-reviewed filter on llvm/llvm-project.
+
 ## Comment template
 
 Each `pr-<N>.md` starts with a title line (not part of the comment itself —
@@ -282,7 +287,8 @@ this PR's head commit) has no way to catch it.
 - The already-commented filter matches any comment (any author) whose body
   contains "fuzz-fill" case-insensitively — adjust
   `already_reviewed_without_new_commits()` in `scan.py` if fuzz-fill comments
-  should instead be identified by a specific bot account.
+  should instead be identified by a specific bot account. A
+  `pr-analysis-result` issue on the fuzz-fill repo is not such a comment.
 - The workflow currently only exists on the `users/mgcarrasco/manual-workflow`
   branch of `ROCm/fuzz-fill` (`--ref` default). Update the default (or pass
   `--ref main`) once `pr-gap-analysis.yml` merges to `main`.
