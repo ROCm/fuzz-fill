@@ -22,6 +22,27 @@ import sys
 import tempfile
 import time
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Max concurrent `gh api` subprocesses for per-PR discovery fetches. These are
+# independent GETs against non-search REST endpoints (5000/hr limit), so
+# running them concurrently is safe; kept modest to avoid hammering the API.
+PR_FETCH_WORKERS = 8
+
+# Discovery only looks at PRs updated in the last N days. A PR nobody has
+# touched in over a week is unlikely to be worth reviewing first, and
+# narrowing the search query itself (not just truncating results after the
+# fact) is what actually cuts the number of /pulls/<n> and /pulls/<n>/files
+# calls discovery has to pay for.
+DISCOVERY_WINDOW_DAYS = 7
+
+# Backstop on how many PRs a single label search will scan before giving up,
+# even if max_scan_pages/quota would allow more. Some labels (e.g.
+# llvm:transforms, backend:AMDGPU) carry 400-1000+ open PRs even within the
+# 7-day window, and discover_group() only ranks after scanning everything, so
+# without this a single busy label can burn hundreds of API calls. Logged
+# when it triggers so the coverage loss is visible, not silent.
+PER_LABEL_SCAN_CAP = 30
 
 DEFAULT_LLVM_REPO = "llvm/llvm-project"
 DEFAULT_FUZZ_FILL_REPO = os.environ.get("FUZZ_FILL_GITHUB_REPO", "ROCm/fuzz-fill")
@@ -148,11 +169,28 @@ def check_gh():
         sys.exit("error: gh CLI is required (https://cli.github.com/)")
 
 
-def gh_api_json(path):
-    result = subprocess.run(
-        ["gh", "api", path], capture_output=True, text=True, check=True
-    )
-    return json.loads(result.stdout)
+def gh_api_json(path, retries=5, backoff=2.0):
+    """GET `path` via `gh api`, retrying transient failures.
+
+    Concurrent discovery (_prefetch_pr_cores/_prefetch_reviewed) fires several
+    of these at once, which makes hitting GitHub's secondary rate limit or a
+    one-off network blip more likely than the old fully-serial callers did --
+    without a retry, one flaky call aborts an entire multi-category discover()
+    and throws away everything already fetched (discover only saves to
+    --state once, at the end).
+    """
+    last_err = None
+    for attempt in range(retries):
+        result = subprocess.run(["gh", "api", path], capture_output=True, text=True)
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+        last_err = (result.stderr or result.stdout or "").strip()
+        if attempt < retries - 1:
+            delay = backoff * (2 ** attempt)
+            log(f"warning: gh api {path!r} failed (attempt {attempt + 1}/{retries}): "
+                f"{last_err} -- retrying in {delay:.0f}s")
+            time.sleep(delay)
+    raise RuntimeError(f"gh api {path!r} failed after {retries} attempts: {last_err}")
 
 
 def gh_api_paginated(path, per_page=100, max_pages=50):
@@ -170,9 +208,20 @@ def gh_api_paginated(path, per_page=100, max_pages=50):
     return items
 
 
-def search_open_prs_by_label(llvm_repo, label, per_page, page):
-    """One page of open PRs carrying `label`, most-recently-updated first."""
+def _since_date(days):
+    """YYYY-MM-DD `days` ago (UTC), for a search `updated:>=` qualifier."""
+    return time.strftime("%Y-%m-%d", time.gmtime(time.time() - days * 86400))
+
+
+def search_open_prs_by_label(llvm_repo, label, per_page, page, since_date=None):
+    """One page of open PRs carrying `label`, most-recently-updated first.
+
+    `since_date` (YYYY-MM-DD) restricts to PRs updated on/after that date --
+    narrowing the search query itself, not just how many results are kept.
+    """
     q = f'repo:{llvm_repo} is:pr is:open label:"{label}"'
+    if since_date:
+        q += f" updated:>={since_date}"
     data = gh_api_json(
         f"search/issues?q={urllib.parse.quote(q)}&sort=updated&order=desc"
         f"&per_page={per_page}&page={page}"
@@ -307,7 +356,51 @@ def already_reviewed_without_new_commits(llvm_repo, number):
     return last_commit_at <= last_comment_at
 
 
-def discover(llvm_repo, limit, max_scan_pages=20, per_page=50, backends=None):
+def _fetch_pr_core(llvm_repo, number):
+    """One PR's metadata + changed files -- the two calls every discovery
+    path needs regardless of category. Independent of any other PR, so safe
+    to run from a worker thread."""
+    pr = gh_api_json(f"repos/{llvm_repo}/pulls/{number}")
+    files = gh_api_paginated(f"repos/{llvm_repo}/pulls/{number}/files")
+    return {
+        "pr": pr,
+        "files": files,
+        "filenames": [f["filename"] for f in files],
+        "label_names": {label["name"] for label in pr.get("labels", [])},
+    }
+
+
+def _prefetch_pr_cores(llvm_repo, numbers, cache, max_workers=PR_FETCH_WORKERS):
+    """Populate `cache[number]` (a _fetch_pr_core() result) for any of
+    `numbers` not already cached, fetching concurrently. `cache` may already
+    hold entries from a different category's pass over an overlapping PR."""
+    todo = [n for n in numbers if n not in cache]
+    if not todo:
+        return
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(todo))) as pool:
+        futures = {pool.submit(_fetch_pr_core, llvm_repo, n): n for n in todo}
+        for future in as_completed(futures):
+            cache[futures[future]] = future.result()
+
+
+def _prefetch_reviewed(llvm_repo, numbers, reviewed_cache, max_workers=PR_FETCH_WORKERS):
+    """Populate `reviewed_cache[number]` (already_reviewed_without_new_commits()
+    result) concurrently for any of `numbers` not already cached."""
+    todo = [n for n in numbers if n not in reviewed_cache]
+    if not todo:
+        return
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(todo))) as pool:
+        futures = {
+            pool.submit(already_reviewed_without_new_commits, llvm_repo, n): n
+            for n in todo
+        }
+        for future in as_completed(futures):
+            reviewed_cache[futures[future]] = future.result()
+
+
+def discover(llvm_repo, limit, max_scan_pages=20, per_page=50, backends=None,
+             pr_cache=None, reviewed_cache=None, since_days=DISCOVERY_WINDOW_DAYS,
+             per_label_scan_cap=PER_LABEL_SCAN_CAP):
     """Find up to `limit` most-recently-updated candidate PRs per backend.
 
     Each requested backend (default: both amdgpu and spirv) gets its own
@@ -324,7 +417,12 @@ def discover(llvm_repo, limit, max_scan_pages=20, per_page=50, backends=None):
     limit. A PR found under one backend's label search is only processed
     once even if it also carries another requested backend's label.
     """
+    if pr_cache is None:
+        pr_cache = {}
+    if reviewed_cache is None:
+        reviewed_cache = {}
     requested = set(backends) if backends else set(BACKEND_PATH_RES)
+    since_date = _since_date(since_days) if since_days else None
     candidates = []
     counts = {backend: 0 for backend in requested}
     seen = set()
@@ -332,33 +430,47 @@ def discover(llvm_repo, limit, max_scan_pages=20, per_page=50, backends=None):
     for backend in sorted(requested):
         label = BACKEND_LABELS[backend]
         page = 1
+        label_scanned = 0
         while counts[backend] < limit and page <= max_scan_pages:
-            items = search_open_prs_by_label(llvm_repo, label, per_page, page)
+            if label_scanned >= per_label_scan_cap:
+                log(
+                    f"stop scanning label {label!r}: hit per-label cap "
+                    f"({per_label_scan_cap}) before filling backend={backend} quota"
+                )
+                break
+            items = search_open_prs_by_label(llvm_repo, label, per_page, page, since_date)
             if not items:
                 break
-            for item in items:
-                number = item["number"]
-                if number in seen:
-                    continue
-                seen.add(number)
-                scanned += 1
-                pr = gh_api_json(f"repos/{llvm_repo}/pulls/{number}")
-                files = gh_api_paginated(f"repos/{llvm_repo}/pulls/{number}/files")
-                filenames = [f["filename"] for f in files]
+            page_numbers = [item["number"] for item in items if item["number"] not in seen]
+            seen.update(page_numbers)
+            scanned += len(page_numbers)
+            label_scanned += len(page_numbers)
+            # Fetch the whole page's PR metadata + files concurrently -- the
+            # two calls every item needs regardless of quota/filter outcome,
+            # and cached so a PR shared with another category isn't refetched.
+            _prefetch_pr_cores(llvm_repo, page_numbers, pr_cache)
+            # The quota check below depends on live `counts`, which only
+            # advances as earlier items in this same page are committed, so
+            # this pass (and the already-reviewed check it gates) stays
+            # sequential -- only the network fetch above was parallelized.
+            for number in page_numbers:
+                core = pr_cache[number]
+                pr, filenames, label_names = core["pr"], core["filenames"], core["label_names"]
                 if not auto_would_run(filenames):
                     log(
                         f"skip PR #{number}: --auto would skip "
                         "(no non-test llvm/lib or clang/lib changes)"
                     )
                     continue
-                label_names = {label["name"] for label in pr.get("labels", [])}
                 attributed = attribute_backends(filenames, label_names, requested)
                 if not attributed and backend in requested:
                     attributed = [backend]
                 backends_hit = [b for b in attributed if counts[b] < limit]
                 if not backends_hit:
                     continue
-                if already_reviewed_without_new_commits(llvm_repo, number):
+                if number not in reviewed_cache:
+                    reviewed_cache[number] = already_reviewed_without_new_commits(llvm_repo, number)
+                if reviewed_cache[number]:
                     log(f"skip PR #{number}: already reviewed, no new commits since")
                     continue
                 candidates.append(
@@ -384,7 +496,9 @@ def discover(llvm_repo, limit, max_scan_pages=20, per_page=50, backends=None):
     return candidates
 
 
-def discover_group(llvm_repo, group, limit, max_scan_pages=20, per_page=50):
+def discover_group(llvm_repo, group, limit, max_scan_pages=20, per_page=50,
+                    pr_cache=None, reviewed_cache=None, since_days=DISCOVERY_WINDOW_DAYS,
+                    per_label_scan_cap=PER_LABEL_SCAN_CAP):
     """Find up to `limit` open PRs for a shared llvm/clang quota.
 
     Searches every label in GROUP_CONFIGS[group], dedupes, keeps PRs that
@@ -395,41 +509,60 @@ def discover_group(llvm_repo, group, limit, max_scan_pages=20, per_page=50):
     """
     if group not in GROUP_CONFIGS:
         sys.exit(f"error: unknown group {group!r}; choose from {sorted(GROUP_CONFIGS)}")
+    if pr_cache is None:
+        pr_cache = {}
+    if reviewed_cache is None:
+        reviewed_cache = {}
     config = GROUP_CONFIGS[group]
     labels = config["labels"]
     lib_prefixes = config["lib_prefixes"]
+    since_date = _since_date(since_days) if since_days else None
     seen = set()
     scanned = 0
     eligible = []
     for label in labels:
         page = 1
+        label_scanned = 0
         while page <= max_scan_pages:
-            items = search_open_prs_by_label(llvm_repo, label, per_page, page)
+            if label_scanned >= per_label_scan_cap:
+                log(
+                    f"stop scanning label {label!r}: hit per-label cap "
+                    f"({per_label_scan_cap}) for group={group}"
+                )
+                break
+            items = search_open_prs_by_label(llvm_repo, label, per_page, page, since_date)
             if not items:
                 break
-            for item in items:
-                number = item["number"]
-                if number in seen:
-                    continue
-                seen.add(number)
-                scanned += 1
-                pr = gh_api_json(f"repos/{llvm_repo}/pulls/{number}")
-                files = gh_api_paginated(f"repos/{llvm_repo}/pulls/{number}/files")
-                filenames = [f["filename"] for f in files]
-                if not group_has_lib_change(filenames, lib_prefixes):
+            page_numbers = [item["number"] for item in items if item["number"] not in seen]
+            seen.update(page_numbers)
+            scanned += len(page_numbers)
+            label_scanned += len(page_numbers)
+            # Unlike discover(), eligibility here never depends on processing
+            # order (top-N-by-size selection happens after every PR in every
+            # label is collected), so both the metadata fetch and the
+            # already-reviewed check can run fully concurrently per page.
+            _prefetch_pr_cores(llvm_repo, page_numbers, pr_cache)
+            lib_changed = [
+                n for n in page_numbers
+                if group_has_lib_change(pr_cache[n]["filenames"], lib_prefixes)
+            ]
+            lib_changed_set = set(lib_changed)
+            for number in page_numbers:
+                if number not in lib_changed_set:
                     log(
                         f"skip PR #{number}: no non-test change under "
                         f"{'/'.join(lib_prefixes)}"
                     )
-                    continue
-                if already_reviewed_without_new_commits(llvm_repo, number):
+            _prefetch_reviewed(llvm_repo, lib_changed, reviewed_cache)
+            for number in lib_changed:
+                if reviewed_cache[number]:
                     log(f"skip PR #{number}: already reviewed, no new commits since")
                     continue
+                core = pr_cache[number]
+                pr, files = core["pr"], core["files"]
                 size = lib_diff_size(files, lib_prefixes)
                 label_names = sorted(
-                    name
-                    for name in {lab["name"] for lab in pr.get("labels", [])}
-                    if name in labels
+                    name for name in core["label_names"] if name in labels
                 )
                 eligible.append(
                     {
@@ -510,12 +643,21 @@ def merge_candidates_by_number(candidate_lists):
     return [by_number[n] for n in sorted(by_number)]
 
 
-def discover_categories(llvm_repo, categories, limit, max_scan_pages=20, per_page=50):
+def discover_categories(llvm_repo, categories, limit, max_scan_pages=20, per_page=50,
+                         on_category_done=None, since_days=DISCOVERY_WINDOW_DAYS,
+                         per_label_scan_cap=PER_LABEL_SCAN_CAP):
     """Run each category's discover with its own ``limit``, then dedupe by PR.
 
     Backend categories (amdgpu/spirv) use label + --auto path gates. Group
     categories (llvm/clang) use their lib-path gates and largest-lib-diff
     ranking. A PR selected by more than one category is kept once.
+
+    If `on_category_done` is given, it's called with the merge-so-far after
+    each category finishes (e.g. to checkpoint --state to disk) -- a single
+    category can need hundreds of GitHub API calls (discover_group scans
+    every eligible PR before ranking), so without a mid-run checkpoint, one
+    failure anywhere (rate limit, network blip) throws away every category
+    that already completed.
     """
     requested = []
     seen = set()
@@ -533,22 +675,35 @@ def discover_categories(llvm_repo, categories, limit, max_scan_pages=20, per_pag
             f"{unknown}; choose from {list(CATEGORY_CHOICES)}"
         )
 
+    # Shared across every category in this call: a PR that matches more than
+    # one (e.g. carries both backend:AMDGPU and backend:SPIR-V, or an AMDGPU
+    # PR that also touches llvm/lib/Transforms/) gets its metadata/files and
+    # already-reviewed status fetched once total, not once per category.
+    pr_cache = {}
+    reviewed_cache = {}
+
     per_category = []
     for cat in requested:
         if cat in BACKEND_LABELS:
             found = discover(
-                llvm_repo, limit, max_scan_pages, per_page=per_page, backends=[cat]
+                llvm_repo, limit, max_scan_pages, per_page=per_page, backends=[cat],
+                pr_cache=pr_cache, reviewed_cache=reviewed_cache,
+                since_days=since_days, per_label_scan_cap=per_label_scan_cap,
             )
             for cand in found:
                 cand.setdefault("categories", list(cand.get("backends") or [cat]))
         else:
             found = discover_group(
-                llvm_repo, cat, limit, max_scan_pages, per_page=per_page
+                llvm_repo, cat, limit, max_scan_pages, per_page=per_page,
+                pr_cache=pr_cache, reviewed_cache=reviewed_cache,
+                since_days=since_days, per_label_scan_cap=per_label_scan_cap,
             )
             for cand in found:
                 cand.setdefault("categories", [cat])
         per_category.append(found)
         log(f"category {cat}: selected {len(found)} PR(s) (limit={limit})")
+        if on_category_done is not None:
+            on_category_done(merge_candidates_by_number(per_category))
 
     merged = merge_candidates_by_number(per_category)
     overlap = sum(1 for c in merged if len(c.get("categories") or []) > 1)
@@ -588,11 +743,17 @@ def resolve_discover(
     backends=None,
     group=None,
     categories=None,
+    on_category_done=None,
+    since_days=DISCOVERY_WINDOW_DAYS,
+    per_label_scan_cap=PER_LABEL_SCAN_CAP,
 ):
     cats = normalize_categories(categories, backends, group)
     if not cats:
         cats = list(DEFAULT_CATEGORIES)
-    return discover_categories(llvm_repo, cats, limit, max_scan_pages)
+    return discover_categories(
+        llvm_repo, cats, limit, max_scan_pages, on_category_done=on_category_done,
+        since_days=since_days, per_label_scan_cap=per_label_scan_cap,
+    )
 
 
 def target_one(state, state_path, llvm_repo, number, backend_override=None):
@@ -1086,6 +1247,11 @@ def add_common_args(p):
 
 def cmd_discover(args):
     state = load_state(args.state)
+
+    def checkpoint(partial):
+        state["candidates"] = partial
+        save_state(state, args.state)
+
     state["candidates"] = resolve_discover(
         args.llvm_repo,
         args.limit,
@@ -1093,6 +1259,9 @@ def cmd_discover(args):
         backends=args.backend,
         group=getattr(args, "group", None),
         categories=getattr(args, "category", None),
+        on_category_done=checkpoint,
+        since_days=args.since_days,
+        per_label_scan_cap=args.scan_cap,
     )
     save_state(state, args.state)
 
@@ -1132,6 +1301,10 @@ def cmd_run(args):
             )
         target_one(state, args.state, args.llvm_repo, args.pr, args.backend)
     elif not state["candidates"]:
+        def checkpoint(partial):
+            state["candidates"] = partial
+            save_state(state, args.state)
+
         state["candidates"] = resolve_discover(
             args.llvm_repo,
             args.limit,
@@ -1139,6 +1312,9 @@ def cmd_run(args):
             backends=args.backend,
             group=getattr(args, "group", None),
             categories=getattr(args, "category", None),
+            on_category_done=checkpoint,
+            since_days=args.since_days,
+            per_label_scan_cap=args.scan_cap,
         )
         save_state(state, args.state)
     dispatch(state, args.state, args.fuzz_fill_repo, args.ref, args.llvm_repo)
@@ -1176,6 +1352,24 @@ def add_discover_scope_args(p):
         help="Max candidates to keep per category (default: 20)",
     )
     p.add_argument("--max-scan-pages", type=int, default=20)
+    p.add_argument(
+        "--since-days",
+        type=int,
+        default=DISCOVERY_WINDOW_DAYS,
+        help=(
+            "Only scan PRs updated in the last N days (0 disables the window; "
+            f"default: {DISCOVERY_WINDOW_DAYS})"
+        ),
+    )
+    p.add_argument(
+        "--scan-cap",
+        type=int,
+        default=PER_LABEL_SCAN_CAP,
+        help=(
+            "Stop scanning a single label after this many PRs, even if quota/"
+            f"max-scan-pages would allow more (default: {PER_LABEL_SCAN_CAP})"
+        ),
+    )
 
 
 def main():
