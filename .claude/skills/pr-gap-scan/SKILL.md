@@ -175,7 +175,7 @@ message:
 ```
 # [#218649](https://github.com/llvm/llvm-project/pull/218649) — [AMDGPU] MC support for indexed VBUFFER resources for gfx13
 
-Hi! This comment was generated using [fuzz-fill](https://github.com/ROCm/fuzz-fill), a new tool we're building to help improve LLVM test coverage by spotting lines introduced in a PR that don't yet appear to be exercised by the full test suite, including any tests added in this PR.
+Hi! This comment was generated using [fuzz-fill](https://github.com/ROCm/fuzz-fill), a new tool we're building to help improve LLVM test coverage by spotting lines introduced in a PR that don't yet appear to be exercised by the full test suite, including any tests added in this PR. After manually reviewing the findings, they look worth sharing.
 
 Looking at PR head 9f967d998a20, we found 1 line added or modified here that we couldn't find a test for:
 

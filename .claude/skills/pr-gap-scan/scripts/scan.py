@@ -146,7 +146,8 @@ COMMENT_TEMPLATE = """\
 Hi! This comment was generated using [fuzz-fill](https://github.com/ROCm/fuzz-fill), \
 a new tool we're building to help improve LLVM test coverage by spotting lines \
 introduced in a PR that don't yet appear to be exercised by the full test suite, \
-including any tests added in this PR.
+including any tests added in this PR. After manually reviewing the findings, \
+they look worth sharing.
 
 Looking at PR head {short_sha}, we found {count} line{plural} added or modified \
 here that we couldn't find a test for:
