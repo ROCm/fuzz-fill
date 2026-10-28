@@ -39,6 +39,13 @@ on:
         required: false
         type: boolean
         default: true
+      file_issue:
+        description: >-
+          File or update a fuzz-fill pr-analysis-result issue for this PR
+          (comment while open; create if none). On by default.
+        required: false
+        type: boolean
+        default: true
 
 defaults:
   run:
@@ -46,7 +53,6 @@ defaults:
 
 permissions:
   contents: read
-  actions: write
 
 env:
   DEBIAN_FRONTEND: noninteractive
@@ -72,6 +78,9 @@ jobs:
     name: PR gap analysis
     runs-on: aws-linux-scale-rocm-medium
     timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: write
     container:
       image: ubuntu:24.04
     env:
@@ -354,3 +363,36 @@ jobs:
           compression-level: 9
           retention-days: 7
           if-no-files-found: error
+
+  file-pr-analysis-issue:
+    name: File PR analysis issue
+    needs: pr-gap-analysis
+    if: success() && inputs.file_issue
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ACTOR: ${{ github.actor }}
+    steps:
+      - name: Checkout fuzz-fill
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download gap finding results
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: gap-finding-results-pr${{ inputs.pr_id }}-${{ github.run_id }}
+          path: /tmp/gap-finding-results
+
+      - name: File or comment on fuzz-fill issue
+        run: |
+          .github/scripts/pr-gap-file-issue.sh \
+            --actor "$ACTOR" \
+            --repo "${{ github.repository }}" \
+            --artifact-dir /tmp/gap-finding-results \
+            --run-id "${{ github.run_id }}" \
+            --server-url "${{ github.server_url }}"
