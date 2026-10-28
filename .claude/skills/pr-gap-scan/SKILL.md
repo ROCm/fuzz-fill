@@ -181,7 +181,7 @@ Looking at PR head 9f967d998a20, we found 1 line added or modified here that we 
 
 1. https://github.com/llvm/llvm-project/blob/9f967d998a2073e2e3c3c527a49f2e2bf26c391d/llvm/lib/Target/AMDGPU/AMDGPUISelDAGToDAG.cpp#L4405
 
-If it makes sense, adding a regression test that validates these lines would be great. And if any of them are already tested and we missed it, we'd love to hear so we can improve the tool. Feel free to give us some feedback on whether this review was useful from your perspective. Thanks!
+If it makes sense, adding a test that validates these lines would be great. And if any of them are already tested and we missed it, we'd love to hear so we can improve the tool. Feel free to give us some feedback on whether this review was useful from your perspective. Thanks!
 ```
 
 The prose uses the short (12-char) SHA, deliberately without backticks —

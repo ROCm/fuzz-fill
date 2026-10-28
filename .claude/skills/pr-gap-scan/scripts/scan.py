@@ -153,7 +153,7 @@ here that we couldn't find a test for:
 
 {links}
 
-If it makes sense, adding a regression test that validates these lines would be \
+If it makes sense, adding a test that validates these lines would be \
 great. And if any of them are already tested and we missed it, we'd love to hear \
 so we can improve the tool. Feel free to give us some feedback on whether this \
 review was useful from your perspective. Thanks!
