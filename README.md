@@ -947,3 +947,16 @@ Lines added or changed in LLVM pull requests that baseline coverage (including t
 | 2026-08-05 | [#213986](https://github.com/llvm/llvm-project/pull/213986#issuecomment-5193921835) | [OpenCL][Clang] Add support for cooperative matrix extension |
 | 2026-08-25 | [#215794](https://github.com/llvm/llvm-project/pull/215794#issuecomment-5412012574) | [SPIR-V] Preserve constexpr vectors as OpSpecConstantComposite |
 | 2026-08-27 | [#217965](https://github.com/llvm/llvm-project/pull/217965#pullrequestreview-5039288121) | [SPIR-V] Add support for DebugLexicalBlock |
+
+#### LLVM
+
+| Date | PR | Summary |
+|------|-----|---------|
+| 2026-10-28 | [#180039](https://github.com/llvm/llvm-project/pull/180039#issuecomment-6466665410) | [LV] Use speculative load intrinsics for early-exit vectorization |
+| 2026-10-28 | [#214491](https://github.com/llvm/llvm-project/pull/214491#issuecomment-6467369003) | [LoopVectorize] Support vectorization of compressing patterns |
+
+#### Clang
+
+| Date | PR | Summary |
+|------|-----|---------|
+| 2026-10-28 | [#199808](https://github.com/llvm/llvm-project/pull/199808#issuecomment-6466835037) | [clang] Make __builtin_exp and __builtin_expf constexpr. |
