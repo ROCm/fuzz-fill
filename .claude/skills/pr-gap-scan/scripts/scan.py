@@ -112,10 +112,14 @@ DEFAULT_CATEGORIES = ("amdgpu", "spirv")
 # Expected artifact naming from pr-gap-analysis.yml -- used to detect a
 # reusable prior run's artifacts, and to notice if the workflow's naming
 # convention has drifted out from under this check. Finding runs always
-# upload results; raw (all baseline CSVs) is opt-in via upload_raw.
+# upload results; raw (all baseline CSVs) and instrumented tools are
+# opt-in via upload_raw / upload_tools.
 FINDING_RESULTS_ARTIFACT_RE = re.compile(r"^gap-finding-results-pr(\d+)-(\d+)$")
 FINDING_RAW_ARTIFACT_RE = re.compile(r"^gap-finding-raw-pr(\d+)-(\d+)$")
 PR_HEAD_ARTIFACT_RE = re.compile(r"^pr-head-pr(\d+)-(\d+)$")
+INSTRUMENTED_TOOLS_ARTIFACT_RE = re.compile(
+    r"^instrumented-tools-pr(\d+)-(\d+)$"
+)
 
 
 def _is_expected_artifact_name(name):
@@ -123,6 +127,7 @@ def _is_expected_artifact_name(name):
         FINDING_RESULTS_ARTIFACT_RE.match(name)
         or FINDING_RAW_ARTIFACT_RE.match(name)
         or PR_HEAD_ARTIFACT_RE.match(name)
+        or INSTRUMENTED_TOOLS_ARTIFACT_RE.match(name)
     )
 
 

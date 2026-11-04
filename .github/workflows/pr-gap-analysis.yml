@@ -34,6 +34,13 @@ on:
         required: false
         type: boolean
         default: false
+      upload_tools:
+        description: >-
+          Upload instrumented opt/llc and Release sancov (large; ~1.2 GB
+          uncompressed, off by default)
+        required: false
+        type: boolean
+        default: false
       generate_html:
         description: Generate and upload a separate HTML coverage artifact
         required: false
@@ -59,6 +66,7 @@ env:
   WORK_ROOT: /work
   ARTIFACT_DIR: /work/artifact
   ARTIFACT_RAW_DIR: /work/artifact-raw
+  INSTRUMENTED_TOOLS_DIR: /work/instrumented-tools
   LLVM_APT_MAJOR: "24"
   LLVM_RELEASE_BIN: /usr/lib/llvm-24/bin
   LLVM_MIRROR_DIR: /work/llvm-mirror
@@ -227,6 +235,41 @@ jobs:
           build_args+=("$(nproc)")
           ./scripts/build-llvm-sancov.sh "${build_args[@]}"
 
+      - name: Stage instrumented tools artifact
+        if: inputs.upload_tools && steps.scope.outputs.action == 'run'
+        env:
+          SCOPE_BACKENDS: ${{ steps.scope.outputs.backends }}
+          SCOPE_ALLOWLIST: ${{ steps.scope.outputs.allowlist }}
+          ALLOW_INLINE: ${{ inputs.allow_inline }}
+        run: |
+          enable_projects=""
+          case "$(basename "${SCOPE_ALLOWLIST}")" in
+            allowlist-clang.txt|allowlist-llvm-clang.txt)
+              enable_projects="clang"
+              ;;
+          esac
+          chmod +x .github/scripts/stage-instrumented-tools.sh
+          .github/scripts/stage-instrumented-tools.sh \
+            --bin-dir "${PR_BUILD_BIN}" \
+            --llvm-dir "${PR_LLVM_DIR}" \
+            --commit-file "${SQUASH_COMMIT_FILE}" \
+            --out-dir "${INSTRUMENTED_TOOLS_DIR}" \
+            --github-repo "${INPUT_GITHUB_REPO}" \
+            --allowlist "${SCOPE_ALLOWLIST}" \
+            --targets "${SCOPE_BACKENDS}" \
+            --enable-projects "${enable_projects}" \
+            --allow-inline "${ALLOW_INLINE}"
+
+      - name: Upload instrumented tools artifact
+        if: inputs.upload_tools && steps.scope.outputs.action == 'run'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: instrumented-tools-pr${{ inputs.pr_id }}-${{ github.run_id }}
+          path: ${{ env.INSTRUMENTED_TOOLS_DIR }}
+          compression-level: 9
+          retention-days: 7
+          if-no-files-found: error
+
       - name: Show ccache stats
         if: always() && steps.scope.outputs.action == 'run'
         run: ccache --show-stats -v
@@ -310,6 +353,7 @@ jobs:
             echo "gap_scope_reason: ${{ steps.scope.outputs.reason }}"
             echo "allow_inline: ${{ inputs.allow_inline }}"
             echo "upload_raw: ${{ inputs.upload_raw }}"
+            echo "upload_tools: ${{ inputs.upload_tools }}"
             echo "generate_html: ${{ inputs.generate_html }}"
             echo "pr_head: ${pr_head}"
             echo "pr_head_ref: ${pr_head_ref}"
