@@ -13,11 +13,10 @@ name: Fill-line gateway ping
 
 on:
   workflow_dispatch:
-  # Path never matches: registers this workflow on PRs so it can be
-  # manually dispatched before the file lands on the default branch.
+  # Lets GitHub register this workflow from a PR/branch before it lands on
+  # the default branch. After one PR run appears in Actions, `gh workflow run
+  # --ref <branch>` works. The job below still only executes on dispatch.
   pull_request:
-    paths:
-      - '.github/workflows/.fill-line-ping-manual-only'
 
 defaults:
   run:
