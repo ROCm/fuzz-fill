@@ -38,7 +38,6 @@ Prerequisites:
 ```bash
 gh workflow run pr-gap-analysis.yml \
   -R ROCm/fuzz-fill \
-  --ref main \
   -f pr_id=229490
 ```
 
