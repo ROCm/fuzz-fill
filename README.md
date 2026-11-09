@@ -28,6 +28,19 @@ fuzz-fill identifies coverage gaps in LLVM:
 
 See [Contributions](#contributions) for tests contributed to LLVM.
 
+## Quick start (GitHub Actions)
+
+Run [PR gap finding](#gap-finding-pr) on an llvm-project pull request via the [`PR gap analysis`](.github/workflows/pr-gap-analysis.yml) workflow. It opens a `pr-analysis-result` issue on this repo and tags the requester. It does not comment on the LLVM PR or create cross-references or notifications there.
+
+Prerequisites:
+- [GitHub CLI](https://cli.github.com/) (`gh`) authenticated with permission to run workflows on [ROCm/fuzz-fill](https://github.com/ROCm/fuzz-fill)
+
+```bash
+gh workflow run pr-gap-analysis.yml \
+  -R ROCm/fuzz-fill \
+  -f pr_id=229490
+```
+
 ## Quick start (Docker)
 
 Try [PR gap finding](#gap-finding-pr), which reports lines changed in a PR or commit that are not covered by any LIT tests. Results are saved in `<output-dir>/commit_lines_report/target_lines_uncovered.csv`. See [Gap finding (PR)](#gap-finding-pr) and [Docker test image](#docker-test-image) for more options.
@@ -69,6 +82,7 @@ With `--build-image`, `--auto` chooses the backends, lit suites, and SanitizerCo
 
 ## Table of Contents
 
+- [Quick start (GitHub Actions)](#quick-start-github-actions)
 - [Quick start (Docker)](#quick-start-docker)
 - [Setup](#setup)
   - [Python environment](#python-environment)
