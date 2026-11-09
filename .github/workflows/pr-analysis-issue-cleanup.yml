@@ -1,0 +1,51 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+
+name: PR analysis issue cleanup
+
+on:
+  schedule:
+    # Daily at 07:00 UTC.
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: List issues that would be closed without closing them
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-analysis-issue-cleanup
+  cancel-in-progress: false
+
+jobs:
+  close-stale-issues:
+    name: Close issues for closed pull requests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Close stale pr-analysis-result issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          args=(--repo "$REPO")
+          if [[ "$DRY_RUN" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          .github/scripts/pr-gap-close-stale-issues.sh "${args[@]}"
