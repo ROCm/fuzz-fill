@@ -4,7 +4,8 @@ LLM agent that writes LIT tests for uncovered LLVM source lines, implemented in 
 
 ## fill-line
 
-`fill-line` receives a target line. Over a series of rounds it
+`fill-line` receives one or more target lines.
+Each LLM session still aims at a single line. Over a series of rounds it
 proposes `opt` or `llc` tests aimed at that line, uses nearby coverage to
 guide the next attempt, and picks the tool and flags from the PR diff and
 source.
@@ -42,6 +43,13 @@ cover it with the available tools, or when the budget is exhausted. When the
 agent accepts a test, a final step re-runs that test on the instrumented
 binary and confirms the target line, independently of the LLM.
 
+### Multiple targets
+
+Repeat `--target` for several lines. Each gets its own LLM session; after a
+session ends, any remaining line already covered by a prior run is skipped.
+Several targets write `summary.json` and `lines/<index>-…/`; optional
+`--max-*-total` caps apply across the whole batch.
+
 ### Tools (MCP)
 
 The agent has the following tools/actions available at each round.
@@ -73,8 +81,10 @@ session artifacts first.
 | `attempts/run_NNN.{ll,mir}` | Every candidate (with `Testing:` header) |
 | `test.{ll,mir}` | Accepted lit test (on success) |
 | `fuzz_fill.log` | Session log (`--log-to-file`) |
+| `summary.json` | Multi-target batch result |
+| `lines/<index>-…/` | Per-line outputs when several targets are given |
 
-Terminal statuses / exit codes:
+Terminal statuses / exit codes (single target):
 
 | Status | Exit | Meaning |
 |---|---|---|
@@ -83,19 +93,25 @@ Terminal statuses / exit codes:
 | `not_instrumented` | 2 | No tool instruments the target |
 | `likely_unreachable` | 3 | Unreachable with current tools (evidence-backed) |
 
+Multi-target exit codes: `0` if every line is covered (session or collateral),
+`2` if none are instrumented, `3` if every instrumented line is
+`likely_unreachable`, otherwise `1`. Each summary entry may set
+`covered_by` to `session` or `collateral`.
+
 ### Example
 
 ```bash
 ./venv/bin/fill-line \
   --target llvm/lib/Transforms/Scalar/StructurizeCFG.cpp:134 \
+  --target llvm/lib/Transforms/Scalar/StructurizeCFG.cpp:1381 \
   --llvm-src /path/to/llvm-project \
   --diff /path/to/pr.diff \
   --api-key "$KEY" \
   --base-url "$GATEWAY_URL" \
   --user-ntid "$USER_NTID" \
   --instrumented-bin-dir /path/to/instrumented-tools/bin \
-  --out-dir ./out-134 \
-  --work-dir ./work-134 \
+  --out-dir ./out-structurize \
+  --work-dir ./work-structurize \
   --tools-runner docker \
   --model sonnet \
   --effort low \
@@ -103,6 +119,7 @@ Terminal statuses / exit codes:
   --max-runs 40 \
   --max-turns 200 \
   --max-wall-s 1800 \
+  --max-wall-s-total 7200 \
   --log-level info \
   --log-to-file
 ```
@@ -111,8 +128,8 @@ To keep sessions short:
 
 - `--effort low` / `--thinking-tokens 0` — shorter replies
 - `--model haiku` — faster model for easy lines
-- `--max-wall-s` — hard time limit (recommended; USD cost may not report
-  through a custom gateway)
+- `--max-wall-s` / `--max-wall-s-total` — per-session and batch time limits
+  (recommended; USD cost may not report through a custom gateway)
 
 `check-line` re-runs an accepted test on the instrumented binary and checks
 whether a given line is covered, without calling the LLM. Useful when one test
@@ -141,6 +158,7 @@ scripts/fill-line/instrumented-tools/build.sh
 ```
 src/fill_line_agent/
   __main__.py             # fill-line CLI
+  batch.py                # multi-target loop helpers + total budgets
   check_line.py           # check-line CLI
   session.py              # SDK session loop + system prompt
   session_state.py        # quotas, analysis, budgets

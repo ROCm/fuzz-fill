@@ -299,6 +299,13 @@ class CoverageOracle:
         self.work_root.mkdir(parents=True, exist_ok=True)
         self._run_counter = 0
 
+    @property
+    def run_counter(self) -> int:
+        return self._run_counter
+
+    def set_run_counter(self, value: int) -> None:
+        self._run_counter = max(0, int(value))
+
     def tools_instrumenting(self) -> list[ToolName]:
         return [name for name, idx in self.indexes.items() if idx.is_instrumented(self.target)]
 
