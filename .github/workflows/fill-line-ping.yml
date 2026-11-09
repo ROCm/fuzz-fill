@@ -1,0 +1,69 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# Smoke-test the LLM gateway used by fill-line.
+# Credentials are read from repository secrets as env vars (no CLI flags).
+#
+# Required secrets (define later):
+#   FUZZ_FILL_API_KEY  — gateway subscription key
+#   FUZZ_FILL_BASE_URL — gateway base URL
+#   USER_NTID          — value for the gateway `user` header
+
+name: Fill-line gateway ping
+
+on:
+  workflow_dispatch:
+  # Path never matches: registers this workflow on PRs so it can be
+  # manually dispatched before the file lands on the default branch.
+  pull_request:
+    paths:
+      - '.github/workflows/.fill-line-ping-manual-only'
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: fill-line-ping-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      FUZZ_FILL_API_KEY: ${{ secrets.FUZZ_FILL_API_KEY }}
+      FUZZ_FILL_BASE_URL: ${{ secrets.FUZZ_FILL_BASE_URL }}
+      USER_NTID: ${{ secrets.USER_NTID }}
+
+    steps:
+      - name: Check secrets are configured
+        run: |
+          missing=()
+          [[ -n "${FUZZ_FILL_API_KEY}" ]] || missing+=(FUZZ_FILL_API_KEY)
+          [[ -n "${FUZZ_FILL_BASE_URL}" ]] || missing+=(FUZZ_FILL_BASE_URL)
+          [[ -n "${USER_NTID}" ]] || missing+=(USER_NTID)
+          if ((${#missing[@]})); then
+            echo "Missing repository secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install fill-line
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -U pip
+          .venv/bin/pip install '.[fill-line]'
+
+      - name: Ping gateway
+        run: .venv/bin/python -m fill_line_agent.ping

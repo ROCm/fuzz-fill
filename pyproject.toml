@@ -15,12 +15,23 @@ dependencies = [
     "orjson>=3.10",
 ]
 
+[project.optional-dependencies]
+fill-line = [
+    "claude-agent-sdk>=0.2.178",
+]
+# Alias for older install instructions (`pip install '.[agent]'`).
+agent = [
+    "claude-agent-sdk>=0.2.178",
+]
+
 [project.scripts]
 reduce = "reduce.__main__:main"
 llvm-test-suite-coverage = "coverage.__main__:main"
 added-lines = "added_lines.__main__:main"
 gap-pruner = "gap_pruner.__main__:main"
 gap-scope = "gap_scope.__main__:main"
+fill-line = "fill_line_agent.__main__:main"
+check-line = "fill_line_agent.check_line:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
