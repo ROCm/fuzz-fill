@@ -218,7 +218,12 @@ build_body() {
     results_name="gap-finding-results-pr${pr_id}-${RUN_ID}"
     html_name="html-coverage-pr${pr_id}-${RUN_ID}"
 
-    body="@${ACTOR}"$'\n\n'
+    body=""
+    # Scheduled / bot-dispatched runs use github-actions[bot]; leave the
+    # leading @mention off so the issue does not tag the Actions bot.
+    if [[ "$ACTOR" != "github-actions[bot]" ]]; then
+        body="@${ACTOR}"$'\n\n'
+    fi
     body+="[Pull request](https://redirect.github.com/${github_repo}/pull/${pr_id})"$'\n'
     if [[ -n "$pr_title" ]]; then
         body+="\`${pr_title}\`"$'\n'
