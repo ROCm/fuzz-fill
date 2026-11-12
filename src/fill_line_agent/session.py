@@ -14,6 +14,7 @@ from fill_line_agent.session_state import (
     LLM_HEARTBEAT_S,
     LLM_IDLE_RETRIES,
     LLM_IDLE_TIMEOUT_S,
+    POLISH_RUNS_AFTER_COVER,
     SessionState,
 )
 from fill_line_agent.tools import build_fill_tools
@@ -135,11 +136,11 @@ Rules:
 3. Prefer format=ll for opt. MIR (format=mir) is only valid with llc.
 4. Call record_analysis before the first run_candidate and before give_up.
 5. After each run_candidate, use the nearby-line window as a closeness hint. Read the source of the closest newly hit lines and adjust the input toward the branch that reaches the target. Use instrumented_lines for a wider static range.
-6. Call target_line_covered to decide whether the target itself was reached. No other tool answers that question. A nearby hit is not success.
+6. Each run_candidate reply has a target field (status, n_hit, n_points) and changed. Only target.status == "covered" means the target was reached; a nearby hit is not success.
 7. A non-zero exit (or timeout) is a failed invocation. Read stdout/stderr tails for unknown flags, usage errors, or IR/MIR verifier messages, fix the input or flags, and do not treat that run as evidence about the pass. Use show_streams for more of either stream.
 8. After a run that exited 0, call compare_output to see what the compiler did.
 9. When the target line is inside a pass, prefer a positive test when possible: the pass is applied, changed is true, and the diff shows the change that pass exists to make. For llc, prefer asking for IR/MIR after that pass (-stop-after=<pass> on .ll, -run-pass=<pass> on .mir) so the diff is the pass output rather than final assembly. A run that covers the line only on a bailout with an empty diff is a negative test; try a variant that makes the pass fire before accept. If you cannot build a positive test, you may accept the negative one.
-10. Call accept only when target_line_covered reports covered=true for the latest run.
+10. Accept is your decision. Call accept(run=N) with any run whose target.status was "covered" (default: the latest run). Once a run covers the target, accept right away if it is a positive test. Otherwise try at most {POLISH_RUNS_AFTER_COVER} more runs to make it positive (the reply shows polish_runs_left and covered_runs), then accept the best covering run.
 11. Call give_up when stuck. Unless the latest analysis verdict is likely_unreachable, give_up also requires missing_action and why_needed. If you select_tool(none), provide the same missing_action and why_needed fields.
 
 Coverage rule: the target line is covered only when every SanitizerCoverage point on that line is hit in one run.
@@ -445,24 +446,30 @@ async def run_session(
 
     if state.accepted:
         return state
-    if state.gave_up:
-        return state
+    # A covering run exists even when the session stopped on budget or give_up.
     fallback = state.pick_fallback_candidate()
     if fallback is not None:
+        run_no = state.runs.index(fallback) + 1
         state.latest = fallback
         state.accepted = True
+        state.accepted_by = "harness_fallback"
+        state.likely_unreachable = False
         state.history.append(
             {
                 "event": "fallback_accept",
-                "run": state.runs.index(fallback) + 1,
+                "run": run_no,
                 "changed": fallback.changed,
+                "stop_reason": state.give_up_reason,
             }
         )
         logger.info(
-            "fallback accept run=%s changed=%s",
-            state.runs.index(fallback) + 1,
+            "fallback accept run=%s changed=%s (stop reason: %s)",
+            run_no,
             fallback.changed,
+            state.give_up_reason,
         )
+        return state
+    if state.gave_up:
         return state
     if not state.gave_up:
         state.gave_up = True

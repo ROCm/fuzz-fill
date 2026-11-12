@@ -232,6 +232,13 @@ def _finish_session_outputs(
         "usage": state.usage_dict(),
         "analysis": state.analysis,
         "covered_by": "session" if status == "covered" else None,
+        "accepted_by": state.accepted_by,
+        "accepted_run": (
+            state.runs.index(state.latest) + 1
+            if state.accepted and state.latest in state.runs
+            else None
+        ),
+        "covered_runs": state.covered_run_numbers(),
     }
 
     if state.accepted and state.latest is not None:

@@ -60,10 +60,14 @@ The agent has the following tools/actions available at each round.
 | `instrumented_lines` | Static instrumented lines in a range |
 | `select_tool` | Choose `opt`, `llc`, or `none` |
 | `record_analysis` | Save the current path-conditions analysis |
-| `run_candidate` | Run a proposed `opt`/`llc` test; report nearby coverage |
+| `run_candidate` | Run a proposed `opt`/`llc` test; report target and nearby coverage |
 | `compare_output` / `show_streams` | Inspect the latest run |
-| `target_line_covered` | Whether the target line is fully covered |
-| `accept` / `give_up` | End the session |
+| `accept` / `give_up` | End the session (`accept` can pick any covering run) |
+
+Once a run covers the target, the agent accepts it if it is a positive test.
+Otherwise it gets up to 5 more runs to find a positive variant before
+accepting the best covering run. If the session ends on budget without an
+accept, the harness accepts the best covering run itself.
 
 If the agent gives up, it can leave feedback on what would have helped, so
 later sessions can improve.

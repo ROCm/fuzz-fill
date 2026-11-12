@@ -28,6 +28,7 @@ LLM_HEARTBEAT_S = 30.0
 LLM_IDLE_RETRIES = 1
 MIN_VALID_RUNS_FOR_UNREACHABLE = 3
 ANALYSIS_STALE_AFTER_RUNS = 3
+POLISH_RUNS_AFTER_COVER = 5
 
 VERDICTS = frozenset({"likely_reachable", "likely_unreachable", "unknown"})
 CONDITION_STATUSES = frozenset({"satisfied", "unsatisfied", "unknown"})
@@ -79,6 +80,8 @@ class SessionState:
     capability_gap: dict[str, object] | None = None
     likely_unreachable: bool = False
     accepted: bool = False
+    accepted_by: str | None = None
+    first_covered_run: int | None = None
     stop_requested: bool = False
     history: list[dict[str, object]] = field(default_factory=list)
 
@@ -119,6 +122,12 @@ class SessionState:
     ) -> None:
         self.runs.append(result)
         self.latest = result
+        if (
+            self.first_covered_run is None
+            and result.measure is not None
+            and result.measure.status == "covered"
+        ):
+            self.first_covered_run = len(self.runs)
         if result.timed_out:
             self.runs_timeout += 1
         elif result.exit_code == 0:
@@ -279,6 +288,19 @@ class SessionState:
             for r in self.runs
             if r.measure is not None and r.measure.status == "covered"
         ]
+
+    def covered_run_numbers(self) -> list[int]:
+        """1-based run numbers that fully covered the target."""
+        return [
+            i
+            for i, r in enumerate(self.runs, start=1)
+            if r.measure is not None and r.measure.status == "covered"
+        ]
+
+    def runs_since_first_cover(self) -> int | None:
+        if self.first_covered_run is None:
+            return None
+        return len(self.runs) - self.first_covered_run
 
     def pick_fallback_candidate(self) -> RunResult | None:
         covered = self.covered_runs()

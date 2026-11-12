@@ -19,6 +19,7 @@ from fill_line_agent.render import command_line, write_analysis, write_attempt
 from fill_line_agent.session_state import (
     CONDITION_STATUSES,
     MIN_VALID_RUNS_FOR_UNREACHABLE,
+    POLISH_RUNS_AFTER_COVER,
     VERDICTS,
     SessionState,
 )
@@ -450,6 +451,7 @@ def build_fill_tools(state: SessionState):
         state.record_run(result, attempt_path=attempt_path, testing=testing)
         logger.debug("run %s command: %s", run_no, command_line(result))
 
+        m = result.measure
         payload: dict[str, Any] = {
             "ok": True,
             "run": len(state.runs),
@@ -458,6 +460,13 @@ def build_fill_tools(state: SessionState):
             "testing": testing,
             "exit_code": result.exit_code,
             "timed_out": result.timed_out,
+            "changed": result.changed,
+            "target": {
+                "line": str(state.target),
+                "status": m.status if m else "uncovered",
+                "n_hit": m.n_hit if m else 0,
+                "n_points": m.n_points if m else 0,
+            },
             "function": result.measure.function if result.measure else None,
             "function_n_hit": result.measure.function_n_hit if result.measure else 0,
             "function_n_points": (
@@ -472,6 +481,10 @@ def build_fill_tools(state: SessionState):
         }
         if attempt_path is not None:
             payload["attempt"] = attempt_path
+        since = state.runs_since_first_cover()
+        if since is not None:
+            payload["covered_runs"] = state.covered_run_numbers()
+            payload["polish_runs_left"] = max(0, POLISH_RUNS_AFTER_COVER - since)
         if result.exit_code != 0 or result.timed_out:
             payload["stdout_tail"] = stream_tail(result.stdout)
             payload["stderr_tail"] = stream_tail(result.stderr)
@@ -512,48 +525,43 @@ def build_fill_tools(state: SessionState):
         page = stream_page(text, offset=int(args.get("offset") or 0))
         return _text({"ok": True, "stream": stream, **page})
 
-    async def target_line_covered(args: dict[str, Any]) -> dict[str, Any]:
-        del args
-        if state.latest is None or state.latest.measure is None:
-            return _text(
-                {
-                    "ok": True,
-                    "covered": False,
-                    "reason": "no_run",
-                    "target": str(state.target),
-                }
-            )
-        m = state.latest.measure
-        return _text(
-            {
-                "ok": True,
-                "covered": m.status == "covered",
-                "status": m.status,
-                "n_hit": m.n_hit,
-                "n_points": m.n_points,
-                "target": str(state.target),
-            }
-        )
-
     async def accept(args: dict[str, Any]) -> dict[str, Any]:
-        del args
-        if state.latest is None or state.latest.measure is None:
+        if not state.runs:
             return _error("no_run")
-        if state.latest.measure.status != "covered":
+        raw = args.get("run")
+        if raw is None:
+            run_no = len(state.runs)
+        else:
+            try:
+                run_no = int(raw)
+            except (TypeError, ValueError):
+                return _error("run must be an integer run number")
+            if not 1 <= run_no <= len(state.runs):
+                return _error(f"run must be between 1 and {len(state.runs)}")
+        chosen = state.runs[run_no - 1]
+        m = chosen.measure
+        if m is None or m.status != "covered":
+            status = m.status if m else "uncovered"
+            hit = f"{m.n_hit}/{m.n_points}" if m else "0/0"
             return _error(
-                f"latest run is {state.latest.measure.status} "
-                f"({state.latest.measure.n_hit}/{state.latest.measure.n_points}); "
-                "cannot accept"
+                f"run {run_no} is {status} ({hit}); cannot accept. "
+                f"Covering runs: {state.covered_run_numbers()}"
             )
+        state.latest = chosen
         state.accepted = True
+        state.accepted_by = "agent"
         state.stop_requested = True
+        state.history.append(
+            {"event": "accept", "run": run_no, "changed": chosen.changed}
+        )
         return _text(
             {
                 "ok": True,
                 "accepted": True,
-                "changed": state.latest.changed,
-                "format": state.latest.fmt,
-                "tool": state.latest.tool,
+                "run": run_no,
+                "changed": chosen.changed,
+                "format": chosen.fmt,
+                "tool": chosen.tool,
             }
         )
 
@@ -729,7 +737,7 @@ def build_fill_tools(state: SessionState):
             "run_candidate",
             "Run the selected tool on LLVM IR or MIR. Requires prior "
             "record_analysis and a testing field naming the condition under test. "
-            "Does not report the target line.",
+            "Reports target coverage, changed, and nearby coverage.",
             {
                 "type": "object",
                 "properties": {
@@ -770,15 +778,17 @@ def build_fill_tools(state: SessionState):
             show_streams,
         ),
         tracked(
-            "target_line_covered",
-            "Report whether the configured target line was fully covered in the latest run.",
-            {},
-            target_line_covered,
-        ),
-        tracked(
             "accept",
-            "Accept the latest candidate if the target line is covered.",
-            {},
+            "Accept a run that covered the target line (default: the latest run).",
+            {
+                "type": "object",
+                "properties": {
+                    "run": {
+                        "type": "integer",
+                        "description": "Run number to accept; must have covered the target",
+                    },
+                },
+            },
             accept,
         ),
         tracked(
