@@ -78,7 +78,7 @@ env:
   VENV_DIR: /work/fuzz-fill-venv
   GH_TOKEN: ${{ github.token }}
   CCACHE_DIR: /work/ccache
-  CCACHE_MAXSIZE: 3G
+  CCACHE_MAXSIZE: 5G
   CCACHE_COMPRESS: "true"
 
 jobs:
@@ -194,15 +194,38 @@ jobs:
           echo "file,line,coverage" > "${OUT_DIR}/commit_lines_report/target_lines_coverage_summary.csv"
           echo "gap-scope: skip (rule ${{ steps.scope.outputs.rule }}): ${{ steps.scope.outputs.reason }}"
 
-      - name: Restore ccache
+      - name: Select warmed ccache
         if: steps.scope.outputs.action == 'run'
+        id: ccache-recipe
+        env:
+          SCOPE_BACKENDS: ${{ steps.scope.outputs.backends }}
+          SCOPE_ALLOWLIST: ${{ steps.scope.outputs.allowlist }}
+          ALLOW_INLINE: ${{ inputs.allow_inline }}
+        run: |
+          # Recipe names and the compiler hash must match pr-gap-scan.yml warm-ccache.
+          recipe=""
+          case "$(basename "${SCOPE_ALLOWLIST}"):${SCOPE_BACKENDS}" in
+            "allowlist-llvm.txt:X86;AMDGPU") recipe=llvm-x86-amdgpu ;;
+            "allowlist-llvm.txt:X86;SPIRV") recipe=llvm-x86-spirv ;;
+            "allowlist-clang.txt:all") recipe=clang-all ;;
+            "allowlist-llvm-clang.txt:all") recipe=llvm-clang-all ;;
+          esac
+          if [[ "${ALLOW_INLINE}" == "true" ]]; then
+            recipe=""
+          fi
+          compiler="$("${LLVM_RELEASE_BIN}/clang" --version | sha256sum | cut -c1-12)"
+          echo "recipe=${recipe}" >> "${GITHUB_OUTPUT}"
+          echo "compiler=${compiler}" >> "${GITHUB_OUTPUT}"
+          echo "ccache recipe: ${recipe:-<none, building cold>} compiler: ${compiler}"
+
+      - name: Restore ccache
+        if: steps.scope.outputs.action == 'run' && steps.ccache-recipe.outputs.recipe != ''
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache-ccache
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: fuzz-fill-llvm-sancov-ccache-pr-${{ env.LLVM_APT_MAJOR }}-${{ github.run_id }}
+          key: fuzz-fill-llvm-sancov-ccache-pr-${{ env.LLVM_APT_MAJOR }}-${{ steps.ccache-recipe.outputs.recipe }}-${{ steps.ccache-recipe.outputs.compiler }}-${{ github.run_id }}
           restore-keys: |
-            fuzz-fill-llvm-sancov-ccache-pr-${{ env.LLVM_APT_MAJOR }}-
+            fuzz-fill-llvm-sancov-ccache-pr-${{ env.LLVM_APT_MAJOR }}-${{ steps.ccache-recipe.outputs.recipe }}-${{ steps.ccache-recipe.outputs.compiler }}-
 
       - name: Reset ccache stats for this run
         if: steps.scope.outputs.action == 'run'
@@ -273,13 +296,6 @@ jobs:
       - name: Show ccache stats
         if: always() && steps.scope.outputs.action == 'run'
         run: ccache --show-stats -v
-
-      - name: Save ccache
-        if: always() && steps.scope.outputs.action == 'run'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ steps.cache-ccache.outputs.cache-primary-key }}
 
       - name: Install fuzz-fill venv
         if: steps.scope.outputs.action == 'run'
