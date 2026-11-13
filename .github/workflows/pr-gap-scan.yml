@@ -91,4 +91,5 @@ jobs:
           python3 .claude/skills/pr-gap-scan/scripts/scan.py dispatch \
             --state "$STATE" \
             --ref "${GITHUB_REF_NAME}" \
-            --fuzz-fill-repo "${GITHUB_REPOSITORY}"
+            --fuzz-fill-repo "${GITHUB_REPOSITORY}" \
+            --upload-tools

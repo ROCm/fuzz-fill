@@ -808,17 +808,17 @@ def target_one(state, state_path, llvm_repo, number, backend_override=None):
 # --- dispatch -------------------------------------------------------------
 
 
-def dispatch_one(fuzz_fill_repo, ref, llvm_repo, number):
-    subprocess.run(
-        [
-            "gh", "workflow", "run", "pr-gap-analysis.yml",
-            "-R", fuzz_fill_repo,
-            "--ref", ref,
-            "-f", f"pr_id={number}",
-            "-f", f"github_repo={llvm_repo}",
-        ],
-        check=True,
-    )
+def dispatch_one(fuzz_fill_repo, ref, llvm_repo, number, *, upload_tools=False):
+    args = [
+        "gh", "workflow", "run", "pr-gap-analysis.yml",
+        "-R", fuzz_fill_repo,
+        "--ref", ref,
+        "-f", f"pr_id={number}",
+        "-f", f"github_repo={llvm_repo}",
+    ]
+    if upload_tools:
+        args.extend(["-f", "upload_tools=true"])
+    subprocess.run(args, check=True)
 
 
 def run_title_marker(number):
@@ -923,7 +923,7 @@ def find_cached_run(fuzz_fill_repo, number, head_sha):
     return None
 
 
-def dispatch(state, state_path, fuzz_fill_repo, ref, llvm_repo):
+def dispatch(state, state_path, fuzz_fill_repo, ref, llvm_repo, *, upload_tools=False):
     known_ids = {r["run_id"] for r in state["runs"].values() if "run_id" in r}
     for cand in state["candidates"]:
         number = cand["number"]
@@ -950,7 +950,9 @@ def dispatch(state, state_path, fuzz_fill_repo, ref, llvm_repo):
                 continue
         since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         log(f"dispatching PR #{number}")
-        dispatch_one(fuzz_fill_repo, ref, llvm_repo, number)
+        dispatch_one(
+            fuzz_fill_repo, ref, llvm_repo, number, upload_tools=upload_tools,
+        )
         run_id = resolve_run_id(fuzz_fill_repo, number, since, known_ids)
         if run_id is None:
             log(f"  warning: could not resolve run id for {key}; check manually")
@@ -1277,7 +1279,10 @@ def cmd_discover(args):
 
 def cmd_dispatch(args):
     state = load_state(args.state)
-    dispatch(state, args.state, args.fuzz_fill_repo, args.ref, args.llvm_repo)
+    dispatch(
+        state, args.state, args.fuzz_fill_repo, args.ref, args.llvm_repo,
+        upload_tools=getattr(args, "upload_tools", False),
+    )
 
 
 def cmd_collect(args):
@@ -1326,7 +1331,10 @@ def cmd_run(args):
             per_label_scan_cap=args.scan_cap,
         )
         save_state(state, args.state)
-    dispatch(state, args.state, args.fuzz_fill_repo, args.ref, args.llvm_repo)
+    dispatch(
+        state, args.state, args.fuzz_fill_repo, args.ref, args.llvm_repo,
+        upload_tools=getattr(args, "upload_tools", False),
+    )
     process(state, args.state, args.fuzz_fill_repo, args.artifacts_dir, args.out_dir, args.poll_interval)
 
 
@@ -1397,6 +1405,14 @@ def main():
     p.add_argument("--fuzz-fill-repo", default=DEFAULT_FUZZ_FILL_REPO)
     p.add_argument("--ref", default=DEFAULT_REF)
     p.add_argument("--llvm-repo", default=DEFAULT_LLVM_REPO)
+    p.add_argument(
+        "--upload-tools",
+        action="store_true",
+        help=(
+            "Pass upload_tools=true to pr-gap-analysis.yml so the instrumented "
+            "opt/llc build is saved as an artifact (~1.2 GB uncompressed)"
+        ),
+    )
     p.set_defaults(func=cmd_dispatch)
 
     p = sub.add_parser("collect", help="Download artifacts for completed runs")
@@ -1443,6 +1459,14 @@ def main():
     p.add_argument("--poll-interval", type=int, default=60)
     p.add_argument("--artifacts-dir", required=True)
     p.add_argument("--out-dir", required=True)
+    p.add_argument(
+        "--upload-tools",
+        action="store_true",
+        help=(
+            "Pass upload_tools=true to pr-gap-analysis.yml so the instrumented "
+            "opt/llc build is saved as an artifact (~1.2 GB uncompressed)"
+        ),
+    )
     p.set_defaults(func=cmd_run)
 
     args = parser.parse_args()
