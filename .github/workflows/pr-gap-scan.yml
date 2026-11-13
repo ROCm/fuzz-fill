@@ -4,6 +4,10 @@
 # Discover recent llvm/llvm-project PRs for selected categories and dispatch
 # pr-gap-analysis.yml for each. Does not wait for those builds; each analysis
 # run files its own pr-analysis-result issue.
+#
+# The scheduled run first warms one ccache per recipe, in parallel, from
+# llvm-project main. pr-gap-analysis restores the entry for its recipe and
+# compiler and never saves. Manual runs skip the warm-up unless warmup is on.
 
 name: PR gap scan
 
@@ -31,17 +35,127 @@ on:
         required: false
         type: number
         default: 5
+      warmup:
+        description: >-
+          Build the four PR-gap recipes and save one ccache per recipe before
+          dispatch. On for the daily schedule. Off for a manual run.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    shell: bash
 
 concurrency:
   group: pr-gap-scan
   cancel-in-progress: false
 
 jobs:
+  warm-ccache:
+    name: Warm ${{ matrix.recipe.name }}
+    if: github.event_name == 'schedule' || inputs.warmup
+    runs-on: aws-linux-scale-rocm-medium
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: write
+    container:
+      image: ubuntu:24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe:
+          - name: llvm-x86-amdgpu
+            allowlist: scripts/allowlist-llvm.txt
+            targets: "X86;AMDGPU"
+            projects: ""
+          - name: llvm-x86-spirv
+            allowlist: scripts/allowlist-llvm.txt
+            targets: "X86;SPIRV"
+            projects: ""
+          - name: clang-all
+            allowlist: scripts/allowlist-clang.txt
+            targets: all
+            projects: clang
+          - name: llvm-clang-all
+            allowlist: scripts/allowlist-llvm-clang.txt
+            targets: all
+            projects: clang
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      LLVM_APT_MAJOR: "24"
+      LLVM_RELEASE_BIN: /usr/lib/llvm-24/bin
+      # ccache hashes absolute source and build paths. These must equal
+      # PR_LLVM_DIR and PR_BUILD_DIR in pr-gap-analysis.yml or nothing hits.
+      LLVM_DIR: /work/pr-llvm
+      BUILD_DIR: /work/build-sancov
+      CCACHE_DIR: /work/ccache
+      CCACHE_MAXSIZE: 5G
+      CCACHE_COMPRESS: "true"
+      CCACHE_COMPRESSLEVEL: "2"
+      RECIPE_ALLOWLIST: ${{ matrix.recipe.allowlist }}
+      RECIPE_TARGETS: ${{ matrix.recipe.targets }}
+      RECIPE_PROJECTS: ${{ matrix.recipe.projects }}
+    steps:
+      - name: Checkout fuzz-fill
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install apt packages
+        run: ./scripts/image/install-apt-packages.sh all
+
+      - name: Install CMake
+        run: ./scripts/image/install-cmake.sh
+
+      - name: Install apt.llvm.org bootstrap
+        run: ./scripts/image/install-llvm-apt.sh "${LLVM_APT_MAJOR}"
+
+      - name: Hash bootstrap compiler
+        id: compiler
+        run: |
+          # Must match the hash in pr-gap-analysis.yml "Select warmed ccache".
+          echo "hash=$("${LLVM_RELEASE_BIN}/clang" --version | sha256sum | cut -c1-12)" >> "${GITHUB_OUTPUT}"
+
+      - name: Clone current llvm-project main
+        run: |
+          git clone --depth 1 --branch main \
+            https://github.com/llvm/llvm-project.git "${LLVM_DIR}"
+
+      - name: Build recipe
+        run: |
+          build_args=(
+            "${GITHUB_WORKSPACE}/${RECIPE_ALLOWLIST}"
+            "${LLVM_DIR}"
+            "${BUILD_DIR}"
+            --bootstrap-bin "${LLVM_RELEASE_BIN}"
+            --targets "${RECIPE_TARGETS}"
+            --enable-ccache
+            --ccache-compiler-check-version
+          )
+          if [[ -n "${RECIPE_PROJECTS}" ]]; then
+            build_args+=(--enable-projects "${RECIPE_PROJECTS}")
+          fi
+          build_args+=("$(nproc)")
+          ./scripts/build-llvm-sancov.sh "${build_args[@]}"
+
+      - name: Show ccache stats
+        run: ccache --show-stats -v
+
+      - name: Save ccache
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: fuzz-fill-llvm-sancov-ccache-pr-${{ env.LLVM_APT_MAJOR }}-${{ matrix.recipe.name }}-${{ steps.compiler.outputs.hash }}-${{ github.run_id }}
+
   discover-and-dispatch:
     name: Discover and dispatch
+    needs: warm-ccache
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
