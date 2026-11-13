@@ -8,28 +8,29 @@
 name: PR gap scan
 
 on:
-  # Temporary: registers this workflow before it lands on the default branch.
-  # Remove after one run is recorded, then dispatch with gh workflow run.
-  pull_request:
+  schedule:
+    # 05:00 UTC Mon-Fri. That is 5:00 AM UK time in GMT (winter); during BST
+    # it is 6:00 AM UK time (GitHub cron is UTC-only).
+    - cron: "0 5 * * 1-5"
   workflow_dispatch:
     inputs:
       category:
         description: >-
-          Category to scan (spirv by default; all = amdgpu + spirv + llvm + clang)
+          Category to scan (all by default = amdgpu + spirv + llvm + clang)
         required: false
         type: choice
-        default: spirv
+        default: all
         options:
+          - all
           - spirv
           - amdgpu
           - clang
           - llvm
-          - all
       limit:
         description: Max pull requests to keep per selected category
         required: false
         type: number
-        default: 1
+        default: 5
 
 permissions:
   contents: read
@@ -41,7 +42,6 @@ concurrency:
 jobs:
   discover-and-dispatch:
     name: Discover and dispatch
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -56,8 +56,9 @@ jobs:
       - name: Discover candidates and dispatch PR gap analysis
         env:
           GH_TOKEN: ${{ github.token }}
-          LIMIT: ${{ inputs.limit }}
-          CATEGORY: ${{ inputs.category }}
+          # schedule has no inputs; fall back to the workflow_dispatch defaults.
+          LIMIT: ${{ inputs.limit || 5 }}
+          CATEGORY: ${{ inputs.category || 'all' }}
         run: |
           set -euo pipefail
           STATE="${RUNNER_TEMP}/pr-gap-scan/state.json"
