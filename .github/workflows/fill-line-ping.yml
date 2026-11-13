@@ -1,0 +1,68 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# Smoke-test the LLM gateway used by fill-line.
+# Credentials are read from repository secrets as env vars (no CLI flags).
+#
+# Required secrets (define later):
+#   FUZZ_FILL_API_KEY  — gateway subscription key
+#   FUZZ_FILL_BASE_URL — gateway base URL
+#   USER_NTID          — value for the gateway `user` header
+
+name: Fill-line gateway ping
+
+on:
+  workflow_dispatch:
+  # Lets GitHub register this workflow from a PR/branch before it lands on
+  # the default branch. After one PR run appears in Actions, `gh workflow run
+  # --ref <branch>` works. The job below still only executes on dispatch.
+  pull_request:
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: fill-line-ping-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: aws-linux-scale-rocm-medium
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      FUZZ_FILL_API_KEY: ${{ secrets.FUZZ_FILL_API_KEY }}
+      FUZZ_FILL_BASE_URL: ${{ secrets.FUZZ_FILL_BASE_URL }}
+      USER_NTID: ${{ secrets.USER_NTID }}
+
+    steps:
+      - name: Check secrets are configured
+        run: |
+          missing=()
+          [[ -n "${FUZZ_FILL_API_KEY}" ]] || missing+=(FUZZ_FILL_API_KEY)
+          [[ -n "${FUZZ_FILL_BASE_URL}" ]] || missing+=(FUZZ_FILL_BASE_URL)
+          [[ -n "${USER_NTID}" ]] || missing+=(USER_NTID)
+          if ((${#missing[@]})); then
+            echo "Missing repository secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install fill-line
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -U pip
+          .venv/bin/pip install '.[fill-line]'
+
+      - name: Ping gateway
+        run: .venv/bin/python -m fill_line_agent.ping
