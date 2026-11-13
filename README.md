@@ -910,6 +910,8 @@ E2E tests prepare the PR checkout, then build SanitizerCoverage and run gap find
 
 fuzz-fill targets two kinds of coverage gap: lines **already in LLVM** that tests miss, and lines **introduced or changed in a PR** that tests still miss after the PR's own tests run.
 
+The contributions below were made after manual analysis of the coverage results, not by an automated bot.
+
 ### Gaps filled in existing LLVM code
 
 Baseline coverage gaps — lines already present in LLVM that the LIT suite did not exercise. Identified with baseline gap finding and closed with new or expanded LIT tests.
@@ -952,6 +954,7 @@ Lines added or changed in LLVM pull requests that baseline coverage (including t
 | 2026-08-21 | [#217396](https://github.com/llvm/llvm-project/pull/217396#issuecomment-5373728634) | [AMDGPU] Guard RewriteMFMAFormStage recolor against unsafe def/use |
 | 2026-08-25 | [#211937](https://github.com/llvm/llvm-project/pull/211937#issuecomment-5409652592) | [AMDGPU] Unpack V_PK_MOV_B32 for MFMA co-issue |
 | 2026-08-27 | [#218955](https://github.com/llvm/llvm-project/pull/218955#issuecomment-5437365595) | [AMDGPU] Use s_fmamk_f32 when the folded addend is inlinable |
+| 2026-11-05 | [#201675](https://github.com/llvm/llvm-project/pull/201675#issuecomment-6663741675) | [AMDGPU] Add islands to StructurizeCFG |
 
 #### SPIR-V
 
@@ -968,6 +971,7 @@ Lines added or changed in LLVM pull requests that baseline coverage (including t
 |------|-----|---------|
 | 2026-10-28 | [#180039](https://github.com/llvm/llvm-project/pull/180039#issuecomment-6466665410) | [LV] Use speculative load intrinsics for early-exit vectorization |
 | 2026-10-28 | [#214491](https://github.com/llvm/llvm-project/pull/214491#issuecomment-6467369003) | [LoopVectorize] Support vectorization of compressing patterns |
+| 2026-11-09 | [#233470](https://github.com/llvm/llvm-project/pull/233470#issuecomment-6750676605) | [GlobalISel] Simplify demanded bits through TRUNC, XOR and SELECT |
 
 #### Clang
 
