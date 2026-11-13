@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Close open pr-analysis-result issues whose tracked pull request is no
-# longer open. The pull request may be in any repository. This script reads
-# that pull request and writes only to the issue tracker given by --repo.
+# Close open pr-analysis-result issues when:
+#   - the tracked pull request is no longer open, or
+#   - the latest analysis report on the issue has Uncovered lines: 0.
+# The pull request may be in any repository. This script reads that pull
+# request and writes only to the issue tracker given by --repo.
 #
 # Usage:
 #   pr-gap-close-stale-issues.sh [--dry-run] [--repo OWNER/NAME]
@@ -132,23 +134,36 @@ pr_disposition() {
     done
 }
 
+# Last "Uncovered lines: N" in the issue body, then chronological comments.
+# Prints the count, or empty if none.
+latest_uncovered_count() {
+    local number="$1" body="$2"
+    local comments text
+    comments="$(
+        gh_retry gh api --paginate \
+            "repos/${REPO}/issues/${number}/comments" \
+            --jq '.[].body // ""'
+    )"
+    text="${body}"$'\n'"${comments}"
+    printf '%s\n' "$text" | grep -E '^Uncovered lines: [0-9]+$' | tail -n 1 | awk '{print $3}'
+}
+
 close_issue() {
-    local number="$1" upstream="$2" pr_id="$3" disposition="$4"
-    local comment="Closing: the tracked pull request is no longer open."
+    local number="$1" comment="$2" detail="$3"
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        echo "dry-run: would close ${REPO} issue #${number} (${disposition}, ${upstream} pull ${pr_id})"
+        echo "dry-run: would close ${REPO} issue #${number} (${detail})"
         return 0
     fi
-    # Close the tracking issue in $REPO. Do not close ${upstream} pull ${pr_id}.
+    # Close the tracking issue in $REPO. Do not close the upstream pull.
     gh_retry gh issue close "$number" --repo "$REPO" \
         --reason completed \
         --comment "$comment" >/dev/null
-    echo "closed ${REPO} issue #${number} (${disposition}, ${upstream} pull ${pr_id})"
+    echo "closed ${REPO} issue #${number} (${detail})"
 }
 
 process_issue() {
     local number="$1" body="$2"
-    local upstream pr_id disposition
+    local upstream pr_id disposition uncovered
     if [[ ! "$body" =~ Tracking-PR:[[:space:]]*(https://(redirect\.)?github\.com/)?([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/([0-9]+) ]]; then
         echo "error: issue #${number} has no Tracking-PR" >&2
         failed=$((failed + 1))
@@ -163,11 +178,29 @@ process_issue() {
     fi
     case "$disposition" in
         open)
+            if ! uncovered="$(latest_uncovered_count "$number" "$body")"; then
+                echo "error: could not read comments for issue #${number}" >&2
+                failed=$((failed + 1))
+                return 0
+            fi
+            if [[ "$uncovered" == "0" ]]; then
+                if close_issue "$number" \
+                    "Closing: the latest analysis reported no uncovered lines." \
+                    "zero gaps, ${upstream} pull ${pr_id}"; then
+                    closed=$((closed + 1))
+                else
+                    echo "error: failed to close ${REPO} issue #${number}" >&2
+                    failed=$((failed + 1))
+                fi
+                return 0
+            fi
             echo "keep issue #${number}: ${upstream} pull ${pr_id} is open"
             kept=$((kept + 1))
             ;;
         merged|closed)
-            if close_issue "$number" "$upstream" "$pr_id" "$disposition"; then
+            if close_issue "$number" \
+                "Closing: the tracked pull request is no longer open." \
+                "${disposition}, ${upstream} pull ${pr_id}"; then
                 closed=$((closed + 1))
             else
                 echo "error: failed to close ${REPO} issue #${number}" >&2
