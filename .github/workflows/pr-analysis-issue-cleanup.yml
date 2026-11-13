@@ -6,9 +6,9 @@ name: PR analysis issue cleanup
 
 on:
   schedule:
-    # Hourly. Closes issues for closed/merged tracked PRs, and for open PRs
-    # whose latest analysis report has Uncovered lines: 0.
-    - cron: "0 * * * *"
+    # Every 30 minutes. Closes issues for closed/merged tracked PRs, and for
+    # open PRs whose latest analysis report has Uncovered lines: 0.
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       dry_run:
