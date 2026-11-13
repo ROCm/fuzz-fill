@@ -13,9 +13,9 @@ name: PR gap scan
 
 on:
   schedule:
-    # 05:00 UTC daily. That is 5:00 AM UK time in GMT (winter); during BST
-    # it is 6:00 AM UK time (GitHub cron is UTC-only).
-    - cron: "0 5 * * *"
+    # 04:30 UTC daily. That is 4:30 AM UK time in GMT (winter); during BST
+    # it is 5:30 AM UK time (GitHub cron is UTC-only).
+    - cron: "30 4 * * *"
   workflow_dispatch:
     inputs:
       category:
