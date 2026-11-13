@@ -10,7 +10,7 @@ from gap_scope.classifier import classify_changed_paths
 
 _SCAN = (
     Path(__file__).resolve().parents[1]
-    / ".claude/skills/pr-gap-scan/scripts/scan.py"
+    / ".github/scripts/pr-gap-scan.py"
 )
 _spec = importlib.util.spec_from_file_location("pr_gap_scan", _SCAN)
 assert _spec is not None and _spec.loader is not None

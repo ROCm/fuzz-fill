@@ -1,0 +1,95 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# Discover recent llvm/llvm-project PRs for selected categories and dispatch
+# pr-gap-analysis.yml for each. Does not wait for those builds; each analysis
+# run files its own pr-analysis-result issue.
+
+name: PR gap scan
+
+on:
+  schedule:
+    # 05:00 UTC daily. That is 5:00 AM UK time in GMT (winter); during BST
+    # it is 6:00 AM UK time (GitHub cron is UTC-only).
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      category:
+        description: >-
+          Category to scan (all by default = amdgpu + spirv + llvm + clang)
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - spirv
+          - amdgpu
+          - clang
+          - llvm
+      limit:
+        description: Max pull requests to keep per selected category
+        required: false
+        type: number
+        default: 5
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-gap-scan
+  cancel-in-progress: false
+
+jobs:
+  discover-and-dispatch:
+    name: Discover and dispatch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Discover candidates and dispatch PR gap analysis
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # schedule has no inputs; fall back to the workflow_dispatch defaults.
+          LIMIT: ${{ inputs.limit || 5 }}
+          CATEGORY: ${{ inputs.category || 'all' }}
+        run: |
+          set -euo pipefail
+          STATE="${RUNNER_TEMP}/pr-gap-scan/state.json"
+          mkdir -p "$(dirname "$STATE")"
+
+          category_args=()
+          case "$CATEGORY" in
+            all)
+              category_args=(
+                --category amdgpu
+                --category spirv
+                --category llvm
+                --category clang
+              )
+              ;;
+            spirv|amdgpu|clang|llvm)
+              category_args=(--category "$CATEGORY")
+              ;;
+            *)
+              echo "error: unsupported category ${CATEGORY}" >&2
+              exit 1
+              ;;
+          esac
+
+          python3 .github/scripts/pr-gap-scan.py discover \
+            --state "$STATE" \
+            --limit "$LIMIT" \
+            "${category_args[@]}"
+
+          python3 .github/scripts/pr-gap-scan.py dispatch \
+            --state "$STATE" \
+            --ref "${GITHUB_REF_NAME}" \
+            --fuzz-fill-repo "${GITHUB_REPOSITORY}" \
+            --upload-tools
