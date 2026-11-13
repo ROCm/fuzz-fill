@@ -83,12 +83,12 @@ jobs:
               ;;
           esac
 
-          python3 .claude/skills/pr-gap-scan/scripts/scan.py discover \
+          python3 .github/scripts/pr-gap-scan.py discover \
             --state "$STATE" \
             --limit "$LIMIT" \
             "${category_args[@]}"
 
-          python3 .claude/skills/pr-gap-scan/scripts/scan.py dispatch \
+          python3 .github/scripts/pr-gap-scan.py dispatch \
             --state "$STATE" \
             --ref "${GITHUB_REF_NAME}" \
             --fuzz-fill-repo "${GITHUB_REPOSITORY}" \

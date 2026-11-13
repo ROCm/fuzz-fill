@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
-"""Scan recent llvm/llvm-project PRs touching AMDGPU/SPIRV for coverage gaps.
+"""Discover llvm/llvm-project PRs and dispatch PR gap analysis.
 
-Drives the pr-gap-analysis.yml workflow (ROCm/fuzz-fill) end to end:
-discover candidate PRs -> dispatch gap-finding-only runs -> poll and process
-each PR as soon as its runs finish (download artifacts, write a draft review
-comment) without waiting on the rest of the batch.
-
-All state is persisted to a JSON file so the script can be re-run (e.g. after
-being interrupted, or hours later once CI runs complete) and pick up where it
-left off. See SKILL.md in the parent directory for the intended workflow.
+Used by .github/workflows/pr-gap-scan.yml: find candidate PRs by category,
+then trigger pr-gap-analysis.yml for each. State is persisted to a JSON file
+so discover/dispatch can be resumed. Does not wait for analysis runs or draft
+review comments -- each analysis run files its own pr-analysis-result issue.
 """
 
 import argparse
-import csv
 import json
 import os
 import re
@@ -137,37 +132,6 @@ def _is_expected_artifact_name(name):
 def _finding_artifact_name(number, run_id, *, raw=False):
     prefix = "gap-finding-raw-pr" if raw else "gap-finding-results-pr"
     return f"{prefix}{number}-{run_id}"
-
-# gap-finding-pr.sh builds inside the container at this path, and
-# target_lines_uncovered_pruned.csv's `file` column reflects that absolute build
-# path rather than a path relative to the repo root. Strip it so permalinks
-# and raw.githubusercontent.com fetches resolve correctly.
-CONTAINER_BUILD_PREFIX = "/work/pr-llvm/"
-
-
-def normalize_target_path(path):
-    if path.startswith(CONTAINER_BUILD_PREFIX):
-        return path[len(CONTAINER_BUILD_PREFIX):]
-    return path
-
-COMMENT_TEMPLATE = """\
-Hi! This comment was generated using [fuzz-fill](https://github.com/ROCm/fuzz-fill), \
-a new tool we're building to help improve LLVM test coverage by spotting lines \
-introduced in a PR that don't yet appear to be exercised by the full test suite, \
-including any tests added in this PR. After manually reviewing the findings, \
-they look worth sharing.
-
-Looking at PR head {short_sha}, we found {count} line{plural} added or modified \
-here that we couldn't find a test for:
-
-{links}
-
-If it makes sense, adding a test that validates these lines would be \
-great. And if any of them are already tested and we missed it, we'd love to hear \
-so we can improve the tool. Feel free to give us some feedback on whether this \
-review was useful from your perspective. Thanks!
-"""
-
 
 def log(msg):
     print(msg, file=sys.stderr)
@@ -491,7 +455,6 @@ def discover(llvm_repo, limit, max_scan_pages=20, per_page=50, backends=None,
                         "title": pr["title"],
                         "updated_at": pr["updated_at"],
                         "llvm_repo": llvm_repo,
-                        "forced": False,
                     }
                 )
                 for b in backends_hit:
@@ -585,7 +548,6 @@ def discover_group(llvm_repo, group, limit, max_scan_pages=20, per_page=50,
                         "title": pr["title"],
                         "updated_at": pr["updated_at"],
                         "llvm_repo": llvm_repo,
-                        "forced": False,
                     }
                 )
                 log(
@@ -765,45 +727,6 @@ def resolve_discover(
     )
 
 
-def target_one(state, state_path, llvm_repo, number, backend_override=None):
-    """Force-add a single PR as a candidate, bypassing the discovery filters.
-
-    Unlike discover(), this ignores the "already reviewed, no new commits"
-    check, and clears any prior run state for this PR so dispatch() always
-    triggers a fresh CI run rather than reusing a stale/failed one. Marking
-    the candidate "forced" also makes dispatch() skip its artifact-reuse
-    check (find_cached_run()) for this PR -- forcing means always fresh.
-    """
-    pr = gh_api_json(f"repos/{llvm_repo}/pulls/{number}")
-    if backend_override:
-        backends = sorted(set(backend_override))
-    else:
-        files = gh_api_paginated(f"repos/{llvm_repo}/pulls/{number}/files")
-        filenames = [f["filename"] for f in files]
-        if not auto_would_run(filenames):
-            sys.exit(
-                f"error: PR #{number} has no non-test llvm/lib or clang/lib changes, "
-                "so --auto would skip it; pass --backend to dispatch anyway"
-            )
-        label_names = {label["name"] for label in pr.get("labels", [])}
-        backends = attribute_backends(filenames, label_names, set(BACKEND_PATH_RES))
-
-    cand = {
-        "number": number,
-        "head_sha": pr["head"]["sha"],
-        "backends": backends,
-        "url": pr["html_url"],
-        "title": pr["title"],
-        "updated_at": pr["updated_at"],
-        "llvm_repo": llvm_repo,
-        "forced": True,
-    }
-    state["runs"].pop(str(number), None)
-    state["candidates"] = [c for c in state["candidates"] if c["number"] != number] + [cand]
-    save_state(state, state_path)
-    scope = "/".join(backends) if backends else "auto"
-    log(f"forced candidate PR #{number} ({scope}): {pr['title']}")
-
 
 # --- dispatch -------------------------------------------------------------
 
@@ -928,11 +851,10 @@ def dispatch(state, state_path, fuzz_fill_repo, ref, llvm_repo, *, upload_tools=
     for cand in state["candidates"]:
         number = cand["number"]
         head_sha = cand.get("head_sha")
-        forced = cand.get("forced", False)
         key = str(number)
         if key in state["runs"]:
             continue
-        if not forced and head_sha:
+        if head_sha:
             cached_run_id = find_cached_run(fuzz_fill_repo, number, head_sha)
             if cached_run_id is not None:
                 log(
@@ -944,7 +866,6 @@ def dispatch(state, state_path, fuzz_fill_repo, ref, llvm_repo, *, upload_tools=
                     "run_id": cached_run_id,
                     "status": "completed",
                     "conclusion": "success",
-                    "downloaded": False,
                 }
                 save_state(state, state_path)
                 continue
@@ -962,291 +883,10 @@ def dispatch(state, state_path, fuzz_fill_repo, ref, llvm_repo, *, upload_tools=
             "run_id": run_id,
             "status": "queued",
             "conclusion": None,
-            "downloaded": False,
         }
         log(f"  run id: {run_id}")
         save_state(state, state_path)
 
-
-# --- collect -----------------------------------------------------------
-
-
-def collect(state, state_path, fuzz_fill_repo, artifacts_dir):
-    for key, run in state["runs"].items():
-        if run.get("status") != "completed" or run.get("downloaded"):
-            continue
-        if run.get("conclusion") != "success":
-            log(f"skip {key}: run did not succeed (conclusion={run.get('conclusion')})")
-            continue
-        number = key
-        dest = os.path.join(artifacts_dir, f"pr-{number}")
-        os.makedirs(dest, exist_ok=True)
-        # Prefer results; fall back to raw if results is missing.
-        results_name = _finding_artifact_name(number, run["run_id"])
-        raw_name = _finding_artifact_name(number, run["run_id"], raw=True)
-        downloaded = False
-        for name in (results_name, raw_name):
-            result = subprocess.run(
-                [
-                    "gh",
-                    "run",
-                    "download",
-                    str(run["run_id"]),
-                    "-R",
-                    fuzz_fill_repo,
-                    "-n",
-                    name,
-                    "-D",
-                    dest,
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode == 0:
-                downloaded = True
-                log(f"downloaded {name} -> {dest}")
-                break
-            log(f"  note: could not download {name} ({result.stderr.strip() or result.stdout.strip()})")
-        if not downloaded:
-            raise RuntimeError(
-                f"failed to download gap-finding artifact for PR #{number} "
-                f"(tried {results_name} and {raw_name})"
-            )
-        run["downloaded"] = True
-        run["artifact_dir"] = dest
-        save_state(state, state_path)
-
-
-# --- comment -----------------------------------------------------------
-
-
-def parse_readme(path):
-    info = {}
-    with open(path) as f:
-        for line in f:
-            if ":" in line:
-                k, v = line.split(":", 1)
-                info[k.strip()] = v.strip()
-    return info
-
-
-def render_comment(pr_head, entries):
-    links = "\n".join(
-        f"{i}. https://github.com/llvm/llvm-project/blob/{pr_head}/{file}#L{line}"
-        for i, (file, line) in enumerate(entries, 1)
-    )
-    return COMMENT_TEMPLATE.format(
-        short_sha=pr_head[:12],
-        count=len(entries),
-        plural="" if len(entries) == 1 else "s",
-        links=links,
-    )
-
-
-def fetch_live_pr(llvm_repo, number):
-    """One live GET of the PR; returns {"head_sha", "base_ref"}, or None on failure
-    (closed/renumbered/network hiccup -- don't block the report on this)."""
-    try:
-        pr = gh_api_json(f"repos/{llvm_repo}/pulls/{number}")
-        return {"head_sha": pr["head"]["sha"], "base_ref": pr["base"]["ref"]}
-    except Exception as e:
-        log(f"warning: could not re-check PR #{number}'s current state: {e}")
-        return None
-
-
-def default_branch(llvm_repo, cache):
-    key = ("_default_branch", llvm_repo)
-    if key not in cache:
-        cache[key] = gh_api_json(f"repos/{llvm_repo}")["default_branch"]
-    return cache[key]
-
-
-def find_base_pr(llvm_repo, base_ref):
-    """If base_ref is itself the head branch of another currently-open PR in
-    llvm_repo, return that PR's {number, title}; else None (already merged,
-    a maintenance branch, or otherwise not a live PR)."""
-    owner = llvm_repo.split("/", 1)[0]
-    try:
-        matches = gh_api_json(
-            f"repos/{llvm_repo}/pulls?state=open&head={owner}:{base_ref}&per_page=1"
-        )
-    except Exception:
-        return None
-    if not matches:
-        return None
-    return {"number": matches[0]["number"], "title": matches[0]["title"]}
-
-
-def render_drift_warning(number, analyzed_sha, live_sha):
-    # HTML comments are stripped from GitHub's rendered view, so this stays
-    # visible to whoever reads the raw file but disappears if the file is
-    # posted as-is with `gh pr comment --body-file`.
-    return (
-        "<!-- fuzz-fill internal note: do not post this block, GitHub hides "
-        "HTML comments when rendering so it won't show up if you do, but "
-        "strip it if you're posting the body some other way. -->\n"
-        "> [!WARNING]\n"
-        f"> PR #{number} has drifted since this analysis ran. It was analyzed "
-        f"against commit `{analyzed_sha[:12]}` (`{analyzed_sha}`), but the "
-        f"PR's current tip is `{live_sha[:12]}` (`{live_sha}`). The uncovered "
-        "lines below may be stale -- re-run the analysis (pr-gap-check's "
-        "`target` subcommand forces a fresh run) before posting.\n"
-        "<!-- end internal note -->\n\n"
-    )
-
-
-def render_stacked_pr_warning(number, base_ref, base_branch, base_pr):
-    if base_pr:
-        detail = (
-            f"which is itself still-open PR #{base_pr['number']} "
-            f"({base_pr['title']!r})"
-        )
-    else:
-        detail = (
-            "which doesn't match any currently open PR -- it may be a "
-            "maintenance branch, or the PR this was stacked on has already "
-            "merged without this PR being retargeted onto the default branch yet"
-        )
-    return (
-        "<!-- fuzz-fill internal note: do not post this block, GitHub hides "
-        "HTML comments when rendering so it won't show up if you do, but "
-        "strip it if you're posting the body some other way. -->\n"
-        "> [!WARNING]\n"
-        f"> PR #{number} looks stacked: its base branch is `{base_ref}`, not "
-        f"the repository's default branch (`{base_branch}`), {detail}. The gap "
-        "analysis only considered lines unique to this PR (diffed against its "
-        "merge-base), but that merge-base will move if the base branch gets "
-        "amended or rebased before it merges -- which can invalidate this "
-        "analysis without this PR's own head commit ever changing, so the "
-        "drift check (which only compares this PR's own head commit) "
-        "wouldn't catch it. Confirm the base PR/branch is settled before "
-        "trusting these findings.\n"
-        "<!-- end internal note -->\n\n"
-    )
-
-
-def render_lit_failures_warning(message):
-    # Same hidden-note treatment as render_drift_warning: visible in the raw
-    # draft for whoever reviews it, stripped by GitHub if posted verbatim.
-    lines = [
-        "<!-- fuzz-fill internal note: do not post this block, GitHub hides "
-        "HTML comments when rendering so it won't show up if you do, but "
-        "strip it if you're posting the body some other way. -->",
-        "> [!WARNING]",
-    ]
-    for line in message.splitlines():
-        lines.append(f"> {line}" if line else ">")
-    lines.append("<!-- end internal note -->\n")
-    return "\n".join(lines)
-
-
-def render_pr_comment(cand, state, out_dir, cache):
-    """Build and write the draft comment for one candidate, if it has uncovered
-    lines. Returns the written path, or None if there was nothing to write.
-    """
-    number = cand["number"]
-    run = state["runs"].get(str(number))
-    if not run or not run.get("downloaded"):
-        return None
-    adir = run["artifact_dir"]
-    readme_path = os.path.join(adir, "README-finding.txt")
-    csv_path = os.path.join(adir, "out", "commit_lines_report", "target_lines_uncovered_pruned.csv")
-    if not os.path.isfile(csv_path):
-        return None
-    info = parse_readme(readme_path) if os.path.isfile(readme_path) else {}
-    pr_head = info.get("pr_head") or cand["head_sha"]
-    entries = set()
-    with open(csv_path, newline="") as f:
-        for row in csv.DictReader(f):
-            entries.add((normalize_target_path(row["file"]), int(row["line"])))
-    if not entries or pr_head is None:
-        return None
-    uncovered = sorted(entries)
-    text = render_comment(pr_head, uncovered)
-    llvm_repo = cand.get("llvm_repo", DEFAULT_LLVM_REPO)
-    live_pr = fetch_live_pr(llvm_repo, number)
-    live_head = live_pr["head_sha"] if live_pr else None
-    if live_head and live_head != pr_head:
-        log(f"warning: PR #{number} has drifted (analyzed {pr_head[:12]}, now at {live_head[:12]})")
-        text = render_drift_warning(number, pr_head, live_head) + text
-    warning_path = os.path.join(adir, "README-WARNING")
-    if os.path.isfile(warning_path):
-        with open(warning_path) as f:
-            lit_message = f.read().strip()
-        if lit_message:
-            log(f"warning: PR #{number} had LIT test failures during analysis")
-            text = render_lit_failures_warning(lit_message) + text
-    base_ref = live_pr["base_ref"] if live_pr else None
-    if base_ref:
-        base_branch = default_branch(llvm_repo, cache)
-        if base_ref != base_branch:
-            base_pr = find_base_pr(llvm_repo, base_ref)
-            log(f"warning: PR #{number} looks stacked (base branch {base_ref!r} "
-                f"!= default branch {base_branch!r})")
-            text = render_stacked_pr_warning(number, base_ref, base_branch, base_pr) + text
-    title = f"# [#{number}]({cand['url']}) — {cand['title']}\n\n"
-    text = title + text
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, f"pr-{number}.md")
-    with open(out_path, "w") as f:
-        f.write(text)
-    log(f"wrote {out_path} ({len(uncovered)} uncovered line(s))")
-    return out_path
-
-
-def comment(state, out_dir):
-    cache = {}
-    written = []
-    for cand in state["candidates"]:
-        path = render_pr_comment(cand, state, out_dir, cache)
-        if path:
-            written.append(path)
-    return written
-
-
-def candidate_ready(state, cand):
-    """True once the run for this candidate has reached a terminal state
-    (completed, downloaded-or-not) -- i.e. there's nothing left to wait for
-    before writing this PR's comment, win or lose."""
-    run = state["runs"].get(str(cand["number"]))
-    if run is not None and run.get("status") != "completed":
-        return False
-    return True
-
-
-def process(state, state_path, fuzz_fill_repo, artifacts_dir, out_dir, poll_interval):
-    """Poll dispatched runs and handle each PR as soon as its own runs finish
-    -- download its artifact(s) and write its draft comment immediately --
-    rather than waiting for every dispatched run in the batch to complete
-    before touching any of them.
-    """
-    cache = {}
-    done = set()
-    while True:
-        for run in state["runs"].values():
-            if run.get("status") == "completed":
-                continue
-            data = gh_api_json(f"repos/{fuzz_fill_repo}/actions/runs/{run['run_id']}")
-            run["status"] = data["status"]
-            run["conclusion"] = data.get("conclusion")
-        save_state(state, state_path)
-
-        collect(state, state_path, fuzz_fill_repo, artifacts_dir)
-
-        for cand in state["candidates"]:
-            number = cand["number"]
-            if number in done:
-                continue
-            if candidate_ready(state, cand):
-                render_pr_comment(cand, state, out_dir, cache)
-                done.add(number)
-
-        pending = [k for k, v in state["runs"].items() if v.get("status") != "completed"]
-        if not pending:
-            return
-        log(f"waiting on {len(pending)} run(s): {', '.join(pending)}")
-        time.sleep(poll_interval)
 
 
 # --- CLI -----------------------------------------------------------------
@@ -1254,6 +894,17 @@ def process(state, state_path, fuzz_fill_repo, artifacts_dir, out_dir, poll_inte
 
 def add_common_args(p):
     p.add_argument("--state", required=True, help="Path to the JSON state file")
+
+
+def add_upload_tools_arg(p):
+    p.add_argument(
+        "--upload-tools",
+        action="store_true",
+        help=(
+            "Pass upload_tools=true to pr-gap-analysis.yml so the instrumented "
+            "opt/llc build is saved as an artifact (~1.2 GB uncompressed)"
+        ),
+    )
 
 
 def cmd_discover(args):
@@ -1281,40 +932,14 @@ def cmd_dispatch(args):
     state = load_state(args.state)
     dispatch(
         state, args.state, args.fuzz_fill_repo, args.ref, args.llvm_repo,
-        upload_tools=getattr(args, "upload_tools", False),
+        upload_tools=args.upload_tools,
     )
 
 
-def cmd_collect(args):
-    state = load_state(args.state)
-    collect(state, args.state, args.fuzz_fill_repo, args.artifacts_dir)
-
-
-def cmd_comment(args):
-    state = load_state(args.state)
-    comment(state, args.out_dir)
-
-
-def cmd_process(args):
-    state = load_state(args.state)
-    process(state, args.state, args.fuzz_fill_repo, args.artifacts_dir, args.out_dir, args.poll_interval)
-
-
-def cmd_target(args):
-    state = load_state(args.state)
-    target_one(state, args.state, args.llvm_repo, args.pr, args.backend)
-
-
 def cmd_run(args):
+    """discover then dispatch -- same sequence as the Actions workflow."""
     state = load_state(args.state)
-    if getattr(args, "pr", None):
-        if getattr(args, "group", None) or getattr(args, "category", None):
-            sys.exit(
-                "error: --category/--group cannot be combined with --pr; "
-                "use pr-gap-check / target"
-            )
-        target_one(state, args.state, args.llvm_repo, args.pr, args.backend)
-    elif not state["candidates"]:
+    if not state["candidates"]:
         def checkpoint(partial):
             state["candidates"] = partial
             save_state(state, args.state)
@@ -1333,9 +958,8 @@ def cmd_run(args):
         save_state(state, args.state)
     dispatch(
         state, args.state, args.fuzz_fill_repo, args.ref, args.llvm_repo,
-        upload_tools=getattr(args, "upload_tools", False),
+        upload_tools=args.upload_tools,
     )
-    process(state, args.state, args.fuzz_fill_repo, args.artifacts_dir, args.out_dir, args.poll_interval)
 
 
 def add_discover_scope_args(p):
@@ -1400,73 +1024,21 @@ def main():
     add_discover_scope_args(p)
     p.set_defaults(func=cmd_discover)
 
-    p = sub.add_parser("dispatch", help="Trigger gap-finding-only runs for candidates in --state")
+    p = sub.add_parser("dispatch", help="Trigger pr-gap-analysis.yml for candidates in --state")
     add_common_args(p)
     p.add_argument("--fuzz-fill-repo", default=DEFAULT_FUZZ_FILL_REPO)
     p.add_argument("--ref", default=DEFAULT_REF)
     p.add_argument("--llvm-repo", default=DEFAULT_LLVM_REPO)
-    p.add_argument(
-        "--upload-tools",
-        action="store_true",
-        help=(
-            "Pass upload_tools=true to pr-gap-analysis.yml so the instrumented "
-            "opt/llc build is saved as an artifact (~1.2 GB uncompressed)"
-        ),
-    )
+    add_upload_tools_arg(p)
     p.set_defaults(func=cmd_dispatch)
 
-    p = sub.add_parser("collect", help="Download artifacts for completed runs")
-    add_common_args(p)
-    p.add_argument("--fuzz-fill-repo", default=DEFAULT_FUZZ_FILL_REPO)
-    p.add_argument("--artifacts-dir", required=True)
-    p.set_defaults(func=cmd_collect)
-
-    p = sub.add_parser("comment", help="Filter uncovered lines and write draft comments")
-    add_common_args(p)
-    p.add_argument("--out-dir", required=True)
-    p.set_defaults(func=cmd_comment)
-
-    p = sub.add_parser(
-        "process",
-        help="Poll dispatched runs, downloading and drafting each PR's comment as soon as it's ready",
-    )
-    add_common_args(p)
-    p.add_argument("--fuzz-fill-repo", default=DEFAULT_FUZZ_FILL_REPO)
-    p.add_argument("--artifacts-dir", required=True)
-    p.add_argument("--out-dir", required=True)
-    p.add_argument("--poll-interval", type=int, default=60)
-    p.set_defaults(func=cmd_process)
-
-    p = sub.add_parser(
-        "target", help="Force-add one specific PR as a candidate, bypassing discovery filters"
-    )
-    add_common_args(p)
-    p.add_argument("--llvm-repo", default=DEFAULT_LLVM_REPO)
-    p.add_argument("--pr", type=int, required=True, help="llvm/llvm-project PR number")
-    p.add_argument(
-        "--backend", choices=["amdgpu", "spirv"], action="append",
-        help="Repeatable; default: auto-detect from the PR's changed files",
-    )
-    p.set_defaults(func=cmd_target)
-
-    p = sub.add_parser("run", help="Run discover -> dispatch -> process (poll/collect/comment as each PR is ready)")
+    p = sub.add_parser("run", help="Run discover then dispatch")
     add_common_args(p)
     p.add_argument("--llvm-repo", default=DEFAULT_LLVM_REPO)
     p.add_argument("--fuzz-fill-repo", default=DEFAULT_FUZZ_FILL_REPO)
     p.add_argument("--ref", default=DEFAULT_REF)
-    p.add_argument("--pr", type=int, default=None, help="Force-analyze one PR instead of discovering")
     add_discover_scope_args(p)
-    p.add_argument("--poll-interval", type=int, default=60)
-    p.add_argument("--artifacts-dir", required=True)
-    p.add_argument("--out-dir", required=True)
-    p.add_argument(
-        "--upload-tools",
-        action="store_true",
-        help=(
-            "Pass upload_tools=true to pr-gap-analysis.yml so the instrumented "
-            "opt/llc build is saved as an artifact (~1.2 GB uncompressed)"
-        ),
-    )
+    add_upload_tools_arg(p)
     p.set_defaults(func=cmd_run)
 
     args = parser.parse_args()
