@@ -21,6 +21,21 @@ source.
   `FUZZ_FILL_BASE_URL`).
 - An NTID for the gateway `user` header (`--user-ntid` or `USER_NTID`).
 
+To gather those inputs from a prior `PR gap analysis` run:
+
+```bash
+scripts/fill-line/setup-context.sh --pr 12345 --out ./context/pr-12345
+# Reuse objects from an existing llvm-project clone (optional):
+scripts/fill-line/setup-context.sh --pr 12345 --out ./context/pr-12345 \
+  --reference /path/to/llvm-project
+source ./context/pr-12345/context.env
+```
+
+That leaves an LLVM checkout, PR diff, instrumented tools, and uncovered
+targets under `--out`. `context.env` sets `LLVM_SRC`, `DIFF`, and
+`INSTRUMENTED_BIN_DIR` for `--llvm-src`, `--diff`, and
+`--instrumented-bin-dir`.
+
 ### Session flow
 
 The agent loops:
@@ -128,6 +143,10 @@ Multi-target exit codes: `0` if every line is covered (session or collateral),
   --log-to-file
 ```
 
+`--tools-runner docker` matters when the instrumented binaries come from a CI
+artifact (for example via `setup-context.sh`): they are built on Ubuntu 24.04
+and may not run on an older host glibc.
+
 To keep sessions short:
 
 - `--effort low` / `--thinking-tokens 0` — shorter replies
@@ -176,5 +195,6 @@ src/fill_line_agent/
   ping.py                 # LLM gateway preflight
 
 scripts/fill-line/
+  setup-context.sh        # download PR gap artifacts + checkout for fill-line
   instrumented-tools/     # Docker image to run instrumented opt/llc/sancov
 ```
