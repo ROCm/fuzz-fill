@@ -229,11 +229,6 @@ class UsherState:
             and disc.stale_runs >= disc.max_stale_runs
         ):
             return "stale"
-        verdict = ""
-        if disc.analysis is not None:
-            verdict = str(disc.analysis.get("verdict") or "")
-        if verdict == "likely_unreachable":
-            return "likely_unreachable"
         return None
 
     def fallback_unlocked(self) -> bool:
@@ -318,8 +313,12 @@ class UsherState:
         return [p for p in self.proposals if p.covered and p.filecheck_ok]
 
     def pick_fallback_proposal(self) -> StandaloneProposal | None:
-        valid = self.valid_proposals()
-        return valid[-1] if valid else None
+        """Latest covered+FileCheck-ok proposal that would also pass accept's style gate."""
+        unlocked = self.fallback_unlocked()
+        eligible = [
+            p for p in self.valid_proposals() if p.pr_style_ok or unlocked
+        ]
+        return eligible[-1] if eligible else None
 
     def apply_fallback(self) -> StandaloneProposal | None:
         proposal = self.pick_fallback_proposal()

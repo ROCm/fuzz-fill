@@ -778,15 +778,8 @@ def main(argv: list[str] | None = None) -> None:
                 batch_ok = False
             print(f"{status}: case {case.case_id} -> {suggested_host}")
 
-        # No host patches; humans paste standalones manually.
-        diff_path_out = out_dir / "test.diff"
-        diff_path_out.write_text("", encoding="utf-8")
-
         summary = {
             "cases": case_summaries,
-            "test_diff": None,
-            "apply_check_ok": True,
-            "mode": "standalone",
         }
         (out_dir / "summary.json").write_text(
             json.dumps(summary, indent=2) + "\n", encoding="utf-8"

@@ -27,6 +27,7 @@ from fill_line_agent.oracle import InputFormat, stream_page
 from fill_line_agent.source_tools import source_tool_specs
 from fill_line_agent.tool_common import build_mcp_server, error_payload, text_payload
 from fill_line_agent.tools import fill_tool_specs, make_fill_handlers
+from fill_line_agent.session_state import POLISH_RUNS_AFTER_COVER
 from fill_line_agent.usher_state import (
     DeclaredStyle,
     StandaloneProposal,
@@ -500,15 +501,8 @@ def ensure_usher_comment(
     fmt: str = "ll",
     style_mismatch: bool = False,
     style_mismatch_detail: str | None = None,
-    # Back-compat aliases
-    mir_only: bool | None = None,
-    mir_only_detail: str | None = None,
 ) -> str:
     """Insert or refresh the Usher placement comment near the top."""
-    if mir_only is not None:
-        style_mismatch = bool(mir_only)
-    if mir_only_detail is not None and style_mismatch_detail is None:
-        style_mismatch_detail = mir_only_detail
     comment = ";" if fmt == "ll" else "#"
     lines = test_text.splitlines()
     # Drop prior Usher comments
@@ -691,6 +685,19 @@ def proposal_matches_pr_style(
     return False
 
 
+def prepare_run_candidate_args(
+    args: dict[str, Any], *, declared_suffix: str
+) -> dict[str, Any]:
+    """Copy run_candidate args with format defaulted to the declared suffix.
+
+    Fill-line's handler defaults omitted format to ``ll``. Usher's style gate
+    defaults to the declared suffix, so forward the same default.
+    """
+    out = dict(args)
+    out["format"] = str(args.get("format") or declared_suffix)
+    return out
+
+
 def style_violation(
     style: DeclaredStyle,
     *,
@@ -738,10 +745,10 @@ def build_standalone_from_run(
     run_template: str,
     fmt: str,
     check_lines: str | None = None,
+    extra_runs: list[str] | None = None,
 ) -> str:
     """Build a lit file from a discovery run's input plus a declared RUN template."""
     comment = ";" if fmt == "ll" else "#"
-    run_line = f"{comment} RUN: {run_template.strip()}"
     body = input_text.strip()
     # Drop any existing RUN / Usher headers from the input body.
     body_lines = [
@@ -749,7 +756,11 @@ def build_standalone_from_run(
         for ln in body.splitlines()
         if not re.match(r"^[;#]\s*(?:RUN:|Usher:)", ln)
     ]
-    parts = [run_line]
+    parts = [f"{comment} RUN: {run_template.strip()}"]
+    for extra in extra_runs or []:
+        extra_s = str(extra).strip()
+        if extra_s:
+            parts.append(f"{comment} RUN: {extra_s}")
     if check_lines and check_lines.strip():
         parts.append(check_lines.strip())
     parts.append("\n".join(body_lines))
@@ -911,9 +922,11 @@ def declare_test_style_impl(state: UsherState, args: dict[str, Any]) -> dict[str
         "active": True,
         "hint": (
             "Active style updated. Use select_tool / record_analysis / "
-            "run_candidate in this style. When a run covers the target, call "
-            "finalize_standalone(run=N). Fallback to a non-PR format unlocks "
-            "only after discovery budget/stale/likely_unreachable."
+            "run_candidate in this style. When a run covers the target, up to "
+            f"{POLISH_RUNS_AFTER_COVER} polish run_candidate calls are allowed, "
+            "then finalize_standalone(run=N, check_lines=...). Redeclare if "
+            "this style was wrong. Off-style gate rejects do not unlock "
+            "fallback; only style-conforming budget/stale do."
         ),
     }
 
@@ -950,6 +963,8 @@ def finalize_standalone_impl(
     note_s = str(note).strip() if isinstance(note, str) and note.strip() else None
 
     from_run: int | None = None
+    used_declared_template = False
+    discovery_argv: list[str] | None = None
     run_raw = args.get("run")
     test_text = args.get("test_text")
     check_lines = args.get("check_lines")
@@ -973,23 +988,37 @@ def finalize_standalone_impl(
                     f"run must be between 1 and {len(state.discovery.runs)}"
                 ),
             }
+        if check_s is None:
+            return {
+                "ok": False,
+                "error": (
+                    "check_lines is required with run=N (write CHECK lines from "
+                    "dump_ir/compare_output, or use annotate_checks and pass "
+                    "full test_text)"
+                ),
+            }
         chosen = state.discovery.runs[from_run - 1]
         fmt = str(args.get("format") or chosen.fmt or active.suffix)
         if fmt not in ("ll", "mir"):
             return {"ok": False, "error": "format must be ll or mir"}
+        discovery_argv = [str(a) for a in (chosen.argv or [])]
         # Prefer declared RUN template when the run matches PR style.
         run_ok = state.run_style_ok.get(from_run, False)
         template = active.run_template if run_ok else None
+        extras = list(active.extra_runs) if run_ok else None
         if template is None:
             # Build a simple FileCheck RUN from the discovery argv.
             tool = chosen.tool
-            argv = " ".join(chosen.argv)
+            argv = " ".join(discovery_argv)
             template = f"{tool} {argv} %s -o - | FileCheck %s".strip()
+        else:
+            used_declared_template = True
         test_text = build_standalone_from_run(
             input_text=chosen.input_text,
             run_template=template,
             fmt=fmt,
             check_lines=check_s,
+            extra_runs=extras,
         )
     else:
         if not isinstance(test_text, str) or not test_text.strip():
@@ -1054,16 +1083,34 @@ def finalize_standalone_impl(
             "style_ok": style_ok,
             "pr_style_ok": pr_style_ok,
             "style_reasons": list(style_reasons),
+            "used_declared_template": used_declared_template,
         }
     )
     hint = "call accept if covered and FileCheck ok"
+    run_line_note = None
+    if used_declared_template:
+        run_line_note = (
+            "finalize(run=N) uses the declared run_template as the RUN line, "
+            "not the discovery argv"
+        )
+        if discovery_argv is not None:
+            run_line_note += f" (discovery argv were {discovery_argv!r})"
     if not proposal.covered or not proposal.filecheck_ok:
-        hint = str(
+        detail = str(
             validation.get("error")
             or validation.get("filecheck", {}).get("stderr_tail")
             or validation.get("filecheck", {}).get("error")
             or "fix RUN/CHECKs and finalize again"
         )
+        if used_declared_template and not proposal.covered:
+            hint = (
+                "declared run_template differs from the covering run's argv; "
+                "coverage was lost after the RUN swap. Adjust the input for "
+                "the declared template, or redeclare the style, then finalize "
+                f"again. {detail}"
+            )
+        else:
+            hint = detail
     elif not pr_style_ok:
         unlocked = state.fallback_unlocked_by()
         if unlocked:
@@ -1075,9 +1122,13 @@ def finalize_standalone_impl(
             hint = (
                 f"covered, but style mismatch ({'; '.join(style_reasons)}). "
                 f"Keep searching with run_candidate in the declared style "
-                f"({active.run_template}); fallback unlocks on budget/stale/"
-                f"likely_unreachable."
+                f"({active.run_template}); fallback unlocks on budget/stale."
             )
+    elif used_declared_template:
+        hint = (
+            "call accept if covered and FileCheck ok. "
+            "RUN line is the declared run_template (not discovery argv)."
+        )
     return {
         "ok": True,
         "proposal": proposal.proposal_id,
@@ -1094,6 +1145,8 @@ def finalize_standalone_impl(
         "coverage": proposal.coverage,
         "filecheck": proposal.filecheck,
         "run": validation.get("run"),
+        "used_declared_template": used_declared_template,
+        "run_line_note": run_line_note,
         "hint": hint,
     }
 
@@ -1142,8 +1195,8 @@ def accept_proposal_impl(state: UsherState, args: dict[str, Any]) -> dict[str, A
         missing: list[str] = []
         if not state.fallback_unlocked():
             missing.append(
-                "fallback not unlocked yet (need discovery budget exhausted, "
-                "stale runs, or likely_unreachable analysis)"
+                "fallback not unlocked yet (need discovery budget exhausted "
+                "or stale runs)"
             )
         if not style_reason:
             missing.append("pass style_reason explaining why PR style failed")
@@ -1196,8 +1249,9 @@ def build_usher_tools(state: UsherState):
                 "declare_test_style before run_candidate "
                 "(list_pr_tests → read_source → declare)"
             )
-        fmt_raw = str(args.get("format") or active.suffix)
-        argv_in = args.get("args") or []
+        forwarded = prepare_run_candidate_args(args, declared_suffix=active.suffix)
+        fmt_raw = str(forwarded["format"])
+        argv_in = forwarded.get("args") or []
         if not isinstance(argv_in, list):
             return error_payload("args must be a list of strings")
         tool = state.discovery.selected_tool or "llc"
@@ -1208,11 +1262,13 @@ def build_usher_tools(state: UsherState):
         if viol and not state.fallback_unlocked():
             return error_payload(
                 f"style gate: {viol}. "
-                "Keep searching in the declared PR style; fallback unlocks "
-                "on budget/stale/likely_unreachable."
+                "Keep searching in the declared PR style. Off-style attempts "
+                "do not count toward fallback unlock. Redeclare if the style "
+                "was wrong; otherwise unlock needs style-conforming "
+                "budget/stale."
             )
         before = len(state.discovery.runs)
-        result = await fill_handlers["run_candidate"](args)
+        result = await fill_handlers["run_candidate"](forwarded)
         after = len(state.discovery.runs)
         if after > before:
             run_no = after
@@ -1329,7 +1385,8 @@ def build_usher_tools(state: UsherState):
             if viol and not state.fallback_unlocked():
                 return error_payload(
                     f"dump_ir style gate: {viol}. "
-                    "Use the declared PR style, or wait until fallback unlocks."
+                    "Use the declared PR style. Off-style dump_ir does not "
+                    "unlock fallback."
                 )
         input_text = str(args.get("input") or "")
         if not input_text.strip():
@@ -1439,8 +1496,9 @@ def build_usher_tools(state: UsherState):
             "declare_test_style",
             "Declare what the PR's tests actually look like after reading them. "
             "Evidence files must match the declared suffix and RUN shape (citing a "
-            ".ll codegen test while declaring MIR is rejected). Redeclare PR-matching "
-            "variants if attempts fail. Required before finalize_standalone.",
+            ".ll codegen test while declaring MIR is rejected). Redeclare from "
+            "better evidence if the style was wrong; do not spam off-style runs "
+            "to unlock fallback. Required before finalize_standalone.",
             {
                 "type": "object",
                 "properties": {
@@ -1459,7 +1517,11 @@ def build_usher_tools(state: UsherState):
                     "extra_runs": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional additional RUNs (e.g. spirv-val)",
+                        "description": (
+                            "Optional additional RUN bodies from the host file "
+                            "(e.g. spirv-val); written into the standalone after "
+                            "the primary run_template"
+                        ),
                     },
                     "evidence": {
                         "type": "array",
@@ -1544,21 +1606,26 @@ def build_usher_tools(state: UsherState):
             "finalize_standalone",
             "Build/validate a standalone lit proposal. Prefer run=N from a "
             "covering run_candidate (uses that input + the declared RUN "
-            "template + optional check_lines). Or pass full test_text. "
-            "Requires declare_test_style. Host suffix must match format.",
+            "template + check_lines; check_lines are required with run=N). "
+            "The RUN line is the declared run_template, not the discovery "
+            "argv — coverage can be lost if they differ. Or pass full "
+            "test_text. Requires declare_test_style. Host suffix must match "
+            "format.",
             {
                 "type": "object",
                 "properties": {
                     "run": {
                         "type": "integer",
                         "description": (
-                            "Discovery run number whose input becomes the body"
+                            "Discovery run number whose input becomes the body; "
+                            "RUN line still comes from the declared template"
                         ),
                     },
                     "check_lines": {
                         "type": "string",
                         "description": (
-                            "Optional CHECK lines when building from run=N"
+                            "CHECK lines for the test; required when building "
+                            "from run=N"
                         ),
                     },
                     "test_text": {
@@ -1586,7 +1653,7 @@ def build_usher_tools(state: UsherState):
             "accept",
             "Accept a standalone proposal that covers the target and passes "
             "validation. Style-mismatched proposals need fallback_unlocked "
-            "(budget/stale/likely_unreachable) plus style_reason.",
+            "(budget/stale) plus style_reason.",
             {
                 "type": "object",
                 "properties": {
@@ -1604,8 +1671,7 @@ def build_usher_tools(state: UsherState):
         ),
         (
             "give_up",
-            "Stop without accepting. The harness may still emit a standalone file "
-            "with a heuristic suggested_host comment for a human to paste.",
+            "Stop without accepting a proposal.",
             {
                 "type": "object",
                 "properties": {

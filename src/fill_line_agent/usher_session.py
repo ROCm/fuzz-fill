@@ -44,10 +44,7 @@ def build_usher_system_prompt(
     max_stale_runs: int = 0,
     diff_path: Path | None = None,
     function_range: tuple[str, int, int] | None = None,
-    # Deprecated; ignored (kept so older callers do not explode).
-    min_style_attempts: int | None = None,
 ) -> str:
-    del min_style_attempts
     source_title = "Source context"
     lo = target.line - SNIPPET_RADIUS
     hi = target.line + SNIPPET_RADIUS
@@ -91,22 +88,24 @@ Fill-line covering test (format=.{fill_test_fmt}):
 this input. It is a source of ideas for which conditions matter — not a RUN
 shape to copy. You must rediscover coverage in the PR's declared style.
 
-Guideline (follow in order; each step maps to tools below):
+Guideline (follow in order; each step maps to tools below). You emit only a
+standalone paste-ready case plus suggested_host — a human merges it into the
+host file. Do not edit hosts.
 {guideline}
 
 How the guideline maps to tools:
-1 / 6. Reuse a PR-touched file and its RUN style → list_pr_tests, read_source,
-   declare_test_style (copy run_template from an existing RUN; host prefers
-   PR-touched files).
-2. Run the related pass *with the same kind of input those tests already use*
-   → run_candidate is gated to the declared suffix and RUN shape. "Run the pass
-   directly" does **not** mean switch to MIR if the PR's tests are `.ll`
-   codegen. Stay in the declared style until fallback unlocks.
+1 / 6. Choose the host file and its RUN style → list_pr_tests, read_source,
+   declare_test_style (copy run_template and any extra_runs from an existing
+   RUN; host prefers PR-touched files).
+2. Hit the line with the same kind of input nearby tests already use
+   → run_candidate is gated to the declared suffix and RUN shape. Stay in the
+   declared style until fallback unlocks. Do **not** switch to MIR if the PR's
+   tests are `.ll` codegen.
 3. Change only your new case → finalize a standalone file only; never edit hosts.
 4. Smallest input, name the function → after the first covering run, up to
    {POLISH_RUNS_AFTER_COVER} polish run_candidate calls before
-   finalize_standalone(run=N).
-5. Update checks with the file's tool → annotate_checks when the evidence file
+   finalize_standalone(run=N, check_lines).
+5. Write CHECKs for your new case → annotate_checks when the evidence file
    has an update script; for SPIR-V (soft-fail) write CHECKs from dump_ir.
 
 Working efficiently:
@@ -119,13 +118,16 @@ Before the first run_candidate, call record_analysis with the conditions needed
 to execute the target line. Each condition needs status + evidence.
 Each run_candidate must set testing to the condition it tries to make true.
 Update the analysis when a run changes your view or when a reply includes
-analysis_stale. A likely_unreachable verdict needs at least 3 valid (exit 0)
-runs; that also unlocks fallback.
+analysis_stale. A likely_unreachable verdict means the line is not reachable
+in the declared PR style after real attempts; it needs at least 3 valid
+(exit 0) runs as evidence. It does not unlock fallback.
 
 Rules:
 1. You may only use the provided MCP tools. There is no Bash, Read, Edit, or Write.
 2. Discover the PR style first: list_pr_tests → read_source → declare_test_style.
-   Evidence must match the declared suffix and RUN shape.
+   Evidence must match the declared suffix and RUN shape. If the declaration
+   was wrong, redeclare from better evidence — do not try to escape via
+   off-style runs.
 3. Call select_tool, then record_analysis, before the first run_candidate.
 4. Prefer format matching the declared style. MIR is only valid when the
    declaration says mir (or after fallback unlocks).
@@ -141,14 +143,19 @@ Rules:
    target is inside a pass, prefer asking for IR/MIR after that pass *only if
    that shape matches the declared style*.
 10. Once a style-conforming run covers the line, polish if needed, then
-    finalize_standalone(run=N, suggested_host, optional check_lines) and accept.
-11. Fallback to the fill-line test's own format unlocks only when discovery
-    budget is spent, stale runs hit the limit, or analysis is likely_unreachable.
-    Then finalize that format and accept with style_reason. The result is labelled
-    style_mismatch — not a PR-style success.
+    finalize_standalone(run=N, suggested_host, check_lines) and accept.
+    check_lines are required with run=N. The RUN line is the declared
+    run_template, not the discovery argv — if coverage is lost after that
+    swap, adjust the input or redeclare, then finalize again.
+11. Fallback to the fill-line test's own format unlocks only when
+    style-conforming discovery runs hit the budget, or stale runs hit the
+    limit. Off-style attempts the gate rejects do not count. If you never
+    search in the PR style, call give_up — that is not a style_mismatch.
+    When unlocked, finalize that format and accept with style_reason. The
+    result is labelled style_mismatch — not a PR-style success.
 12. dump_ir is for writing CHECK lines / inspecting output, not a discovery
     substitute, and is subject to the same style gate until fallback unlocks.
-13. Call give_up when stuck after a real search.
+13. Call give_up when stuck after a real search in the declared style.
 
 Do not invent unsupported RUN pipelines. Humans merge; your job is the standalone
 file and a clear suggested_host.
@@ -160,7 +167,7 @@ def build_usher_user_prompt(state: UsherState) -> str:
         f"Produce a standalone lit test for {state.target} with a suggested_host "
         "comment. Start with list_pr_tests, read the PR tests, declare_test_style, "
         "then select_tool / record_analysis / run_candidate in that style, "
-        "finalize_standalone(run=N) / accept."
+        "finalize_standalone(run=N, check_lines) / accept."
     )
 
 
