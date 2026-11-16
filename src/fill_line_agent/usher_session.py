@@ -18,7 +18,6 @@ from fill_line_agent.session_state import POLISH_RUNS_AFTER_COVER
 from fill_line_agent.usher_state import UsherState
 
 GUIDELINE_CANDIDATES = (
-    Path(__file__).resolve().parents[2] / "llvm-test-guideline.md",
     Path(__file__).resolve().parent / "llvm-test-guideline.md",
 )
 

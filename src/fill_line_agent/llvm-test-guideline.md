@@ -11,7 +11,7 @@ When you add a test for a line the existing suite never hits, follow these steps
    - If that pass can be invoked on its own, take the IR or MIR from just before it runs in the pipeline, and write the test in that form.
    - Use the shortest path that still hits the line.
 
-3. **Change only your new case.** Leave the other functions, their run commands, and their expected results as they are. If your case behaves differently for another CPU, give it its own expected results. If the file mixes compiler modes, pin the mode the nearby cases use.
+3. **Change only your new case.** Leave the other functions, their run commands, and their expected results as they are. If your case needs different expected output for another CPU (or another RUN / FileCheck prefix the file already uses), add checks only for that case — do not rewrite the shared RUNs. Prefer the same triples, CPUs, opt levels, and CHECK prefixes that nearby cases in the file already use; do not introduce a one-off mode just for your function.
 
 4. **Keep the test small, and name it for the case.** Cut it down until it is the smallest input that still hits the line. Name the function for that case, for example `test_bool_v16_eq`.
 
