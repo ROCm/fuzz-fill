@@ -55,6 +55,7 @@ class ToolRunner:
         timeout_s: float | None = None,
         bind_paths: Sequence[Path] = (),
         check: bool = False,
+        input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         if not argv:
             raise ValueError("argv must be non-empty")
@@ -70,6 +71,7 @@ class ToolRunner:
                     timeout=timeout_s,
                     env=dict(env) if env is not None else None,
                     check=check,
+                    input=input,
                 )
             return self._run_docker(
                 argv,
@@ -77,6 +79,7 @@ class ToolRunner:
                 timeout_s=timeout_s,
                 bind_paths=bind_paths,
                 check=check,
+                input=input,
             )
         finally:
             logger.info("exec done:  %s in %.2fs", label, time.perf_counter() - start)
@@ -89,6 +92,7 @@ class ToolRunner:
         timeout_s: float | None,
         bind_paths: Sequence[Path],
         check: bool,
+        input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         if shutil.which(self.docker_bin) is None:
             raise RuntimeError(f"{self.docker_bin} not found on PATH")
@@ -134,4 +138,5 @@ class ToolRunner:
             text=True,
             timeout=timeout_s,
             check=check,
+            input=input,
         )

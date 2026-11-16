@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
-from fill_line_agent.oracle import CoverageOracle, TargetLine, ToolName
+from fill_line_agent.oracle import CoverageOracle, RunResult, TargetLine, ToolName
 from fill_line_agent.responses import ResponseLog
 from fill_line_agent.session_state import (
     LLM_HEARTBEAT_S,
@@ -17,7 +19,6 @@ from fill_line_agent.session_state import (
     POLISH_RUNS_AFTER_COVER,
     SessionState,
 )
-from fill_line_agent.tools import build_fill_tools
 from fill_line_agent.ping import gateway_settings
 from fuzz_fill.log import get_logger
 
@@ -26,6 +27,9 @@ logger = get_logger("fill_line_agent.session")
 CONTINUE_PROMPT = (
     "Continue from the latest tool results; do not repeat finished work."
 )
+
+ToolBuilder = Callable[[Any], tuple[Any, list[str]]]
+FallbackPicker = Callable[[Any], Any]
 
 
 SNIPPET_RADIUS = 20
@@ -232,32 +236,46 @@ async def _give_up(state: SessionState, reason: str, client) -> None:
 
 async def run_session(
     *,
-    state: SessionState,
+    state: Any,
     api_key: str,
     base_url: str,
     user_ntid: str,
     max_turns: int | None,
-) -> SessionState:
-    from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ResultMessage
+    build_tools: ToolBuilder | None = None,
+    system_prompt: str | None = None,
+    user_prompt: str | None = None,
+    mcp_server_name: str = "cover",
+    fallback_picker: FallbackPicker | None = None,
+) -> Any:
+    """Run an agent session.
 
+    Defaults preserve fill-line behaviour. Usher passes its own tool builder,
+    prompts, and fallback picker.
+    """
+    from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, ResultMessage
+    from fill_line_agent.tools import build_fill_tools
+
+    tool_builder = build_tools or build_fill_tools
     with state.steps.step("build_mcp_tools"):
-        server, allowed_tools = build_fill_tools(state)
-    system_prompt = build_system_prompt(
-        target=state.target,
-        llvm_src=state.llvm_src,
-        allowed_tools=state.allowed_tools,
-        max_runs=state.max_runs,
-        max_stale_runs=state.max_stale_runs,
-        function_range=state.oracle.function_line_range(state.target),
-        diff_path=state.diff_path,
-    )
+        server, allowed_tools = tool_builder(state)
+
+    if system_prompt is None:
+        system_prompt = build_system_prompt(
+            target=state.target,
+            llvm_src=state.llvm_src,
+            allowed_tools=state.allowed_tools,
+            max_runs=state.max_runs,
+            max_stale_runs=state.max_stale_runs,
+            function_range=state.oracle.function_line_range(state.target),
+            diff_path=state.diff_path,
+        )
     options_kwargs: dict = {
         "setting_sources": [],
         "settings": gateway_settings(
             api_key=api_key, base_url=base_url, user_ntid=user_ntid
         ),
         "tools": [],
-        "mcp_servers": {"cover": server},
+        "mcp_servers": {mcp_server_name: server},
         "allowed_tools": allowed_tools,
         "system_prompt": system_prompt,
         "permission_mode": "dontAsk",
@@ -291,11 +309,12 @@ async def run_session(
     )
     options = ClaudeAgentOptions(**options_kwargs)
 
-    user_prompt = (
-        f"Write a lit test that covers {state.target}. "
-        f"Available instrumenting tools: {state.allowed_tools}. "
-        "Inspect the diff and source, select a tool, then iterate with coverage feedback."
-    )
+    if user_prompt is None:
+        user_prompt = (
+            f"Write a lit test that covers {state.target}. "
+            f"Available instrumenting tools: {state.allowed_tools}. "
+            "Inspect the diff and source, select a tool, then iterate with coverage feedback."
+        )
 
     if max_turns is not None:
         state.max_turns = max_turns
@@ -446,29 +465,33 @@ async def run_session(
 
     if state.accepted:
         return state
-    # A covering run exists even when the session stopped on budget or give_up.
-    fallback = state.pick_fallback_candidate()
-    if fallback is not None:
-        run_no = state.runs.index(fallback) + 1
-        state.latest = fallback
-        state.accepted = True
-        state.accepted_by = "harness_fallback"
-        state.likely_unreachable = False
-        state.history.append(
-            {
-                "event": "fallback_accept",
-                "run": run_no,
-                "changed": fallback.changed,
-                "stop_reason": state.give_up_reason,
-            }
-        )
-        logger.info(
-            "fallback accept run=%s changed=%s (stop reason: %s)",
-            run_no,
-            fallback.changed,
-            state.give_up_reason,
-        )
-        return state
+    if fallback_picker is not None:
+        # Custom picker (e.g. usher) applies acceptance onto *state* itself.
+        if fallback_picker(state) is not None:
+            return state
+    elif hasattr(state, "pick_fallback_candidate"):
+        fallback = state.pick_fallback_candidate()
+        if fallback is not None:
+            run_no = state.runs.index(fallback) + 1
+            state.latest = fallback
+            state.accepted = True
+            state.accepted_by = "harness_fallback"
+            state.likely_unreachable = False
+            state.history.append(
+                {
+                    "event": "fallback_accept",
+                    "run": run_no,
+                    "changed": fallback.changed,
+                    "stop_reason": state.give_up_reason,
+                }
+            )
+            logger.info(
+                "fallback accept run=%s changed=%s (stop reason: %s)",
+                run_no,
+                fallback.changed,
+                state.give_up_reason,
+            )
+            return state
     if state.gave_up:
         return state
     if not state.gave_up:

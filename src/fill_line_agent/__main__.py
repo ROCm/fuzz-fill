@@ -23,6 +23,7 @@ from fill_line_agent.batch import (
     write_summary,
 )
 from fill_line_agent.check_line import validate_test
+from fill_line_agent.context_json import write_context_json
 from fill_line_agent.instrumented import load_instrumented
 from fill_line_agent.oracle import CoverageOracle, RunResult, TargetLine, ToolName
 from fill_line_agent.render import write_outputs
@@ -368,6 +369,15 @@ def main(argv: list[str] | None = None) -> None:
         args.tools_runner or "host",
     )
     runner = ToolRunner.from_cli(mode=args.tools_runner, image=args.tools_image)
+    # Filepath-only context for usher-test --from (never secrets).
+    write_context_json(
+        out_dir,
+        llvm_src=llvm_src,
+        diff=diff_path,
+        instrumented_bin_dir=bin_dir,
+        tools_runner=runner.mode,
+        tools_image=runner.image if runner.mode == "docker" else None,
+    )
     logger.info("tools-runner mode=%s image=%s", runner.mode, runner.image)
 
     work_ctx = (

@@ -16,7 +16,9 @@ _FORBIDDEN_FLAGS = frozenset({
     "-load-pass-plugin",
     "--load-pass-plugin",
 })
-_SHELL_META = re.compile(r"[;&|`$<>]")
+# < and > are allowed: they appear in new-PM pass names (require<...>, default<O2>).
+# Argv is never run through a shell (subprocess list form).
+_SHELL_META = re.compile(r"[;&|`$]")
 _PATHISH = re.compile(r"(/|\.\./|\.\\)")
 
 
@@ -25,7 +27,11 @@ def validate_argv(
     argv: list[str],
     fmt: InputFormat,
 ) -> list[str]:
-    """Return cleaned argv or raise ``ValueError`` if the proposal is rejected."""
+    """Return cleaned argv or raise ``ValueError`` if the proposal is rejected.
+
+    Host-file ``RUN`` lines trusted by usher should skip this helper and run as
+    parsed. Model-invented argv still goes through here.
+    """
     if fmt == "mir" and tool == "opt":
         raise ValueError("opt does not accept MIR input; use llc or format=ll")
     if not isinstance(argv, list) or any(not isinstance(a, str) for a in argv):

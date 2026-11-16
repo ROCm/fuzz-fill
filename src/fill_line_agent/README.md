@@ -102,6 +102,7 @@ session artifacts first.
 | `fuzz_fill.log` | Session log (`--log-to-file`) |
 | `summary.json` | Multi-target batch result |
 | `lines/<index>-…/` | Per-line outputs when several targets are given |
+| `context.json` | Filepath-only paths for `usher-test --from` (no secrets) |
 
 Terminal statuses / exit codes (single target):
 
@@ -176,16 +177,74 @@ small Ubuntu image for that case. Build it once, then pass
 scripts/fill-line/instrumented-tools/build.sh
 ```
 
+## usher-test
+
+`usher-test` takes a covering `fill-line` result and produces a **standalone**
+FileCheck-ready lit file plus a suggested host path for a human to paste into
+llvm-project. It always runs an LLM session (gateway / `--api-key`). It does
+**not** edit host lit files or emit a git-apply patch into the tree.
+
+```bash
+./venv/bin/fill-line ... --out-dir ./out-line && \
+./venv/bin/usher-test --from ./out-line \
+  --filecheck "$(which FileCheck)" \
+  --api-key "$KEY" --base-url "$GATEWAY_URL" --user-ntid "$USER_NTID"
+```
+
+### Inputs
+
+| Flag / path | Role |
+|---|---|
+| `--from` | fill-line out dir (`result.json`, `test.{ll,mir}`, optional `context.json`) |
+| `--out-dir` | Default `<from>/usher/` (never overwrite the fill-line dir) |
+| `--instrumented-bin-dir` | Same instrumented `opt`/`llc`/`sancov` as fill-line |
+| `--filecheck` | Host `FileCheck` (or on `PATH`) |
+| `context.json` | Optional filepath-only defaults for llvm-src / diff / bin dir |
+
+Only `status=covered` cases are used. Identical covering tests across multi-target
+/ collateral lines are deduplicated into one usher session.
+
+### Outputs (under `--out-dir`)
+
+| Path | Contents |
+|---|---|
+| `cases/<i>-…/test.{ll,mir}` | Standalone lit file with `; Usher: add to <path>` comment |
+| `cases/<i>-…/result.json` | Status + `suggested_host` + discovery/style fields |
+| `cases/<i>-…/discovery/` | fill-line-style attempt logs from `run_candidate` |
+| `test.diff` | Always empty (humans paste standalones manually) |
+| `summary.json` | Batch summary (`mode: standalone`) |
+
+**Statuses:** `standalone` (covers in the declared PR style), `style_mismatch`
+(covers only in another format/shape after fallback unlocks; batch fails),
+`gave_up` (nothing covers).
+
+The agent declares the PR style (`list_pr_tests` → `read_source` →
+`declare_test_style`), then runs a fill-line discovery loop
+(`select_tool` / `record_analysis` / `run_candidate`) constrained to that style
+(`--max-runs`, default 40). When a run covers the line, it calls
+`finalize_standalone(run=N)` + `accept`. Fallback to the fill-line test's own
+format unlocks only on discovery budget, stale runs, or `likely_unreachable`.
+Coverage and FileCheck are validated on the standalone only. On give-up/budget
+the harness may still emit a standalone with a heuristic `suggested_host`.
+
 ### Layout
 
 ```
 src/fill_line_agent/
   __main__.py             # fill-line CLI
+  usher_main.py           # usher-test CLI
+  usher_tools.py          # usher MCP tools
+  usher_session.py        # usher prompts + fallback
+  usher_state.py          # usher session state
+  lit_file.py             # RUN parsing, policy diff
+  source_tools.py         # shared source/diff MCP tools
+  tool_common.py          # shared MCP server helper
+  context_json.py         # filepath-only context.json
   batch.py                # multi-target loop helpers + total budgets
   check_line.py           # check-line CLI
-  session.py              # SDK session loop + system prompt
-  session_state.py        # quotas, analysis, budgets
-  tools.py                # MCP tools closed over session state
+  session.py              # shared SDK session loop
+  session_state.py        # fill-line quotas, analysis, budgets
+  tools.py                # fill-line MCP tools
   oracle.py               # run opt/llc + measure coverage
   instrumented.py         # load binaries, build symcov indexes
   responses.py            # per-response timing / content log
