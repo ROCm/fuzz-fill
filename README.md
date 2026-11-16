@@ -955,6 +955,7 @@ Lines added or changed in LLVM pull requests that baseline coverage (including t
 | 2026-08-25 | [#211937](https://github.com/llvm/llvm-project/pull/211937#issuecomment-5409652592) | [AMDGPU] Unpack V_PK_MOV_B32 for MFMA co-issue |
 | 2026-08-27 | [#218955](https://github.com/llvm/llvm-project/pull/218955#issuecomment-5437365595) | [AMDGPU] Use s_fmamk_f32 when the folded addend is inlinable |
 | 2026-11-05 | [#201675](https://github.com/llvm/llvm-project/pull/201675#issuecomment-6663741675) | [AMDGPU] Add islands to StructurizeCFG |
+| 2026-11-13 | [#242110](https://github.com/llvm/llvm-project/pull/242110#discussion_r4568826994) | [CodeGenPrepare][AMDGPU] Fold urem by constant of loop increment |
 
 #### SPIR-V
 
