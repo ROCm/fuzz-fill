@@ -205,13 +205,14 @@ The agent roughly follows this path:
 
 1. Look at the tests the PR already touches (and nearby ones if needed) and
    decide what “the PR style” is: input kind (for example `.ll` vs `.mir`) and
-   the kind of run command those files use.
-2. Analyze how the target line is reached, then search for an input in the appropriate
-   style that hits the line — like
-   fill-line, but staying inside the targeted style.
+   the RUN line those files use.
+2. Analyze how the target line is reached, then search for an input in that
+   style that hits the line — like fill-line, but staying inside the declared
+   style.
 3. Once something hits, shrink and name the case, write FileCheck expectations
    the way that host file usually does, and emit a standalone file plus a
-   suggested host path.
+   suggested host path. The finished test’s RUN line is the declared PR-style
+   command from step 1.
 4. If a real search in the PR style still cannot hit the line, it may fall
    back to the fill-line test's own format, label the result as a style
    mismatch, and explain why.
