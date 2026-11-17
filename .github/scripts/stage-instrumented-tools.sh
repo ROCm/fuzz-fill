@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Stage instrumented opt/llc (and clang/clang++ when built) plus Release
-# helpers (sancov, FileCheck).
+# Stage instrumented opt/llc (and clang/clang++ plus their resource headers
+# when built) and Release helpers (sancov, FileCheck).
 # Usage:
 #   stage-instrumented-tools.sh \
 #     --bin-dir <build/bin> \
@@ -121,6 +121,36 @@ for tool in clang clang++; do
     fi
 done
 
+# In a build tree clang is a symlink to clang-<major>; stage the real binary so
+# the links resolve inside bin/.
+clang_real=""
+if [[ "$staged_clang" -eq 1 ]]; then
+    clang_real="$(readlink -f "$BIN_DIR/clang")"
+    if [[ "$(dirname "$clang_real")" != "$(readlink -f "$BIN_DIR")" ]]; then
+        echo "error: clang resolves outside the bin directory: $clang_real" >&2
+        exit 1
+    fi
+    clang_real_name="$(basename "$clang_real")"
+    if [[ ! -e "$OUT_DIR/bin/$clang_real_name" ]]; then
+        cp -a "$clang_real" "$OUT_DIR/bin/$clang_real_name"
+    fi
+fi
+
+# Clang looks up its builtin headers relative to its real executable:
+# <bin>/../lib/clang/<major>/include. Keep the same layout in the artifact.
+clang_resource_rel=""
+if [[ "$staged_clang" -eq 1 ]]; then
+    resource_dirs=("$BIN_DIR"/../lib/clang/*/include)
+    if [[ ${#resource_dirs[@]} -ne 1 || ! -d "${resource_dirs[0]}" ]]; then
+        echo "error: expected one clang resource include dir under $BIN_DIR/../lib/clang/*/include" >&2
+        exit 1
+    fi
+    resource_major="$(basename "$(dirname "${resource_dirs[0]}")")"
+    clang_resource_rel="lib/clang/$resource_major/include"
+    mkdir -p "$OUT_DIR/lib/clang/$resource_major"
+    cp -a "${resource_dirs[0]}" "$OUT_DIR/$clang_resource_rel"
+fi
+
 cp -f "$LLVM_DIR/LICENSE.TXT" "$OUT_DIR/LICENSE.TXT"
 
 if [[ -n "$pr_head" ]]; then
@@ -144,6 +174,7 @@ fi
     echo "  bin/opt, bin/llc  RelWithDebInfo, SanitizerCoverage (bb,trace-pc-guard)"
     if [[ "$staged_clang" -eq 1 ]]; then
         echo "  bin/clang, bin/clang++  RelWithDebInfo, SanitizerCoverage (bb,trace-pc-guard)"
+        echo "  $clang_resource_rel  Clang builtin headers (resource dir) for bin/clang"
     fi
     echo "  bin/sancov, bin/FileCheck  Release helpers without SanitizerCoverage"
     echo "  LICENSE.TXT       License of the llvm-project revision that produced these binaries"
@@ -181,4 +212,8 @@ fi
 } > "$OUT_DIR/README.txt"
 
 echo "Instrumented tools staged at $OUT_DIR:"
-find "$OUT_DIR" -type f | LC_ALL=C sort
+find "$OUT_DIR" \( -type f -o -type l \) -not -path "$OUT_DIR/lib/clang/*" | LC_ALL=C sort
+if [[ -n "$clang_resource_rel" ]]; then
+    n_headers="$(find "$OUT_DIR/$clang_resource_rel" -type f | wc -l)"
+    echo "$OUT_DIR/$clang_resource_rel ($n_headers files)"
+fi
