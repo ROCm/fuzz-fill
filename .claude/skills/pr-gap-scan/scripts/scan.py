@@ -118,7 +118,7 @@ FINDING_RESULTS_ARTIFACT_RE = re.compile(r"^gap-finding-results-pr(\d+)-(\d+)$")
 FINDING_RAW_ARTIFACT_RE = re.compile(r"^gap-finding-raw-pr(\d+)-(\d+)$")
 PR_HEAD_ARTIFACT_RE = re.compile(r"^pr-head-pr(\d+)-(\d+)$")
 INSTRUMENTED_TOOLS_ARTIFACT_RE = re.compile(
-    r"^instrumented-tools-pr(\d+)-(\d+)$"
+    r"^instrumented-tools-pr(\d+)-(\d+)-[0-9a-f]+\.tar\.xz$"
 )
 
 

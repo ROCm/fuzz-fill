@@ -21,7 +21,7 @@ PR_ID=""
 OUT_DIR=""
 RUN_ID=""
 REFERENCE=""
-FILECHECK="${FILECHECK:-}"
+LATEST_TOOLS=0
 TOOLS_RUNNER=""
 API_KEY=""
 KEY_FILE=""
@@ -43,9 +43,10 @@ Required:
 
 Optional:
   --run <id>                    Actions run id (passed to setup-context)
+  --latest-tools                Passed to setup-context: newest tools
+                                tarball for the analyzed pr_head
   --reference <path>            Local llvm-project for git clone --reference
   --target <path:line>          Repeatable; fill uses these instead of targets.txt
-  --filecheck <path>            FileCheck binary (or set FILECHECK); required for usher
   --tools-runner <host|docker>  Passed through to fill-line / usher-test when set
   --api-key <key>               Explicit raw gateway key
   --key-file <path>             Gateway key file
@@ -112,6 +113,10 @@ while [[ $# -gt 0 ]]; do
       RUN_ID="$2"
       shift 2
       ;;
+    --latest-tools)
+      LATEST_TOOLS=1
+      shift
+      ;;
     --reference)
       [[ $# -ge 2 ]] || die "--reference requires a value"
       REFERENCE="$2"
@@ -120,11 +125,6 @@ while [[ $# -gt 0 ]]; do
     --target)
       [[ $# -ge 2 ]] || die "--target requires a value"
       TARGETS+=("$2")
-      shift 2
-      ;;
-    --filecheck)
-      [[ $# -ge 2 ]] || die "--filecheck requires a value"
-      FILECHECK="$2"
       shift 2
       ;;
     --tools-runner)
@@ -258,6 +258,7 @@ cmd_setup() {
   [[ -x "$SETUP_CONTEXT" ]] || die "setup-context not found: ${SETUP_CONTEXT}"
   local args=(--pr "$PR_ID" --out "$OUT_DIR")
   [[ -n "$RUN_ID" ]] && args+=(--run "$RUN_ID")
+  [[ "$LATEST_TOOLS" -eq 1 ]] && args+=(--latest-tools)
   [[ -n "$REFERENCE" ]] && args+=(--reference "$REFERENCE")
   "$SETUP_CONTEXT" "${args[@]}"
 }
@@ -317,15 +318,22 @@ cmd_usher() {
   if [[ ! -f "${FILL_OUT}/result.json" && ! -f "${FILL_OUT}/summary.json" ]]; then
     die "missing fill-line results under ${FILL_OUT} (run fill first)"
   fi
-  [[ -n "$FILECHECK" ]] || die "pass --filecheck or set FILECHECK"
-  [[ -x "$FILECHECK" ]] || die "FileCheck not executable: ${FILECHECK}"
+  local filecheck=""
+  if [[ -f "$CONTEXT_ENV" ]]; then
+    # FileCheck from the instrumented-tools artifact (written by setup-context).
+    # shellcheck disable=SC1090
+    source "$CONTEXT_ENV"
+    filecheck="${FILECHECK:-}"
+  fi
+  [[ -n "$filecheck" ]] || die "FILECHECK missing in ${CONTEXT_ENV}; re-run setup"
+  [[ -x "$filecheck" ]] || die "FileCheck not executable: ${filecheck}"
 
   local usher_bin
   usher_bin="$(resolve_bin usher-test)"
 
   local args=(
     --from "${FILL_OUT}"
-    --filecheck "${FILECHECK}"
+    --filecheck "${filecheck}"
   )
   [[ -n "$TOOLS_RUNNER" ]] && args+=(--tools-runner "$TOOLS_RUNNER")
   append_gateway_args args
