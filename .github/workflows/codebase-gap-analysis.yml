@@ -49,8 +49,8 @@ on:
         default: false
       upload_tools:
         description: >-
-          Upload instrumented opt/llc and Release sancov (large; ~1.2 GB
-          uncompressed, off by default)
+          Upload instrumented opt/llc (and clang/clang++ when built) plus
+          Release sancov/FileCheck (large; ~1.2 GB uncompressed, off by default)
         required: false
         type: boolean
         default: false

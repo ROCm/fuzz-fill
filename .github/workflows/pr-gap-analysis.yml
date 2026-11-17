@@ -29,6 +29,13 @@ on:
         required: false
         type: boolean
         default: false
+      build_only:
+        description: >-
+          Only build the instrumented LLVM tools and upload them as an
+          artifact; skip gap finding, reports, and issue filing.
+        required: false
+        type: boolean
+        default: false
       upload_raw:
         description: Upload raw baseline CSVs (large; off by default)
         required: false
@@ -36,8 +43,9 @@ on:
         default: false
       upload_tools:
         description: >-
-          Upload instrumented opt/llc and Release sancov (large; ~1.2 GB
-          uncompressed, off by default)
+          Upload instrumented opt/llc (and clang/clang++ when built) plus
+          Release sancov/FileCheck as a .tar.xz (large; ~1.2 GB uncompressed,
+          off by default)
         required: false
         type: boolean
         default: false
@@ -174,6 +182,18 @@ jobs:
             --no-self-contained \
             --squash-commit-file "${SQUASH_COMMIT_FILE}"
 
+      # Every report is labelled with the head recorded at job start.
+      - name: Verify PR tree matches recorded head
+        run: |
+          head="$(tr -d '[:space:]' < /work/pr-head/pr-head.txt)"
+          git -C "${PR_LLVM_DIR}" fetch --no-filter \
+            "https://github.com/${INPUT_GITHUB_REPO}.git" "${head}"
+          if [[ "$(git -C "${PR_LLVM_DIR}" rev-parse "${head}^{tree}")" != \
+                "$(git -C "${PR_LLVM_DIR}" rev-parse "HEAD^{tree}")" ]]; then
+            echo "error: PR was updated after ${head:0:12} was recorded; re-dispatch" >&2
+            exit 1
+          fi
+
       - name: Classify scope
         id: scope
         run: |
@@ -183,7 +203,7 @@ jobs:
             | tee -a "${GITHUB_OUTPUT}"
 
       - name: Write empty finding report on skip
-        if: steps.scope.outputs.action == 'skip'
+        if: ${{ !inputs.build_only && steps.scope.outputs.action == 'skip' }}
         run: |
           mkdir -p \
             "${OUT_DIR}/baseline" \
@@ -236,7 +256,7 @@ jobs:
           ./scripts/build-llvm-sancov.sh "${build_args[@]}"
 
       - name: Stage instrumented tools artifact
-        if: inputs.upload_tools && steps.scope.outputs.action == 'run'
+        if: (inputs.upload_tools || inputs.build_only) && steps.scope.outputs.action == 'run'
         env:
           SCOPE_BACKENDS: ${{ steps.scope.outputs.backends }}
           SCOPE_ALLOWLIST: ${{ steps.scope.outputs.allowlist }}
@@ -258,15 +278,28 @@ jobs:
             --allowlist "${SCOPE_ALLOWLIST}" \
             --targets "${SCOPE_BACKENDS}" \
             --enable-projects "${enable_projects}" \
-            --allow-inline "${ALLOW_INLINE}"
+            --allow-inline "${ALLOW_INLINE}" \
+            --pr-id "${INPUT_PR_ID}" \
+            --pr-head-file /work/pr-head/pr-head.txt
+
+      # Zipped artifacts drop symlinks and executable bits; a tarball keeps both.
+      # With archive: false the file name is the artifact name.
+      - name: Archive instrumented tools
+        id: tools-tarball
+        if: (inputs.upload_tools || inputs.build_only) && steps.scope.outputs.action == 'run'
+        run: |
+          pr_head="$(tr -d '[:space:]' < /work/pr-head/pr-head.txt)"
+          tarball="/work/instrumented-tools-pr${INPUT_PR_ID}-${GITHUB_RUN_ID}-${pr_head:0:12}.tar.xz"
+          tar -C "${INSTRUMENTED_TOOLS_DIR}" -cf - . | xz -9e -T0 > "${tarball}"
+          ls -l "${tarball}"
+          echo "path=${tarball}" >> "${GITHUB_OUTPUT}"
 
       - name: Upload instrumented tools artifact
-        if: inputs.upload_tools && steps.scope.outputs.action == 'run'
+        if: (inputs.upload_tools || inputs.build_only) && steps.scope.outputs.action == 'run'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: instrumented-tools-pr${{ inputs.pr_id }}-${{ github.run_id }}
-          path: ${{ env.INSTRUMENTED_TOOLS_DIR }}
-          compression-level: 9
+          path: ${{ steps.tools-tarball.outputs.path }}
+          archive: false
           retention-days: 7
           if-no-files-found: error
 
@@ -282,13 +315,13 @@ jobs:
           key: ${{ steps.cache-ccache.outputs.cache-primary-key }}
 
       - name: Install fuzz-fill venv
-        if: steps.scope.outputs.action == 'run'
+        if: ${{ !inputs.build_only && steps.scope.outputs.action == 'run' }}
         run: |
           python3 -m venv "${VENV_DIR}"
           "${VENV_DIR}/bin/pip" install --no-cache-dir -e "${GITHUB_WORKSPACE}"
 
       - name: Run gap finding
-        if: steps.scope.outputs.action == 'run'
+        if: ${{ !inputs.build_only && steps.scope.outputs.action == 'run' }}
         env:
           LIT_ALLOW_FAILURES: "1"
         run: |
@@ -303,7 +336,7 @@ jobs:
             -j "$(nproc)"
 
       - name: Write HTML coverage report
-        if: inputs.generate_html && steps.scope.outputs.action == 'run'
+        if: ${{ inputs.generate_html && !inputs.build_only && steps.scope.outputs.action == 'run' }}
         env:
           SCOPE_BACKENDS: ${{ steps.scope.outputs.backends }}
           SCOPE_TESTS: ${{ steps.scope.outputs.tests }}
@@ -337,8 +370,9 @@ jobs:
           python -m coverage html-report "${html_args[@]}"
 
       - name: Write finding README
+        if: ${{ !inputs.build_only }}
         run: |
-          pr_head="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.sha')"
+          pr_head="$(tr -d '[:space:]' < /work/pr-head/pr-head.txt)"
           pr_head_ref="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.ref')"
           requested_at="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq '.created_at')"
           {
@@ -363,6 +397,7 @@ jobs:
           } > /work/README-finding.txt
 
       - name: Stage finding results artifact
+        if: ${{ !inputs.build_only }}
         run: |
           chmod +x .github/scripts/pr-gap-artifact.sh
           .github/scripts/pr-gap-artifact.sh finding-results \
@@ -372,7 +407,7 @@ jobs:
           .github/scripts/pr-gap-artifact.sh finalize
 
       - name: Stage finding raw artifact
-        if: inputs.upload_raw
+        if: ${{ inputs.upload_raw && !inputs.build_only }}
         run: |
           chmod +x .github/scripts/pr-gap-artifact.sh
           ARTIFACT_DIR="${ARTIFACT_RAW_DIR}" .github/scripts/pr-gap-artifact.sh finding-raw \
@@ -382,6 +417,7 @@ jobs:
           ARTIFACT_DIR="${ARTIFACT_RAW_DIR}" .github/scripts/pr-gap-artifact.sh finalize
 
       - name: Upload gap finding results artifact
+        if: ${{ !inputs.build_only }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gap-finding-results-pr${{ inputs.pr_id }}-${{ github.run_id }}
@@ -390,7 +426,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload gap finding raw artifact
-        if: inputs.upload_raw
+        if: ${{ inputs.upload_raw && !inputs.build_only }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gap-finding-raw-pr${{ inputs.pr_id }}-${{ github.run_id }}
@@ -399,7 +435,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload HTML coverage report
-        if: inputs.generate_html && steps.scope.outputs.action == 'run'
+        if: ${{ inputs.generate_html && !inputs.build_only && steps.scope.outputs.action == 'run' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: html-coverage-pr${{ inputs.pr_id }}-${{ github.run_id }}
@@ -411,7 +447,7 @@ jobs:
   file-pr-analysis-issue:
     name: File PR analysis issue
     needs: pr-gap-analysis
-    if: success() && inputs.file_issue
+    if: success() && inputs.file_issue && !inputs.build_only
     runs-on: ubuntu-latest
     permissions:
       contents: read

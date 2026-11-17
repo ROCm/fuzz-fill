@@ -19,6 +19,16 @@ import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pr_gap_github import (  # noqa: E402
+    analyzed_head_markers,
+    find_pr_issues,
+    gh_api_json,
+    gh_api_paginated,
+    issue_mentions,
+    log,
+)
+
 # Max concurrent `gh api` subprocesses for per-PR discovery fetches. These are
 # independent GETs against non-search REST endpoints (5000/hr limit), so
 # running them concurrently is safe; kept modest to avoid hammering the API.
@@ -104,81 +114,14 @@ GROUP_CONFIGS = {
 CATEGORY_CHOICES = tuple(sorted(set(BACKEND_LABELS) | set(GROUP_CONFIGS)))
 DEFAULT_CATEGORIES = ("amdgpu", "spirv")
 
-# Expected artifact naming from pr-gap-analysis.yml -- used to detect a
-# reusable prior run's artifacts, and to notice if the workflow's naming
-# convention has drifted out from under this check. Finding runs always
-# upload results; HTML coverage uploads when generate_html is on (default);
-# raw (all baseline CSVs) and instrumented tools are opt-in via upload_raw /
-# upload_tools.
-FINDING_RESULTS_ARTIFACT_RE = re.compile(r"^gap-finding-results-pr(\d+)-(\d+)$")
-FINDING_RAW_ARTIFACT_RE = re.compile(r"^gap-finding-raw-pr(\d+)-(\d+)$")
-PR_HEAD_ARTIFACT_RE = re.compile(r"^pr-head-pr(\d+)-(\d+)$")
-INSTRUMENTED_TOOLS_ARTIFACT_RE = re.compile(
-    r"^instrumented-tools-pr(\d+)-(\d+)$"
-)
-HTML_COVERAGE_ARTIFACT_RE = re.compile(r"^html-coverage-pr(\d+)-(\d+)$")
-
-
-def _is_expected_artifact_name(name):
-    return bool(
-        FINDING_RESULTS_ARTIFACT_RE.match(name)
-        or FINDING_RAW_ARTIFACT_RE.match(name)
-        or PR_HEAD_ARTIFACT_RE.match(name)
-        or INSTRUMENTED_TOOLS_ARTIFACT_RE.match(name)
-        or HTML_COVERAGE_ARTIFACT_RE.match(name)
-    )
-
-
 def _finding_artifact_name(number, run_id, *, raw=False):
     prefix = "gap-finding-raw-pr" if raw else "gap-finding-results-pr"
     return f"{prefix}{number}-{run_id}"
-
-def log(msg):
-    print(msg, file=sys.stderr)
 
 
 def check_gh():
     if not shutil.which("gh"):
         sys.exit("error: gh CLI is required (https://cli.github.com/)")
-
-
-def gh_api_json(path, retries=5, backoff=2.0):
-    """GET `path` via `gh api`, retrying transient failures.
-
-    Concurrent discovery (_prefetch_pr_cores/_prefetch_reviewed) fires several
-    of these at once, which makes hitting GitHub's secondary rate limit or a
-    one-off network blip more likely than the old fully-serial callers did --
-    without a retry, one flaky call aborts an entire multi-category discover()
-    and throws away everything already fetched (discover only saves to
-    --state once, at the end).
-    """
-    last_err = None
-    for attempt in range(retries):
-        result = subprocess.run(["gh", "api", path], capture_output=True, text=True)
-        if result.returncode == 0:
-            return json.loads(result.stdout)
-        last_err = (result.stderr or result.stdout or "").strip()
-        if attempt < retries - 1:
-            delay = backoff * (2 ** attempt)
-            log(f"warning: gh api {path!r} failed (attempt {attempt + 1}/{retries}): "
-                f"{last_err} -- retrying in {delay:.0f}s")
-            time.sleep(delay)
-    raise RuntimeError(f"gh api {path!r} failed after {retries} attempts: {last_err}")
-
-
-def gh_api_paginated(path, per_page=100, max_pages=50):
-    items = []
-    page = 1
-    sep = "&" if "?" in path else "?"
-    while page <= max_pages:
-        data = gh_api_json(f"{path}{sep}per_page={per_page}&page={page}")
-        if not isinstance(data, list):
-            return data
-        items.extend(data)
-        if len(data) < per_page:
-            break
-        page += 1
-    return items
 
 
 def _since_date(days):
@@ -314,21 +257,6 @@ def attribute_backends(paths, label_names, requested):
     return label_backends(label_names, requested)
 
 
-def already_reviewed_without_new_commits(llvm_repo, number):
-    """Returns True if fuzz-fill already commented and no commits landed since."""
-    comments = gh_api_paginated(f"repos/{llvm_repo}/issues/{number}/comments")
-    marker_comments = [c for c in comments if "fuzz-fill" in (c.get("body") or "").lower()]
-    if not marker_comments:
-        return False
-    last_comment_at = max(c["created_at"] for c in marker_comments)
-
-    commits = gh_api_paginated(f"repos/{llvm_repo}/pulls/{number}/commits")
-    if not commits:
-        return True
-    last_commit_at = max(c["commit"]["committer"]["date"] for c in commits)
-    return last_commit_at <= last_comment_at
-
-
 def _fetch_pr_core(llvm_repo, number):
     """One PR's metadata + changed files -- the two calls every discovery
     path needs regardless of category. Independent of any other PR, so safe
@@ -356,23 +284,8 @@ def _prefetch_pr_cores(llvm_repo, numbers, cache, max_workers=PR_FETCH_WORKERS):
             cache[futures[future]] = future.result()
 
 
-def _prefetch_reviewed(llvm_repo, numbers, reviewed_cache, max_workers=PR_FETCH_WORKERS):
-    """Populate `reviewed_cache[number]` (already_reviewed_without_new_commits()
-    result) concurrently for any of `numbers` not already cached."""
-    todo = [n for n in numbers if n not in reviewed_cache]
-    if not todo:
-        return
-    with ThreadPoolExecutor(max_workers=min(max_workers, len(todo))) as pool:
-        futures = {
-            pool.submit(already_reviewed_without_new_commits, llvm_repo, n): n
-            for n in todo
-        }
-        for future in as_completed(futures):
-            reviewed_cache[futures[future]] = future.result()
-
-
 def discover(llvm_repo, limit, max_scan_pages=20, per_page=50, backends=None,
-             pr_cache=None, reviewed_cache=None, since_days=DISCOVERY_WINDOW_DAYS,
+             pr_cache=None, since_days=DISCOVERY_WINDOW_DAYS,
              per_label_scan_cap=PER_LABEL_SCAN_CAP):
     """Find up to `limit` most-recently-updated candidate PRs per backend.
 
@@ -392,8 +305,6 @@ def discover(llvm_repo, limit, max_scan_pages=20, per_page=50, backends=None,
     """
     if pr_cache is None:
         pr_cache = {}
-    if reviewed_cache is None:
-        reviewed_cache = {}
     requested = set(backends) if backends else set(BACKEND_PATH_RES)
     since_date = _since_date(since_days) if since_days else None
     candidates = []
@@ -424,8 +335,8 @@ def discover(llvm_repo, limit, max_scan_pages=20, per_page=50, backends=None,
             _prefetch_pr_cores(llvm_repo, page_numbers, pr_cache)
             # The quota check below depends on live `counts`, which only
             # advances as earlier items in this same page are committed, so
-            # this pass (and the already-reviewed check it gates) stays
-            # sequential -- only the network fetch above was parallelized.
+            # this pass stays sequential -- only the network fetch above was
+            # parallelized.
             for number in page_numbers:
                 core = pr_cache[number]
                 pr, filenames, label_names = core["pr"], core["filenames"], core["label_names"]
@@ -440,11 +351,6 @@ def discover(llvm_repo, limit, max_scan_pages=20, per_page=50, backends=None,
                     attributed = [backend]
                 backends_hit = [b for b in attributed if counts[b] < limit]
                 if not backends_hit:
-                    continue
-                if number not in reviewed_cache:
-                    reviewed_cache[number] = already_reviewed_without_new_commits(llvm_repo, number)
-                if reviewed_cache[number]:
-                    log(f"skip PR #{number}: already reviewed, no new commits since")
                     continue
                 candidates.append(
                     {
@@ -469,13 +375,13 @@ def discover(llvm_repo, limit, max_scan_pages=20, per_page=50, backends=None,
 
 
 def discover_group(llvm_repo, group, limit, max_scan_pages=20, per_page=50,
-                    pr_cache=None, reviewed_cache=None, since_days=DISCOVERY_WINDOW_DAYS,
+                    pr_cache=None, since_days=DISCOVERY_WINDOW_DAYS,
                     per_label_scan_cap=PER_LABEL_SCAN_CAP):
     """Find up to `limit` open PRs for a shared llvm/clang quota.
 
     Searches every label in GROUP_CONFIGS[group], dedupes, keeps PRs that
     change a matching lib path (tests/headers/docs alone are not enough),
-    drops already-reviewed ones, then keeps the largest lib diffs
+    then keeps the largest lib diffs
     (additions+deletions on matching lib files only; test paths excluded).
     Ties break toward the more recently updated PR.
     """
@@ -483,8 +389,6 @@ def discover_group(llvm_repo, group, limit, max_scan_pages=20, per_page=50,
         sys.exit(f"error: unknown group {group!r}; choose from {sorted(GROUP_CONFIGS)}")
     if pr_cache is None:
         pr_cache = {}
-    if reviewed_cache is None:
-        reviewed_cache = {}
     config = GROUP_CONFIGS[group]
     labels = config["labels"]
     lib_prefixes = config["lib_prefixes"]
@@ -511,8 +415,8 @@ def discover_group(llvm_repo, group, limit, max_scan_pages=20, per_page=50,
             label_scanned += len(page_numbers)
             # Unlike discover(), eligibility here never depends on processing
             # order (top-N-by-size selection happens after every PR in every
-            # label is collected), so both the metadata fetch and the
-            # already-reviewed check can run fully concurrently per page.
+            # label is collected), so the metadata fetch can run fully
+            # concurrently per page.
             _prefetch_pr_cores(llvm_repo, page_numbers, pr_cache)
             lib_changed = [
                 n for n in page_numbers
@@ -525,11 +429,7 @@ def discover_group(llvm_repo, group, limit, max_scan_pages=20, per_page=50,
                         f"skip PR #{number}: no non-test change under "
                         f"{'/'.join(lib_prefixes)}"
                     )
-            _prefetch_reviewed(llvm_repo, lib_changed, reviewed_cache)
             for number in lib_changed:
-                if reviewed_cache[number]:
-                    log(f"skip PR #{number}: already reviewed, no new commits since")
-                    continue
                 core = pr_cache[number]
                 pr, files = core["pr"], core["files"]
                 size = lib_diff_size(files, lib_prefixes)
@@ -648,17 +548,16 @@ def discover_categories(llvm_repo, categories, limit, max_scan_pages=20, per_pag
 
     # Shared across every category in this call: a PR that matches more than
     # one (e.g. carries both backend:AMDGPU and backend:SPIR-V, or an AMDGPU
-    # PR that also touches llvm/lib/Transforms/) gets its metadata/files and
-    # already-reviewed status fetched once total, not once per category.
+    # PR that also touches llvm/lib/Transforms/) gets its metadata/files
+    # fetched once total, not once per category.
     pr_cache = {}
-    reviewed_cache = {}
 
     per_category = []
     for cat in requested:
         if cat in BACKEND_LABELS:
             found = discover(
                 llvm_repo, limit, max_scan_pages, per_page=per_page, backends=[cat],
-                pr_cache=pr_cache, reviewed_cache=reviewed_cache,
+                pr_cache=pr_cache,
                 since_days=since_days, per_label_scan_cap=per_label_scan_cap,
             )
             for cand in found:
@@ -666,7 +565,7 @@ def discover_categories(llvm_repo, categories, limit, max_scan_pages=20, per_pag
         else:
             found = discover_group(
                 llvm_repo, cat, limit, max_scan_pages, per_page=per_page,
-                pr_cache=pr_cache, reviewed_cache=reviewed_cache,
+                pr_cache=pr_cache,
                 since_days=since_days, per_label_scan_cap=per_label_scan_cap,
             )
             for cand in found:
@@ -809,28 +708,19 @@ def find_cached_run(fuzz_fill_repo, number, head_sha):
     """Look for a prior successful run for this PR that already analyzed
     head_sha, so dispatch() can reuse its artifact instead of scheduling a new run.
 
-    Returns the run_id to reuse, or None if no prior run matches. Warns (and skips
-    that run for reuse purposes) if a run's artifacts don't match the naming
-    convention this depends on ('gap-finding-results-pr<N>-<run_id>' /
-    'pr-head-pr<N>-<run_id>'), since that would otherwise make this check
-    silently useless.
+    Returns the run_id to reuse, or None if no prior run matches. A run is
+    reusable when it still has its 'gap-finding-results-pr<N>-<run_id>'
+    artifact and its 'pr-head-pr<N>-<run_id>' artifact records head_sha; other
+    artifacts are ignored.
     """
     for run in list_prior_runs(fuzz_fill_repo, number):
         run_id = run["id"]
         artifacts = gh_api_json(f"repos/{fuzz_fill_repo}/actions/runs/{run_id}/artifacts?per_page=100")
-        names = {a["name"] for a in artifacts.get("artifacts", [])}
+        names = {
+            a["name"] for a in artifacts.get("artifacts", []) if not a.get("expired")
+        }
         expected_results = _finding_artifact_name(number, run_id)
         expected_head = f"pr-head-pr{number}-{run_id}"
-        unrecognized = {n for n in names if not _is_expected_artifact_name(n)}
-        if unrecognized:
-            log(
-                f"warning: run {run_id} (PR #{number}) has artifact(s) "
-                f"{sorted(unrecognized)} that don't match the expected "
-                f"'gap-finding-results-pr<N>-<run_id>' / 'pr-head-pr<N>-<run_id>' "
-                "naming convention -- has the workflow's artifact naming changed? "
-                "skipping cache reuse for this run"
-            )
-            continue
         if expected_results not in names:
             continue
         if expected_head not in names:
@@ -846,6 +736,15 @@ def find_cached_run(fuzz_fill_repo, number, head_sha):
     return None
 
 
+def find_reported_issue(fuzz_fill_repo, llvm_repo, number, head_sha):
+    """Number of an open or closed report issue that already covers head_sha."""
+    markers = analyzed_head_markers(head_sha)
+    for issue in find_pr_issues(fuzz_fill_repo, llvm_repo, number, state="all"):
+        if issue_mentions(fuzz_fill_repo, issue, *markers):
+            return issue["number"]
+    return None
+
+
 def dispatch(state, state_path, fuzz_fill_repo, ref, llvm_repo, *, upload_tools=False):
     known_ids = {r["run_id"] for r in state["runs"].values() if "run_id" in r}
     for cand in state["candidates"]:
@@ -855,6 +754,18 @@ def dispatch(state, state_path, fuzz_fill_repo, ref, llvm_repo, *, upload_tools=
         if key in state["runs"]:
             continue
         if head_sha:
+            issue_number = find_reported_issue(fuzz_fill_repo, llvm_repo, number, head_sha)
+            if issue_number is not None:
+                log(
+                    f"PR #{number}: head {head_sha[:12]} already reported in "
+                    f"issue #{issue_number}, skipping dispatch"
+                )
+                state["runs"][key] = {
+                    "issue": issue_number,
+                    "status": "reported",
+                }
+                save_state(state, state_path)
+                continue
             cached_run_id = find_cached_run(fuzz_fill_repo, number, head_sha)
             if cached_run_id is not None:
                 log(
