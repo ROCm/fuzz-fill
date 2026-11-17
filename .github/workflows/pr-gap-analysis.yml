@@ -44,7 +44,8 @@ on:
       upload_tools:
         description: >-
           Upload instrumented opt/llc (and clang/clang++ when built) plus
-          Release sancov/FileCheck (large; ~1.2 GB uncompressed, off by default)
+          Release sancov/FileCheck as a .tar.xz (large; ~1.2 GB uncompressed,
+          off by default)
         required: false
         type: boolean
         default: false
@@ -269,13 +270,24 @@ jobs:
             --pr-id "${INPUT_PR_ID}" \
             --pr-head-file /work/pr-head/pr-head.txt
 
+      # Zipped artifacts drop symlinks and executable bits; a tarball keeps both.
+      # With archive: false the file name is the artifact name.
+      - name: Archive instrumented tools
+        id: tools-tarball
+        if: (inputs.upload_tools || inputs.build_only) && steps.scope.outputs.action == 'run'
+        run: |
+          pr_head="$(tr -d '[:space:]' < /work/pr-head/pr-head.txt)"
+          tarball="/work/instrumented-tools-pr${INPUT_PR_ID}-${GITHUB_RUN_ID}-${pr_head:0:12}.tar.xz"
+          tar -C "${INSTRUMENTED_TOOLS_DIR}" -cf - . | xz -9e -T0 > "${tarball}"
+          ls -l "${tarball}"
+          echo "path=${tarball}" >> "${GITHUB_OUTPUT}"
+
       - name: Upload instrumented tools artifact
         if: (inputs.upload_tools || inputs.build_only) && steps.scope.outputs.action == 'run'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: instrumented-tools-pr${{ inputs.pr_id }}-${{ github.run_id }}
-          path: ${{ env.INSTRUMENTED_TOOLS_DIR }}
-          compression-level: 9
+          path: ${{ steps.tools-tarball.outputs.path }}
+          archive: false
           retention-days: 7
           if-no-files-found: error
 
