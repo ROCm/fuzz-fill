@@ -36,6 +36,22 @@ targets under `--out`. `context.env` sets `LLVM_SRC`, `DIFF`, and
 `INSTRUMENTED_BIN_DIR` for `--llvm-src`, `--diff`, and
 `--instrumented-bin-dir`.
 
+To run setup, fill-line, and usher-test together for any PR:
+
+```bash
+export USER_NTID=...
+export LLM_GATEWAY_BASE_URL=...
+export FUZZ_FILL_API_KEY=...   # or pass --api-key / --key-file
+
+scripts/fill-line/run-pr.sh all --pr 12345 --out ./context/pr-12345 \
+  --tools-runner docker --filecheck "$(which FileCheck)" \
+  --reference /path/to/llvm-project
+```
+
+Subcommands: `setup`, `fill`, `usher`, or `all`. Without `--target`,
+`fill` uses every line in `<out>/targets.txt` from setup. Gateway URL comes
+from `--base-url` or `LLM_GATEWAY_BASE_URL` (passed through as `--base-url`).
+
 ### Session flow
 
 The agent loops:

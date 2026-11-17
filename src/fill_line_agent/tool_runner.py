@@ -9,6 +9,7 @@ bind-mounted at the same absolute locations so commands stay unchanged.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import time
@@ -46,6 +47,76 @@ class ToolRunner:
             raise SystemExit(f"tools runner must be host or docker, got {resolved!r}")
         img = (image or os.environ.get(ENV_IMAGE) or DEFAULT_IMAGE).strip()
         return cls(mode=resolved, image=img)  # type: ignore[arg-type]
+
+    def host_callable_tool(
+        self,
+        real_tool: Path,
+        *,
+        shim_dir: Path,
+        bind_paths: Sequence[Path] = (),
+    ) -> Path:
+        """Return a host path that runs *real_tool* via this runner.
+
+        Host mode returns *real_tool*. Docker mode writes a small bash shim
+        under *shim_dir* so host-side helpers (e.g. ``update_*_test_checks.py``)
+        can still invoke instrumented ``llc``/``opt`` without needing a new
+        enough host glibc.
+        """
+        real = real_tool.expanduser().resolve()
+        if self.mode == "host":
+            return real
+        shim_dir = shim_dir.expanduser().resolve()
+        shim_dir.mkdir(parents=True, exist_ok=True)
+        shim = shim_dir / f"{real.name}.docker-shim"
+        fixed_mounts: list[str] = [str(real.parent)]
+        for path in bind_paths:
+            resolved = path.expanduser().resolve()
+            if resolved.is_file():
+                resolved = resolved.parent
+            fixed_mounts.append(str(resolved))
+        # Unique while preserving order.
+        seen: set[str] = set()
+        mounts: list[str] = []
+        for mount in fixed_mounts:
+            if mount not in seen:
+                seen.add(mount)
+                mounts.append(mount)
+        # Paths are absolute; quote for the generated bash script.
+        mounts_lit = " ".join(shlex.quote(m) for m in mounts)
+        script = f"""#!/usr/bin/env bash
+set -euo pipefail
+REAL={shlex.quote(str(real))}
+IMAGE={shlex.quote(self.image)}
+DOCKER_BIN={shlex.quote(self.docker_bin)}
+FIXED_MOUNTS=({mounts_lit})
+uid="$(id -u)"
+gid="$(id -g)"
+cmd=("$DOCKER_BIN" run --rm -i --network=none --user "${{uid}}:${{gid}}")
+declare -A seen_mounts=()
+add_mount() {{
+  local d="$1"
+  [[ -n "${{seen_mounts[$d]:-}}" ]] && return
+  seen_mounts[$d]=1
+  cmd+=(-v "${{d}}:${{d}}")
+}}
+for d in "${{FIXED_MOUNTS[@]}}"; do
+  add_mount "$d"
+done
+for arg in "$@"; do
+  if [[ -e "$arg" ]]; then
+    if [[ -d "$arg" ]]; then
+      add_mount "$(cd -- "$arg" && pwd)"
+    else
+      add_mount "$(cd -- "$(dirname -- "$arg")" && pwd)"
+    fi
+  fi
+done
+cmd+=("$IMAGE" "$REAL" "$@")
+exec "${{cmd[@]}}"
+"""
+        shim.write_text(script, encoding="utf-8")
+        shim.chmod(0o755)
+        return shim
 
     def run(
         self,

@@ -25,7 +25,7 @@ GATEWAY_MODEL_ENV = {
     "ANTHROPIC_AUTH_TOKEN": "placeholder",
     "ANTHROPIC_MODEL": "sonnet",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "Claude-Opus-4.7",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "Claude-Sonnet-4.6",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "Claude-Sonnet-5-5",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "Claude-Haiku-4.5",
 }
 

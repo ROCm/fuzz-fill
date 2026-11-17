@@ -57,6 +57,9 @@ def build_symcov(
 ) -> Path:
     """Run ``tool --version`` under coverage and symbolize into *work_dir*.
 
+    Uses ``sancov -symbolize --no-skip-dead-files`` so files never touched by
+    ``--version`` (e.g. VPlan.cpp) still appear in ``point-symbol-info``.
+
     Returns the path of the written ``.symcov`` file. Never writes into the bin dir.
     """
     dump_dir = work_dir / tool
@@ -98,6 +101,7 @@ def build_symcov(
                 [
                     str(sancov_bin),
                     "-symbolize",
+                    "--no-skip-dead-files",
                     str(sancov_path.resolve()),
                     str(tool_bin),
                 ],

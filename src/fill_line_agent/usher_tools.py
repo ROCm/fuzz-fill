@@ -580,8 +580,17 @@ def run_update_checks_on_standalone(
         fn = funcs[0].name if funcs else function_name_from_ir(test_text)
 
     with tempfile.TemporaryDirectory(prefix="usher-annotate-") as tmp:
-        tmp_path = Path(tmp) / f"standalone.{fmt}"
+        tmp_dir = Path(tmp)
+        tmp_path = tmp_dir / f"standalone.{fmt}"
         tmp_path.write_text(test_text, encoding="utf-8")
+        # update_*_test_checks.py invokes llc/opt as a host subprocess. When the
+        # tools runner is docker, pass a shim so that binary still runs in the
+        # container (CI builds need a newer glibc than many hosts).
+        tool_for_update = state.oracle.runner.host_callable_tool(
+            Path(tool_bin),
+            shim_dir=tmp_dir,
+            bind_paths=[tmp_dir],
+        )
 
         def _cmd(*binary_flags: str) -> list[str]:
             cmd = ["python3", str(script), *binary_flags]
@@ -592,11 +601,11 @@ def run_update_checks_on_standalone(
 
         attempts: list[list[str]] = []
         if "llc" in script_name or "mir" in script_name:
-            attempts.append(_cmd("--llc_binary", str(tool_bin)))
-            attempts.append(_cmd("--llc-binary", str(tool_bin)))
+            attempts.append(_cmd("--llc_binary", str(tool_for_update)))
+            attempts.append(_cmd("--llc-binary", str(tool_for_update)))
         else:
-            attempts.append(_cmd("--opt-binary", str(tool_bin)))
-            attempts.append(_cmd("--tool-binary", str(tool_bin)))
+            attempts.append(_cmd("--opt-binary", str(tool_for_update)))
+            attempts.append(_cmd("--tool-binary", str(tool_for_update)))
 
         last: dict[str, Any] = {"ok": False, "error": "update script failed"}
         for cmd in attempts:
@@ -611,6 +620,7 @@ def run_update_checks_on_standalone(
                 "stderr_tail": (proc.stderr or "")[-1500:],
                 "cmd": cmd,
                 "script": script_name,
+                "tool_binary": str(tool_for_update),
             }
             if proc.returncode == 0:
                 last["test_text"] = tmp_path.read_text(encoding="utf-8")
