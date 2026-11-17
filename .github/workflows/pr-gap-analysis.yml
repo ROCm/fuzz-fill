@@ -265,7 +265,9 @@ jobs:
             --allowlist "${SCOPE_ALLOWLIST}" \
             --targets "${SCOPE_BACKENDS}" \
             --enable-projects "${enable_projects}" \
-            --allow-inline "${ALLOW_INLINE}"
+            --allow-inline "${ALLOW_INLINE}" \
+            --pr-id "${INPUT_PR_ID}" \
+            --pr-head-file /work/pr-head/pr-head.txt
 
       - name: Upload instrumented tools artifact
         if: (inputs.upload_tools || inputs.build_only) && steps.scope.outputs.action == 'run'

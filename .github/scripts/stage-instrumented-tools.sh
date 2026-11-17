@@ -11,7 +11,9 @@
 #     [--allowlist <path or name>] \
 #     [--targets <list>] \
 #     [--enable-projects <list>] \
-#     [--allow-inline true|false]
+#     [--allow-inline true|false] \
+#     [--pr-id <n>] \
+#     [--pr-head-file <path>]
 
 set -euo pipefail
 
@@ -24,6 +26,8 @@ ALLOWLIST=""
 TARGETS=""
 ENABLE_PROJECTS=""
 ALLOW_INLINE=""
+PR_ID=""
+PR_HEAD_FILE=""
 
 usage() {
     cat <<EOF
@@ -31,6 +35,7 @@ Usage:
   $(basename "$0") --bin-dir <path> --llvm-dir <path> --commit-file <path> --out-dir <path>
                  [--github-repo <owner/name>] [--allowlist <path>] [--targets <list>]
                  [--enable-projects <list>] [--allow-inline true|false]
+                 [--pr-id <n>] [--pr-head-file <path>]
 EOF
 }
 
@@ -45,6 +50,8 @@ while [[ $# -gt 0 ]]; do
         --targets) TARGETS="$2"; shift 2 ;;
         --enable-projects) ENABLE_PROJECTS="$2"; shift 2 ;;
         --allow-inline) ALLOW_INLINE="$2"; shift 2 ;;
+        --pr-id) PR_ID="$2"; shift 2 ;;
+        --pr-head-file) PR_HEAD_FILE="$2"; shift 2 ;;
         --help|-h) usage; exit 0 ;;
         *) echo "error: unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
@@ -52,6 +59,11 @@ done
 
 if [[ -z "$BIN_DIR" || -z "$LLVM_DIR" || -z "$COMMIT_FILE" || -z "$OUT_DIR" ]]; then
     usage >&2
+    exit 2
+fi
+
+if [[ -n "$PR_ID" && -z "$PR_HEAD_FILE" ]] || [[ -z "$PR_ID" && -n "$PR_HEAD_FILE" ]]; then
+    echo "error: --pr-id and --pr-head-file must be passed together" >&2
     exit 2
 fi
 
@@ -76,6 +88,19 @@ if [[ -z "$commit" ]]; then
     exit 1
 fi
 
+pr_head=""
+if [[ -n "$PR_HEAD_FILE" ]]; then
+    if [[ ! -f "$PR_HEAD_FILE" ]]; then
+        echo "error: PR head file not found: $PR_HEAD_FILE" >&2
+        exit 1
+    fi
+    pr_head="$(tr -d '[:space:]' < "$PR_HEAD_FILE")"
+    if [[ -z "$pr_head" ]]; then
+        echo "error: PR head file is empty: $PR_HEAD_FILE" >&2
+        exit 1
+    fi
+fi
+
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR/bin"
 
@@ -98,6 +123,10 @@ done
 
 cp -f "$LLVM_DIR/LICENSE.TXT" "$OUT_DIR/LICENSE.TXT"
 
+if [[ -n "$pr_head" ]]; then
+    printf '%s\n' "$pr_head" > "$OUT_DIR/pr-head.txt"
+fi
+
 allowlist_name=""
 if [[ -n "$ALLOWLIST" ]]; then
     allowlist_name="$(basename "$ALLOWLIST")"
@@ -118,6 +147,9 @@ fi
     fi
     echo "  bin/sancov, bin/FileCheck  Release helpers without SanitizerCoverage"
     echo "  LICENSE.TXT       License of the llvm-project revision that produced these binaries"
+    if [[ -n "$pr_head" ]]; then
+        echo "  pr-head.txt       GitHub PR head SHA these binaries were built from"
+    fi
     echo
     echo "These are not unmodified upstream release binaries. opt, llc, and (when present)"
     echo "clang/clang++ were compiled with SanitizerCoverage for coverage measurement."
@@ -126,7 +158,15 @@ fi
     if [[ -n "$GITHUB_REPO" ]]; then
         echo "github_repo: $GITHUB_REPO"
     fi
-    echo "commit: $commit"
+    if [[ -n "$PR_ID" ]]; then
+        echo "pr_id: $PR_ID"
+    fi
+    if [[ -n "$pr_head" ]]; then
+        echo "pr_head: $pr_head"
+        echo "squash_commit: $commit"
+    else
+        echo "commit: $commit"
+    fi
     if [[ -n "$allowlist_name" ]]; then
         echo "allowlist: $allowlist_name"
     fi
