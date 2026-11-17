@@ -525,9 +525,12 @@ class Sancov:
 
             logger.info("Symbolizing %s with %s", sancov_path, self.symbolize_target)
 
+            # Keep files with zero hits in this dump so never-executed
+            # instrumented sources still appear in point-symbol-info.
             cmd = [
                 str(self.sancov_bin),
                 "-symbolize",
+                "--no-skip-dead-files",
                 str(sancov_path),
                 str(self.symbolize_target),
             ]

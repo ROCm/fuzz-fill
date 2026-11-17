@@ -77,7 +77,13 @@ def symbolize_coverage(
         return
     with symcov_path.open('w') as f:
         subprocess.run(
-            [str(sancov_bin), '-symbolize', str(latest_sancov), str(llc_bin)],
+            [
+                str(sancov_bin),
+                '-symbolize',
+                '--no-skip-dead-files',
+                str(latest_sancov),
+                str(llc_bin),
+            ],
             cwd=fuzzer_test_dir,
             check=True,
             stdout=f,
