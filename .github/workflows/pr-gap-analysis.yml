@@ -182,6 +182,18 @@ jobs:
             --no-self-contained \
             --squash-commit-file "${SQUASH_COMMIT_FILE}"
 
+      # Every report is labelled with the head recorded at job start.
+      - name: Verify PR tree matches recorded head
+        run: |
+          head="$(tr -d '[:space:]' < /work/pr-head/pr-head.txt)"
+          git -C "${PR_LLVM_DIR}" fetch --no-filter \
+            "https://github.com/${INPUT_GITHUB_REPO}.git" "${head}"
+          if [[ "$(git -C "${PR_LLVM_DIR}" rev-parse "${head}^{tree}")" != \
+                "$(git -C "${PR_LLVM_DIR}" rev-parse "HEAD^{tree}")" ]]; then
+            echo "error: PR was updated after ${head:0:12} was recorded; re-dispatch" >&2
+            exit 1
+          fi
+
       - name: Classify scope
         id: scope
         run: |
@@ -360,7 +372,7 @@ jobs:
       - name: Write finding README
         if: ${{ !inputs.build_only }}
         run: |
-          pr_head="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.sha')"
+          pr_head="$(tr -d '[:space:]' < /work/pr-head/pr-head.txt)"
           pr_head_ref="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.ref')"
           requested_at="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq '.created_at')"
           {
