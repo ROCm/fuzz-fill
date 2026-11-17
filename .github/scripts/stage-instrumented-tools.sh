@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Stage instrumented opt/llc and the Release sancov helper for upload.
+# Stage instrumented opt/llc (and clang/clang++ when built) plus Release
+# helpers (sancov, FileCheck).
 # Usage:
 #   stage-instrumented-tools.sh \
 #     --bin-dir <build/bin> \
@@ -78,12 +79,21 @@ fi
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR/bin"
 
-for tool in opt llc sancov; do
+# Preserve symlinks (clang++ is often a symlink to clang).
+for tool in opt llc sancov FileCheck; do
     if [[ ! -x "$BIN_DIR/$tool" ]]; then
         echo "error: missing executable: $BIN_DIR/$tool" >&2
         exit 1
     fi
-    cp -f "$BIN_DIR/$tool" "$OUT_DIR/bin/$tool"
+    cp -a "$BIN_DIR/$tool" "$OUT_DIR/bin/$tool"
+done
+
+staged_clang=0
+for tool in clang clang++; do
+    if [[ -e "$BIN_DIR/$tool" ]]; then
+        cp -a "$BIN_DIR/$tool" "$OUT_DIR/bin/$tool"
+        staged_clang=1
+    fi
 done
 
 cp -f "$LLVM_DIR/LICENSE.TXT" "$OUT_DIR/LICENSE.TXT"
@@ -103,12 +113,15 @@ fi
     echo
     echo "Contents:"
     echo "  bin/opt, bin/llc  RelWithDebInfo, SanitizerCoverage (bb,trace-pc-guard)"
-    echo "  bin/sancov        Release helper without SanitizerCoverage"
+    if [[ "$staged_clang" -eq 1 ]]; then
+        echo "  bin/clang, bin/clang++  RelWithDebInfo, SanitizerCoverage (bb,trace-pc-guard)"
+    fi
+    echo "  bin/sancov, bin/FileCheck  Release helpers without SanitizerCoverage"
     echo "  LICENSE.TXT       License of the llvm-project revision that produced these binaries"
     echo
-    echo "These are not unmodified upstream release binaries. opt and llc were compiled"
-    echo "with SanitizerCoverage for coverage measurement. System libraries they link"
-    echo "(libstdc++, zlib, zstd, lzma, …) are not included."
+    echo "These are not unmodified upstream release binaries. opt, llc, and (when present)"
+    echo "clang/clang++ were compiled with SanitizerCoverage for coverage measurement."
+    echo "System libraries they link (libstdc++, zlib, zstd, lzma, …) are not included."
     echo
     if [[ -n "$GITHUB_REPO" ]]; then
         echo "github_repo: $GITHUB_REPO"
