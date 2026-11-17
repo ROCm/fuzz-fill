@@ -217,6 +217,7 @@ def _finish_session_outputs(
     timeout_s: float,
     runner: ToolRunner,
     steps: StepTracker,
+    resource_include: Path | None = None,
 ) -> tuple[str, RunResult | None]:
     """Write session outputs; return ``(status, accepted_result_or_none)``."""
     status = _session_status(state)
@@ -266,6 +267,7 @@ def _finish_session_outputs(
                 sancov_bin=sancov,
                 timeout_s=timeout_s,
                 runner=runner,
+                resource_include=resource_include,
             )
         result_path = out_dir / "result.json"
         payload = json.loads(result_path.read_text(encoding="utf-8"))
@@ -403,7 +405,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     try:
-        tools, indexes, sancov = load_instrumented(
+        tools, indexes, sancov, resource_include = load_instrumented(
             bin_dir=bin_dir,
             work_dir=work_root / "symcov",
             runner=runner,
@@ -536,6 +538,7 @@ def main(argv: list[str] | None = None) -> None:
                 work_root=session_work,
                 timeout_s=args.timeout_s,
                 runner=runner,
+                resource_include=resource_include,
             )
             oracle.set_run_counter(run_counter_base)
 
@@ -578,6 +581,7 @@ def main(argv: list[str] | None = None) -> None:
                 timeout_s=args.timeout_s,
                 runner=runner,
                 steps=steps,
+                resource_include=resource_include,
             )
             covering_run = None
             if accepted is not None:

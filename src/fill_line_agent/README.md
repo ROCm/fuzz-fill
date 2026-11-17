@@ -6,13 +6,15 @@ LLM agent that writes LIT tests for uncovered LLVM source lines, implemented in 
 
 `fill-line` receives one or more target lines.
 Each LLM session still aims at a single line. Over a series of rounds it
-proposes `opt` or `llc` tests aimed at that line, uses nearby coverage to
-guide the next attempt, and picks the tool and flags from the PR diff and
-source.
+proposes `opt`/`llc` or (when staged) `clang_cc1`/`clang`/`clangxx` tests aimed
+at that line, uses nearby coverage to guide the next attempt, and picks the
+tool and flags from the PR diff and source.
 
 ### What it needs
 
 - Instrumented `opt` and/or `llc` binaries plus `sancov`.
+- Optionally instrumented `clang`/`clang++` with sibling
+  `lib/clang/<ver>/include` (required when clang is present).
 - An LLVM source tree and a PR/commit diff
   for context.
 - An LLM gateway subscription key (`--api-key`, `--key-file`, or
@@ -28,6 +30,9 @@ scripts/fill-line/setup-context.sh --pr 12345 --out ./context/pr-12345
 # Reuse objects from an existing llvm-project clone (optional):
 scripts/fill-line/setup-context.sh --pr 12345 --out ./context/pr-12345 \
   --reference /path/to/llvm-project
+# Find latest build_only run:
+scripts/fill-line/setup-context.sh --pr 12345 --out ./context/pr-12345 \
+  --latest-tools
 source ./context/pr-12345/context.env
 ```
 
@@ -44,7 +49,7 @@ export LLM_GATEWAY_BASE_URL=...
 export FUZZ_FILL_API_KEY=...   # or pass --api-key / --key-file
 
 scripts/fill-line/run-pr.sh all --pr 12345 --out ./context/pr-12345 \
-  --tools-runner docker --filecheck "$(which FileCheck)" \
+  --tools-runner docker --latest-tools \
   --reference /path/to/llvm-project
 ```
 
@@ -56,8 +61,9 @@ from `--base-url` or `LLM_GATEWAY_BASE_URL` (passed through as `--base-url`).
 
 The agent loops:
 
-1. Choose `opt` or `llc` and its flags for the next test attempt (or stop if
-   neither can help).
+1. Choose `opt`, `llc`, `clang_cc1`, `clang`, or `clangxx` (or stop if none of
+   the available tools can help). Prefer clang for `clang/` and frontend-only
+   gaps; prefer opt/llc for mid-end/backend `llvm/` gaps.
 2. Write a path-conditions analysis for the reachability of the target line,
    by reading the source around it. Each condition must hold to execute the
    line. For each one the agent records:
@@ -89,9 +95,9 @@ The agent has the following tools/actions available at each round.
 |---|---|
 | `read_diff` / `read_source` / `grep_source` | Inspect PR and LLVM sources |
 | `instrumented_lines` | Static instrumented lines in a range |
-| `select_tool` | Choose `opt`, `llc`, or `none` |
+| `select_tool` | Choose `opt`, `llc`, `clang_cc1`, `clang`, `clangxx`, or `none` |
 | `record_analysis` | Save the current path-conditions analysis |
-| `run_candidate` | Run a proposed `opt`/`llc` test; report target and nearby coverage |
+| `run_candidate` | Run a proposed IR/MIR or C/C++/HIP/OpenCL test; report coverage |
 | `compare_output` / `show_streams` | Inspect the latest run |
 | `accept` / `give_up` | End the session (`accept` can pick any covering run) |
 
@@ -113,8 +119,8 @@ session artifacts first.
 | `result.json` | Status, history, analysis, quota, stats, usage |
 | `analysis.json` | Latest analysis plus every earlier one |
 | `responses.jsonl` | Per-LLM-response timing, tokens, text, tool calls |
-| `attempts/run_NNN.{ll,mir}` | Every candidate (with `Testing:` header) |
-| `test.{ll,mir}` | Accepted lit test (on success) |
+| `attempts/run_NNN.{ll,mir,c,cpp,…}` | Every candidate (with `Testing:` header) |
+| `test.{ll,mir,c,cpp,…}` | Accepted lit test (on success) |
 | `fuzz_fill.log` | Session log (`--log-to-file`) |
 | `summary.json` | Multi-target batch result |
 | `lines/<index>-…/` | Per-line outputs when several targets are given |
@@ -184,7 +190,7 @@ may cover several lines:
 
 ### Running instrumented binaries in Docker
 
-CI-built `opt` / `llc` / `sancov` may not run on the host if shared libraries
+CI-built `opt` / `llc` / `clang` / `sancov` may not run on the host if shared libraries
 (especially glibc) are too old. `scripts/fill-line/instrumented-tools/` is a
 small Ubuntu image for that case. Build it once, then pass
 `--tools-runner docker` to `fill-line` or `check-line`:

@@ -127,26 +127,32 @@ Rules:
 2. Discover the PR style first: list_pr_tests → read_source → declare_test_style.
    Evidence must match the declared suffix and RUN shape. If the declaration
    was wrong, redeclare from better evidence — do not try to escape via
-   off-style runs.
+   off-style runs. Clang styles may use .c/.cpp/.hip/.cl with %clang_cc1 /
+   %clang / %clangxx. -verify and -verify=prefixes are part of the style.
 3. Call select_tool, then record_analysis, before the first run_candidate.
 4. Prefer format matching the declared style. MIR is only valid when the
-   declaration says mir (or after fallback unlocks).
+   declaration says mir (or after fallback unlocks). For clang_cc1, -triple is
+   required; the triple may vary across RUN lines (extra_runs) for clang styles.
 5. After each run_candidate, use the nearby-line window as a closeness hint.
    Read the source of the closest newly hit lines and adjust the input toward
    the branch that reaches the target. Use instrumented_lines for a wider range.
 6. Only target.status == "covered" means the target was reached; a nearby hit
-   is not success. Each reply also reports style_ok.
-7. A non-zero exit (or timeout) is a failed invocation. Fix input/flags; do not
-   treat that run as pass evidence. Use show_streams for more of either stream.
+   is not success. Each reply also reports style_ok. For -verify, exit 0 means
+   expected diagnostics matched.
+7. A non-zero exit (or timeout) is a failed invocation (unless you are still
+   fixing -verify expectations). Fix input/flags; do not treat that run as pass
+   evidence. Use show_streams for more of either stream.
 8. After a run that exited 0, call compare_output to see what the compiler did.
 9. Prefer a positive test when possible (pass applied, changed true). When the
    target is inside a pass, prefer asking for IR/MIR after that pass *only if
-   that shape matches the declared style*.
+   that shape matches the declared style*. Prefer -emit-llvm -o - for clang
+   CodeGen FileCheck tests.
 10. Once a style-conforming run covers the line, polish if needed, then
     finalize_standalone(run=N, suggested_host, check_lines) and accept.
-    check_lines are required with run=N. The RUN line is the declared
-    run_template, not the discovery argv — if coverage is lost after that
-    swap, adjust the input or redeclare, then finalize again.
+    check_lines are required with run=N (may be empty for pure -verify). The
+    RUN line is the declared run_template, not the discovery argv. You may
+    suggest a better-fitting existing host when the RUN shape matches (moved
+    code), without that being a style mismatch.
 11. Fallback to the fill-line test's own format unlocks only when
     style-conforming discovery runs hit the budget, or stale runs hit the
     limit. Off-style attempts the gate rejects do not count. If you never
@@ -155,6 +161,7 @@ Rules:
     result is labelled style_mismatch — not a PR-style success.
 12. dump_ir is for writing CHECK lines / inspecting output, not a discovery
     substitute, and is subject to the same style gate until fallback unlocks.
+    annotate_checks may use update_cc_test_checks.py for C-family tests.
 13. Call give_up when stuck after a real search in the declared style.
 
 Do not invent unsupported RUN pipelines. Humans merge; your job is the standalone

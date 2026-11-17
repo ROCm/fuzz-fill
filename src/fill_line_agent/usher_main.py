@@ -528,7 +528,7 @@ def main(argv: list[str] | None = None) -> None:
     batch_ok = True
 
     try:
-        tools, indexes, sancov = load_instrumented(
+        tools, indexes, sancov, resource_include = load_instrumented(
             bin_dir=bin_dir,
             work_dir=work_root / "symcov",
             runner=runner,
@@ -561,6 +561,7 @@ def main(argv: list[str] | None = None) -> None:
                 work_root=work_root / f"case_{i:03d}",
                 timeout_s=args.timeout_s,
                 runner=runner,
+                resource_include=resource_include,
             )
             allowed = oracle.tools_instrumenting()
             if not allowed:
@@ -693,7 +694,16 @@ def main(argv: list[str] | None = None) -> None:
                     suggested_host = proposal.suggested_host
                     standalone = proposal.test_text
                     run_lines = [r.raw for r in parse_all_runs(standalone)]
-                    if proposal.pr_style_ok or not state.declared_styles:
+                    from fill_line_agent.usher_tools import proposal_shape_matches
+
+                    if (
+                        proposal.pr_style_ok
+                        or not state.declared_styles
+                        or proposal_shape_matches(
+                            state, standalone, out_fmt
+                        )
+                    ):
+                        # Shape match alone is enough for moved-code host choice.
                         status = "standalone"
                     else:
                         status = "style_mismatch"

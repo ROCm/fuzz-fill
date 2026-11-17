@@ -22,12 +22,26 @@ from fill_line_agent.lit_file import (
     split_ll_functions,
     strip_header_comments_keep_run,
     triple_from_argv,
+    verify_prefixes_from_argv,
 )
-from fill_line_agent.oracle import InputFormat, stream_page
+from fill_line_agent.oracle import (
+    _build_tool_cmd,
+    _clang_wants_output_file,
+    stream_page,
+)
 from fill_line_agent.source_tools import source_tool_specs
 from fill_line_agent.tool_common import build_mcp_server, error_payload, text_payload
 from fill_line_agent.tools import fill_tool_specs, make_fill_handlers
 from fill_line_agent.session_state import POLISH_RUNS_AFTER_COVER
+from fill_line_agent.toolset import (
+    FORMAT_SUFFIX,
+    InputFormat,
+    comment_prefix_for,
+    is_clang_tool,
+    is_source_format,
+    lit_token_for,
+    tool_from_lit_token,
+)
 from fill_line_agent.usher_state import (
     DeclaredStyle,
     StandaloneProposal,
@@ -38,7 +52,7 @@ from fuzz_fill.log import get_logger
 
 logger = get_logger("fill_line_agent.usher_tools")
 
-TEST_SUFFIXES = (".ll", ".mir")
+TEST_SUFFIXES = (".ll", ".mir", ".c", ".cpp", ".hip", ".cl")
 CANDIDATE_LIMIT = 40
 CAPTURE_PAGE_LINES = 200
 ADDED_RUNS_LIMIT = 6
@@ -47,10 +61,11 @@ SUPPORTED_UPDATE_SCRIPTS = frozenset(
         "update_test_checks.py",
         "update_llc_test_checks.py",
         "update_mir_test_checks.py",
+        "update_cc_test_checks.py",
     }
 )
 _SPIRV_HINT = re.compile(r"spirv(32|64)?", re.IGNORECASE)
-_RUN_IN_LINE = re.compile(r"^[+#;\s]*RUN:\s*(.*)$")
+_RUN_IN_LINE = re.compile(r"^(?:[+#;\s]|//)*RUN:\s*(.*)$")
 
 
 def _summarize(name: str, args: dict[str, Any]) -> str:
@@ -350,8 +365,8 @@ def rank_candidate_tests(
     return out[:limit]
 
 
-def _ir_body_for_oracle(edited_text: str, fmt: str) -> str:
-    _header, body = strip_header_comments_keep_run(edited_text)
+def _ir_body_for_oracle(edited_text: str, fmt: InputFormat) -> str:
+    _header, body = strip_header_comments_keep_run(edited_text, fmt=fmt)
     if body.strip():
         return body
     return edited_text
@@ -387,10 +402,11 @@ def run_filecheck_pipeline(
     test_path: Path,
     timeout_s: float | None = None,
 ) -> dict[str, Any]:
-    """Run ``opt|llc … | FileCheck``.
+    """Run ``opt|llc|%clang* … | FileCheck``.
 
     The instrumented tool half goes through ``ToolRunner`` (host or docker, same
-    as coverage). FileCheck stays on the host.
+    as coverage). FileCheck stays on the host. Clang expands like the oracle
+    (``-cc1`` + resource include for ``clang_cc1``).
     """
     if parsed.filecheck_args is None:
         return {"ok": False, "error": "RUN line has no FileCheck pipe"}
@@ -401,21 +417,52 @@ def run_filecheck_pipeline(
     test_path = test_path.resolve()
     tool_bin = tool_bin.resolve()
 
-    tool_cmd = [str(tool_bin), *parsed.argv]
+    stdin_text: str | None = None
+    argv = list(parsed.argv)
     # Coverage strips -o from argv; FileCheck needs stdout when the RUN used -o -.
     if getattr(parsed, "output", "default") == "stdout":
-        tool_cmd.extend(["-o", "-"])
-    stdin_text: str | None = None
-    if parsed.stdin_redirect:
-        stdin_text = test_path.read_text(encoding="utf-8", errors="replace")
+        if "-o" not in argv and not any(a.startswith("-o=") for a in argv):
+            argv.extend(["-o", "-"])
+
+    if is_clang_tool(parsed.tool):
+        # Expand %clang_cc1 like lit / the oracle; input is the test file path.
+        capture = test_path.parent / f".usher-out-{test_path.name}"
+        try:
+            tool_cmd = _build_tool_cmd(
+                tool=parsed.tool,
+                tool_bin=tool_bin,
+                argv=argv,
+                input_path=test_path,
+                capture_path=capture,
+                resource_include=state.oracle.resource_include,
+            )
+            # Prefer stdout for FileCheck when the RUN asked for -o -.
+            if getattr(parsed, "output", "default") == "stdout":
+                # Drop a harness -o capture path if we added one for emit actions.
+                if "-o" in tool_cmd and str(capture) in tool_cmd:
+                    oi = tool_cmd.index("-o")
+                    tool_cmd[oi : oi + 2] = ["-o", "-"]
+                elif not _clang_wants_output_file(argv) and "-o" not in tool_cmd:
+                    tool_cmd.extend(["-o", "-"])
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        binds = [tool_bin, test_path, tool_bin.parent.parent]
+        resource = getattr(state.oracle, "resource_include", None)
+        if resource is not None:
+            binds.append(resource)
     else:
-        tool_cmd.append(str(test_path))
+        tool_cmd = [str(tool_bin), *argv]
+        if parsed.stdin_redirect:
+            stdin_text = test_path.read_text(encoding="utf-8", errors="replace")
+        else:
+            tool_cmd.append(str(test_path))
+        binds = [tool_bin, test_path]
 
     try:
         tool_proc = state.oracle.runner.run(
             tool_cmd,
             timeout_s=timeout,
-            bind_paths=[tool_bin, test_path],
+            bind_paths=binds,
             input=stdin_text,
         )
     except subprocess.TimeoutExpired:
@@ -487,9 +534,13 @@ def script_for_standalone(text: str, fmt: str) -> str:
         return note
     if fmt == "mir":
         return "update_mir_test_checks.py"
+    if is_source_format(fmt):
+        return "update_cc_test_checks.py"
     runs = parse_all_runs(text)
     if runs and runs[0].tool == "llc":
         return "update_llc_test_checks.py"
+    if runs and is_clang_tool(runs[0].tool):
+        return "update_cc_test_checks.py"
     return "update_test_checks.py"
 
 
@@ -503,16 +554,17 @@ def ensure_usher_comment(
     style_mismatch_detail: str | None = None,
 ) -> str:
     """Insert or refresh the Usher placement comment near the top."""
-    comment = ";" if fmt == "ll" else "#"
+    comment = comment_prefix_for(fmt)
     lines = test_text.splitlines()
     # Drop prior Usher comments
-    lines = [ln for ln in lines if not re.match(r"^[;#]\s*Usher:", ln)]
+    lines = [ln for ln in lines if not re.match(r"^(?:[;#]|//)\s*Usher:", ln)]
     insert_at = 0
     for i, line in enumerate(lines):
-        if line.strip().startswith((";", "#")) and "RUN:" in line:
+        stripped = line.strip()
+        if stripped.startswith((";", "#", "//")) and "RUN:" in line:
             insert_at = i
             break
-        if line.strip() and not line.strip().startswith((";", "#")):
+        if stripped and not stripped.startswith((";", "#", "//")):
             insert_at = i
             break
     usher_lines: list[str]
@@ -567,12 +619,19 @@ def run_update_checks_on_standalone(
     if script is None:
         return {"ok": False, "error": f"update script not found: {script_name}"}
 
-    tool_for_script = "llc" if "llc" in script_name or "mir" in script_name else "opt"
-    tool_bin = state.oracle.tools.get(tool_for_script)  # type: ignore[arg-type]
+    if "cc_test" in script_name:
+        tool_for_script = "clang"
+        tool_bin = state.oracle.tools.get("clang") or state.oracle.tools.get("clang_cc1")
+    elif "llc" in script_name or "mir" in script_name:
+        tool_for_script = "llc"
+        tool_bin = state.oracle.tools.get("llc")  # type: ignore[arg-type]
+    else:
+        tool_for_script = "opt"
+        tool_bin = state.oracle.tools.get("opt")  # type: ignore[arg-type]
     if tool_bin is None:
         tool_bin = next(iter(state.oracle.tools.values()), None)
     if tool_bin is None:
-        return {"ok": False, "error": "no instrumented opt/llc for update script"}
+        return {"ok": False, "error": "no instrumented tool for update script"}
 
     fn = function_name
     if fn is None and fmt == "ll":
@@ -583,30 +642,36 @@ def run_update_checks_on_standalone(
         tmp_dir = Path(tmp)
         tmp_path = tmp_dir / f"standalone.{fmt}"
         tmp_path.write_text(test_text, encoding="utf-8")
-        # update_*_test_checks.py invokes llc/opt as a host subprocess. When the
+        # update_*_test_checks.py invokes tools as a host subprocess. When the
         # tools runner is docker, pass a shim so that binary still runs in the
         # container (CI builds need a newer glibc than many hosts).
+        bind_extra = [tmp_dir, Path(tool_bin).resolve().parent.parent]
+        resource = getattr(state.oracle, "resource_include", None)
+        if resource is not None:
+            bind_extra.append(resource)
         tool_for_update = state.oracle.runner.host_callable_tool(
             Path(tool_bin),
             shim_dir=tmp_dir,
-            bind_paths=[tmp_dir],
+            bind_paths=bind_extra,
         )
 
         def _cmd(*binary_flags: str) -> list[str]:
             cmd = ["python3", str(script), *binary_flags]
-            if fn and "mir" not in script_name:
+            if fn and "mir" not in script_name and "cc_test" not in script_name:
                 cmd.extend(["--function", fn])
             cmd.append(str(tmp_path))
             return cmd
 
         attempts: list[list[str]] = []
-        if "llc" in script_name or "mir" in script_name:
+        if "cc_test" in script_name:
+            attempts.append(_cmd("--clang", str(tool_for_update)))
+            attempts.append(_cmd("--clang-binary", str(tool_for_update)))
+        elif "llc" in script_name or "mir" in script_name:
             attempts.append(_cmd("--llc_binary", str(tool_for_update)))
             attempts.append(_cmd("--llc-binary", str(tool_for_update)))
         else:
             attempts.append(_cmd("--opt-binary", str(tool_for_update)))
             attempts.append(_cmd("--tool-binary", str(tool_for_update)))
-
         last: dict[str, Any] = {"ok": False, "error": "update script failed"}
         for cmd in attempts:
             try:
@@ -644,7 +709,10 @@ def validate_standalone(
             "error": "standalone has no supported RUN lines",
         }
     parsed = runs[0]
-    fmt_typed: InputFormat = fmt if fmt in ("ll", "mir") else "ll"  # type: ignore[assignment]
+    if fmt in FORMAT_SUFFIX:
+        fmt_typed: InputFormat = fmt  # type: ignore[assignment]
+    else:
+        fmt_typed = "ll"
     cov = run_coverage_for_parsed(state, parsed, test_text, fmt_typed)
     covered = cov["target"]["status"] == "covered"
     coverage = {
@@ -656,6 +724,7 @@ def validate_standalone(
     }
     filecheck: dict[str, Any] = {"ok": True, "skipped": True}
     filecheck_ok = True
+    has_verify = verify_prefixes_from_argv(parsed.argv) is not None
     if parsed.filecheck_args is not None:
         with tempfile.TemporaryDirectory(prefix="usher-fc-") as tmp:
             tmp_path = Path(tmp) / f"standalone.{fmt}"
@@ -664,6 +733,15 @@ def validate_standalone(
             filecheck = {k: v for k, v in fc.items()}
             filecheck_ok = bool(fc.get("ok"))
             filecheck["skipped"] = False
+    elif has_verify:
+        # -verify: exit 0 means expected diagnostics matched.
+        filecheck_ok = cov["exit_code"] == 0
+        filecheck = {
+            "ok": filecheck_ok,
+            "skipped": False,
+            "verify": True,
+            "note": "-verify RUN; exit 0 means diagnostics matched",
+        }
     elif cov["exit_code"] != 0:
         filecheck_ok = False
         filecheck = {
@@ -671,7 +749,6 @@ def validate_standalone(
             "skipped": True,
             "note": "no FileCheck on RUN; tool exit non-zero",
         }
-
     return {
         "ok": covered and filecheck_ok,
         "covered": covered,
@@ -691,6 +768,23 @@ def proposal_matches_pr_style(
             continue
         ok, _ = style.matches(test_text, fmt)
         if ok:
+            return True
+    return False
+
+
+def proposal_shape_matches(state: UsherState, test_text: str, fmt: str) -> bool:
+    """True if the proposal's RUN shape matches a PR-grounded declared style.
+
+    Used for moved-code gaps: a better-fitting host with the same RUN shape is
+    not labelled a style mismatch even when the triple/host differ.
+    """
+    runs = parse_all_runs(test_text)
+    if not runs:
+        return False
+    primary = next((r for r in runs if r.filecheck_args is not None), runs[0])
+    shape = run_shape(primary, fmt)
+    for style in state.declared_styles:
+        if style.pr_grounded and style.shape == shape and style.suffix == fmt:
             return True
     return False
 
@@ -718,10 +812,14 @@ def style_violation(
     """Return an error if *fmt*/*argv* disagree with the declared PR style."""
     if fmt != style.suffix:
         return f"format must be {style.suffix!r} to match declared style (got {fmt!r})"
-    tool_name: ToolName = "opt" if tool == "opt" else "llc"
+    tool_name = tool_from_lit_token(tool) or (
+        tool if tool in ("opt", "llc", "clang_cc1", "clang", "clangxx") else None
+    )
+    if tool_name is None:
+        return f"unsupported tool {tool!r} for style check"
     parsed = ParsedRun(
-        raw=" ".join([tool_name, *argv]),
-        tool=tool_name,
+        raw=" ".join([lit_token_for(tool_name), *argv]),  # type: ignore[arg-type]
+        tool=tool_name,  # type: ignore[arg-type]
         argv=list(argv),
         stdin_redirect=False,
         redirect_stderr=False,
@@ -735,15 +833,33 @@ def style_violation(
             f"RUN shape must be {style.shape!r} to match declared style "
             f"(got {shape!r} from args={argv!r})"
         )
-    if style.triple:
+    # Clang styles: triple is variable (extra RUN lines may use another triple).
+    clang_shapes = ("clang_codegen", "clang_verify", "clang_ast", "clang_driver")
+    if style.triple and style.shape not in clang_shapes:
         got_triple = triple_from_argv(argv)
         if got_triple != style.triple:
             return (
                 f"argv must include -mtriple={style.triple} "
                 f"(got {got_triple!r})"
             )
+    # Keep -verify / -verify=prefixes as part of the style when declared.
+    if style.verify_prefixes is not None:
+        got_verify = verify_prefixes_from_argv(argv)
+        if got_verify is None:
+            return "argv must include -verify (declared style uses -verify)"
+        if sorted(got_verify) != sorted(style.verify_prefixes):
+            return (
+                f"argv -verify prefixes must be {style.verify_prefixes!r} "
+                f"(got {got_verify!r})"
+            )
     got_flags = set(flags_from_argv(argv))
-    missing = [f for f in style.flags if f not in got_flags]
+    # Exclude verify flags from the required-flags check; handled above.
+    required = [
+        f
+        for f in style.flags
+        if f != "-verify" and not f.startswith("-verify=")
+    ]
+    missing = [f for f in required if f not in got_flags]
     if missing:
         return f"argv missing required style flags {missing}"
     return None
@@ -758,13 +874,13 @@ def build_standalone_from_run(
     extra_runs: list[str] | None = None,
 ) -> str:
     """Build a lit file from a discovery run's input plus a declared RUN template."""
-    comment = ";" if fmt == "ll" else "#"
+    comment = comment_prefix_for(fmt)
     body = input_text.strip()
     # Drop any existing RUN / Usher headers from the input body.
     body_lines = [
         ln
         for ln in body.splitlines()
-        if not re.match(r"^[;#]\s*(?:RUN:|Usher:)", ln)
+        if not re.match(r"^(?:[;#]|//)\s*(?:RUN:|Usher:)", ln)
     ]
     parts = [f"{comment} RUN: {run_template.strip()}"]
     for extra in extra_runs or []:
@@ -789,7 +905,7 @@ def evidence_file_style(
     if not path.is_file():
         return f"evidence file not found under llvm-src: {rel_n}"
     suffix = path.suffix.lstrip(".")
-    if suffix not in ("ll", "mir"):
+    if suffix not in FORMAT_SUFFIX:
         return f"evidence {rel_n} has unsupported suffix .{suffix}"
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -832,8 +948,11 @@ def evidence_matches_declaration(
 def declare_test_style_impl(state: UsherState, args: dict[str, Any]) -> dict[str, Any]:
     """Validate and record a declare_test_style call. Returns a plain payload dict."""
     suffix = str(args.get("suffix") or "").strip()
-    if suffix not in ("ll", "mir"):
-        return {"ok": False, "error": "suffix must be ll or mir"}
+    if suffix not in FORMAT_SUFFIX:
+        return {
+            "ok": False,
+            "error": f"suffix must be one of {sorted(FORMAT_SUFFIX)}",
+        }
     run_template = str(args.get("run_template") or "").strip()
     if not run_template:
         return {"ok": False, "error": "run_template is required"}
@@ -998,29 +1117,41 @@ def finalize_standalone_impl(
                     f"run must be between 1 and {len(state.discovery.runs)}"
                 ),
             }
-        if check_s is None:
+        chosen = state.discovery.runs[from_run - 1]
+        if check_s is None and active.shape != "clang_verify":
             return {
                 "ok": False,
                 "error": (
                     "check_lines is required with run=N (write CHECK lines from "
                     "dump_ir/compare_output, or use annotate_checks and pass "
-                    "full test_text)"
+                    "full test_text). Pure -verify styles may pass check_lines=\"\"."
                 ),
             }
-        chosen = state.discovery.runs[from_run - 1]
+        if check_s is None:
+            check_s = ""
+
         fmt = str(args.get("format") or chosen.fmt or active.suffix)
-        if fmt not in ("ll", "mir"):
-            return {"ok": False, "error": "format must be ll or mir"}
+        if fmt not in FORMAT_SUFFIX:
+            return {
+                "ok": False,
+                "error": f"format must be one of {sorted(FORMAT_SUFFIX)}",
+            }
         discovery_argv = [str(a) for a in (chosen.argv or [])]
         # Prefer declared RUN template when the run matches PR style.
         run_ok = state.run_style_ok.get(from_run, False)
         template = active.run_template if run_ok else None
         extras = list(active.extra_runs) if run_ok else None
         if template is None:
-            # Build a simple FileCheck RUN from the discovery argv.
-            tool = chosen.tool
+            # Build a simple FileCheck / -verify RUN from the discovery argv.
+            token = lit_token_for(chosen.tool)
             argv = " ".join(discovery_argv)
-            template = f"{tool} {argv} %s -o - | FileCheck %s".strip()
+            if is_clang_tool(chosen.tool):
+                if verify_prefixes_from_argv(discovery_argv) is not None:
+                    template = f"{token} {argv} %s".strip()
+                else:
+                    template = f"{token} {argv} %s -o - | FileCheck %s".strip()
+            else:
+                template = f"{token} {argv} %s -o - | FileCheck %s".strip()
         else:
             used_declared_template = True
         test_text = build_standalone_from_run(
@@ -1040,9 +1171,11 @@ def finalize_standalone_impl(
                 ),
             }
         fmt = str(args.get("format") or active.suffix or state.fill_test_fmt or "ll")
-        if fmt not in ("ll", "mir"):
-            return {"ok": False, "error": "format must be ll or mir"}
-
+        if fmt not in FORMAT_SUFFIX:
+            return {
+                "ok": False,
+                "error": f"format must be one of {sorted(FORMAT_SUFFIX)}",
+            }
     assert isinstance(test_text, str)
     host_norm = suggested_host.replace("\\", "/")
     if not host_norm.endswith(f".{fmt}"):
@@ -1371,8 +1504,10 @@ def build_usher_tools(state: UsherState):
 
     async def dump_ir(args: dict[str, Any]) -> dict[str, Any]:
         tool = str(args.get("tool") or "")
-        if tool not in ("opt", "llc"):
-            return error_payload("tool must be opt or llc")
+        if tool not in ("opt", "llc", "clang_cc1", "clang", "clangxx"):
+            return error_payload(
+                "tool must be opt, llc, clang_cc1, clang, or clangxx"
+            )
         if tool not in state.oracle.tools:
             return error_payload(f"tool {tool} not available")
         argv_in = args.get("args") or []
@@ -1383,8 +1518,10 @@ def build_usher_tools(state: UsherState):
             active.suffix if active else (state.fill_test_fmt or "ll")
         )
         fmt_raw = str(args.get("format") or default_fmt)
-        if fmt_raw not in ("ll", "mir"):
-            return error_payload("format must be ll or mir")
+        if fmt_raw not in FORMAT_SUFFIX:
+            return error_payload(
+                f"format must be one of {sorted(FORMAT_SUFFIX)}"
+            )
         fmt: InputFormat = fmt_raw  # type: ignore[assignment]
         try:
             argv = validate_argv(tool, list(argv_in), fmt)  # type: ignore[arg-type]
@@ -1400,7 +1537,9 @@ def build_usher_tools(state: UsherState):
                 )
         input_text = str(args.get("input") or "")
         if not input_text.strip():
-            _h, body = strip_header_comments_keep_run(state.fill_test_text)
+            _h, body = strip_header_comments_keep_run(
+                state.fill_test_text, fmt=fmt
+            )
             input_text = body
         result = state.oracle.run(tool, argv, input_text, fmt)  # type: ignore[arg-type]
         state.dump_results.append(result)
@@ -1436,8 +1575,10 @@ def build_usher_tools(state: UsherState):
         active = state.active_style()
         default_fmt = active.suffix if active else (state.fill_test_fmt or "ll")
         fmt = str(args.get("format") or default_fmt)
-        if fmt not in ("ll", "mir"):
-            return error_payload("format must be ll or mir")
+        if fmt not in FORMAT_SUFFIX:
+            return error_payload(
+                f"format must be one of {sorted(FORMAT_SUFFIX)}"
+            )
         script = args.get("script")
         script_name = str(script) if script else None
         fn = args.get("function")
@@ -1514,14 +1655,15 @@ def build_usher_tools(state: UsherState):
                 "properties": {
                     "suffix": {
                         "type": "string",
-                        "description": "ll or mir",
+                        "description": "ll, mir, c, cpp, hip, or cl",
                     },
                     "run_template": {
                         "type": "string",
                         "description": (
                             "Primary RUN to copy, e.g. "
                             "llc -O0 -mtriple=spirv64-unknown-unknown %s -o - | "
-                            "FileCheck %s"
+                            "FileCheck %s  or  "
+                            "%clang_cc1 -triple x86_64 -fsyntax-only -verify %s"
                         ),
                     },
                     "extra_runs": {

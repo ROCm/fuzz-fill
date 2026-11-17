@@ -17,21 +17,25 @@ from fill_line_agent.oracle import (
     TargetLine,
     ToolName,
 )
+from fill_line_agent.toolset import InputFormat
 from fill_line_agent.steps import StepTracker
 from fill_line_agent.tool_runner import ToolRunner
 
 
-def parse_run_line(test_text: str) -> tuple[ToolName, list[str], str]:
+def parse_run_line(
+    test_text: str, *, fmt: InputFormat | None = None
+) -> tuple[ToolName, list[str], str]:
     """Parse the first RUN line into tool, argv, and input body."""
-    return parse_first_run_for_check_line(test_text)
+    return parse_first_run_for_check_line(test_text, fmt=fmt)
 
 
-def detect_format(path: Path) -> str:
+def detect_format(path: Path) -> InputFormat:
     suffix = path.suffix.lstrip(".")
-    if suffix not in ("ll", "mir"):
-        raise ValueError(f"test suffix must be .ll or .mir, got {path.suffix}")
-    return suffix
-
+    if suffix not in ("ll", "mir", "c", "cpp", "hip", "cl"):
+        raise ValueError(
+            f"test suffix must be .ll/.mir/.c/.cpp/.hip/.cl, got {path.suffix}"
+        )
+    return suffix  # type: ignore[return-value]
 
 def validate_test(
     *,
@@ -42,10 +46,11 @@ def validate_test(
     sancov_bin: Path,
     timeout_s: float,
     runner: ToolRunner | None = None,
+    resource_include: Path | None = None,
 ) -> int:
     text = test_path.read_text(encoding="utf-8")
-    tool, argv, input_text = parse_run_line(text)
     fmt = detect_format(test_path)
+    tool, argv, input_text = parse_run_line(text, fmt=fmt)
     if tool == "opt" and fmt == "mir":
         print("error: opt cannot run a .mir test", file=sys.stderr)
         return 1
@@ -65,6 +70,7 @@ def validate_test(
             work_root=Path(tmp),
             timeout_s=timeout_s,
             runner=runner or ToolRunner(),
+            resource_include=resource_include,
         )
         result = oracle.run(tool, argv, input_text, fmt)  # type: ignore[arg-type]
 
@@ -107,7 +113,7 @@ def main(argv: list[str] | None = None) -> None:
     runner = ToolRunner.from_cli(mode=args.tools_runner, image=args.tools_image)
     steps = StepTracker()
     with tempfile.TemporaryDirectory(prefix="check-line-symcov-") as tmp:
-        tools, indexes, sancov = load_instrumented(
+        tools, indexes, sancov, resource_include = load_instrumented(
             bin_dir=args.instrumented_bin_dir,
             work_dir=Path(tmp),
             runner=runner,
@@ -122,6 +128,7 @@ def main(argv: list[str] | None = None) -> None:
                 sancov_bin=sancov,
                 timeout_s=args.timeout_s,
                 runner=runner,
+                resource_include=resource_include,
             )
         )
 

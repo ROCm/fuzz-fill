@@ -8,8 +8,18 @@ import json
 from typing import Any
 
 from fill_line_agent.args_policy import validate_argv
-from fill_line_agent.oracle import InputFormat, stream_page, stream_tail
+from fill_line_agent.oracle import stream_page, stream_tail
 from fill_line_agent.render import command_line, write_analysis, write_attempt
+from fill_line_agent.toolset import (
+    TOOL_NAMES,
+    InputFormat,
+    ToolName,
+    allowed_source_formats,
+    formats_for_tool,
+    is_clang_tool,
+    is_source_format,
+    target_area_for_path,
+)
 from fill_line_agent.session_state import (
     CONDITION_STATUSES,
     MIN_VALID_RUNS_FOR_UNREACHABLE,
@@ -115,19 +125,51 @@ def make_fill_handlers(state: SessionState) -> dict[str, Any]:
                     "capability_gap": state.capability_gap,
                 }
             )
-        if choice not in ("opt", "llc"):
-            return error_payload("tool must be opt, llc, or none")
+        if choice not in TOOL_NAMES:
+            return error_payload(
+                "tool must be opt, llc, clang_cc1, clang, clangxx, or none"
+            )
         if choice not in state.allowed_tools:
             return error_payload(
                 f"{choice} does not instrument the target; "
                 f"allowed: {state.allowed_tools}"
             )
-        state.selected_tool = choice  # type: ignore[assignment]
+        selected: ToolName = choice  # type: ignore[assignment]
+        state.selected_tool = selected
         state.selected_rationale = rationale
         state.history.append(
             {"event": "select_tool", "tool": choice, "rationale": rationale}
         )
-        return text_payload({"ok": True, "selected": choice, "rationale": rationale})
+        area = target_area_for_path(state.target.rel_path)
+        diff_text = ""
+        try:
+            if state.diff_path is not None and state.diff_path.is_file():
+                diff_text = state.diff_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            diff_text = ""
+        src_fmts = (
+            allowed_source_formats(rel_path=state.target.rel_path, diff_text=diff_text)
+            if is_clang_tool(selected)
+            else []
+        )
+        return text_payload(
+            {
+                "ok": True,
+                "selected": choice,
+                "rationale": rationale,
+                "target_area": area,
+                "allowed_formats": list(formats_for_tool(selected)),
+                "allowed_source_formats": src_fmts,
+                "hint": (
+                    "clang/ targets: prefer clang_cc1/clang/clangxx. "
+                    "llvm/ targets: prefer opt/llc; use clang only when the gap "
+                    "depends on frontend-produced IR/MIR that would be contrived "
+                    "to write by hand."
+                    if is_clang_tool(selected) or area == "clang"
+                    else "Prefer opt/llc for llvm/ mid-end and backend gaps."
+                ),
+            }
+        )
 
     async def record_analysis(args: dict[str, Any]) -> dict[str, Any]:
         verdict = str(args.get("verdict") or "").strip()
@@ -219,20 +261,42 @@ def make_fill_handlers(state: SessionState) -> dict[str, Any]:
             state.give_up_reason = reason
             state.stop_requested = True
             return error_payload(reason)
-        fmt_raw = str(args.get("format") or "ll")
-        if fmt_raw not in ("ll", "mir"):
-            return error_payload("format must be ll or mir")
+        tool = state.selected_tool
+        default_fmt = "c" if is_clang_tool(tool) else "ll"
+        fmt_raw = str(args.get("format") or default_fmt)
+        allowed_fmts = formats_for_tool(tool)
+        if fmt_raw not in allowed_fmts:
+            return error_payload(
+                f"format must be one of {allowed_fmts} for {tool}; got {fmt_raw!r}"
+            )
         fmt: InputFormat = fmt_raw  # type: ignore[assignment]
+        if is_source_format(fmt):
+            diff_text = ""
+            try:
+                if state.diff_path is not None and state.diff_path.is_file():
+                    diff_text = state.diff_path.read_text(
+                        encoding="utf-8", errors="replace"
+                    )
+            except OSError:
+                diff_text = ""
+            gate = allowed_source_formats(
+                rel_path=state.target.rel_path, diff_text=diff_text
+            )
+            if fmt not in gate:
+                return error_payload(
+                    f"format={fmt} is not allowed for this target; "
+                    f"allowed_source_formats={gate}"
+                )
         argv_in = args.get("args") or []
         if not isinstance(argv_in, list):
             return error_payload("args must be a list of strings")
         try:
-            argv = validate_argv(state.selected_tool, list(argv_in), fmt)
+            argv = validate_argv(tool, list(argv_in), fmt)
         except ValueError as exc:
             return error_payload(str(exc))
         input_text = str(args.get("input") or "")
         if not input_text.strip():
-            return error_payload("input must be non-empty IR or MIR")
+            return error_payload("input must be non-empty source, IR, or MIR")
 
         run_no = len(state.runs) + 1
         argv_s = " ".join(argv)
@@ -465,14 +529,17 @@ def fill_tool_specs(
     return [
         (
             "select_tool",
-            "Select opt, llc, or none before running candidates. "
-            "none gives up and requires missing_action and why_needed feedback.",
+            "Select opt, llc, clang_cc1, clang, clangxx, or none before running "
+            "candidates. none gives up and requires missing_action and why_needed "
+            "feedback. Returns target_area and allowed formats.",
             {
                 "type": "object",
                 "properties": {
                     "tool": {
                         "type": "string",
-                        "description": "opt, llc, or none",
+                        "description": (
+                            "opt, llc, clang_cc1, clang, clangxx, or none"
+                        ),
                     },
                     "rationale": {"type": "string"},
                     "missing_action": {
@@ -542,9 +609,9 @@ def fill_tool_specs(
         ),
         (
             "run_candidate",
-            "Run the selected tool on LLVM IR or MIR. Requires prior "
-            "record_analysis and a testing field naming the condition under test. "
-            "Reports target coverage, changed, and nearby coverage.",
+            "Run the selected tool on IR/MIR or C/C++/HIP/OpenCL source. Requires "
+            "prior record_analysis and a testing field naming the condition under "
+            "test. Reports target coverage, changed, and nearby coverage.",
             {
                 "type": "object",
                 "properties": {
@@ -555,11 +622,11 @@ def fill_tool_specs(
                     },
                     "input": {
                         "type": "string",
-                        "description": "Full IR or MIR text",
+                        "description": "Full IR, MIR, or source text",
                     },
                     "format": {
                         "type": "string",
-                        "description": "ll or mir",
+                        "description": "ll, mir, c, cpp, hip, or cl",
                     },
                     "testing": {
                         "type": "string",

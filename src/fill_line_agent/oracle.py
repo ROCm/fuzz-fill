@@ -15,6 +15,12 @@ from pathlib import Path
 from typing import Literal
 
 from fill_line_agent.tool_runner import ToolRunner
+from fill_line_agent.toolset import (
+    InputFormat,
+    ToolName,
+    is_clang_tool,
+    is_source_format,
+)
 from coverage.sancov import Sancov
 from reduce.batch.coverage import llvm_rel_source_path
 
@@ -24,12 +30,10 @@ DIFF_MAX_LINES = 200
 
 LineStatus = Literal["covered", "partial", "uncovered", "missed", "hit"]
 TargetStatus = Literal["covered", "partial", "uncovered"]
-ToolName = Literal["opt", "llc"]
-InputFormat = Literal["ll", "mir"]
 
 
 def _safe_rel_path(path: str) -> str:
-    """Normalize a source path to an ``llvm/...`` relative form when possible."""
+    """Normalize a source path to an ``llvm/...`` or ``clang/...`` relative form."""
     try:
         return llvm_rel_source_path(path)
     except ValueError:
@@ -276,16 +280,94 @@ def _unified_diff(a: str, b: str, *, max_lines: int = DIFF_MAX_LINES) -> str:
     return "\n".join(lines)
 
 
+def _clang_sancov_name(name: str) -> bool:
+    """True if a dump basename looks like it came from clang / clang++."""
+    return (
+        name.startswith("clang-")
+        or name.startswith("clang.")
+        or name.startswith("clang++")
+    )
+
+
+def find_sancov_files(run_dir: Path, tool: str) -> list[Path]:
+    """Return matching ``.sancov`` dumps for *tool*, oldest first.
+
+    Clang tools only accept dumps whose basename looks like clang
+    (``clang-*.sancov`` / ``clang.*.sancov`` / ``clang++*``). opt/llc keep the
+    ``{tool}.*.sancov`` pattern.
+    """
+    if is_clang_tool(tool) or tool == "clang":
+        matches = [
+            p for p in run_dir.glob("*.sancov") if _clang_sancov_name(p.name)
+        ]
+        return sorted(matches)
+    return sorted(run_dir.glob(f"{tool}.*.sancov"))
+
+
 def _find_sancov(run_dir: Path, tool: str) -> Path | None:
-    matches = sorted(run_dir.glob(f"{tool}.*.sancov"))
+    matches = find_sancov_files(run_dir, tool)
     if not matches:
         return None
     return matches[-1]
 
 
+def _clang_wants_output_file(argv: list[str]) -> bool:
+    """True when the clang action writes an object/IR/preprocess file via ``-o``."""
+    joined = " ".join(argv)
+    if any(
+        a in ("-fsyntax-only", "-verify", "-###", "-ast-dump")
+        or a.startswith("-verify=")
+        or a.startswith("-ast-dump")
+        for a in argv
+    ):
+        return False
+    return any(
+        a in ("-S", "-E", "-emit-llvm", "-emit-codegen-only")
+        or a.startswith("-emit-llvm")
+        for a in argv
+    ) or "-emit-llvm" in joined
+
+
+def _build_tool_cmd(
+    *,
+    tool: ToolName,
+    tool_bin: Path,
+    argv: list[str],
+    input_path: Path,
+    capture_path: Path,
+    resource_include: Path | None,
+) -> list[str]:
+    if not is_clang_tool(tool):
+        return [
+            str(tool_bin),
+            *argv,
+            str(input_path.resolve()),
+            "-o",
+            str(capture_path.resolve()),
+        ]
+
+    cmd: list[str] = [str(tool_bin)]
+    if tool == "clang_cc1":
+        if resource_include is None:
+            raise ValueError("clang_cc1 requires a staged clang resource include dir")
+        cmd.extend(
+            [
+                "-cc1",
+                "-internal-isystem",
+                str(resource_include.resolve()),
+                "-nostdsysteminc",
+            ]
+        )
+    cmd.extend(argv)
+    cmd.append(str(input_path.resolve()))
+    if _clang_wants_output_file(argv):
+        cmd.extend(["-o", str(capture_path.resolve())])
+    return cmd
+
+
 @dataclass
 class CoverageOracle:
-    """Run instrumented opt/llc and measure coverage for a fixed target."""
+    """Run instrumented opt/llc/clang and measure coverage for a fixed target."""
 
     tools: dict[ToolName, Path]
     indexes: dict[ToolName, SymcovIndex]
@@ -294,10 +376,19 @@ class CoverageOracle:
     work_root: Path
     timeout_s: float = 30.0
     runner: ToolRunner = field(default_factory=ToolRunner)
+    resource_include: Path | None = None
 
     def __post_init__(self) -> None:
         self.work_root.mkdir(parents=True, exist_ok=True)
         self._run_counter = 0
+
+    def _tools_root_binds(self, tool_bin: Path) -> list[Path]:
+        binds = [tool_bin]
+        # Parent of bin/ so clang finds ../lib/clang/<ver>/include relative to itself.
+        binds.append(tool_bin.parent.parent)
+        if self.resource_include is not None:
+            binds.append(self.resource_include)
+        return binds
 
     @property
     def run_counter(self) -> int:
@@ -334,30 +425,40 @@ class CoverageOracle:
         shutil.rmtree(run_dir, ignore_errors=True)
         run_dir.mkdir(parents=True, exist_ok=True)
 
+        out_ext = fmt
+        if is_clang_tool(tool) and _clang_wants_output_file(argv):
+            if "-emit-llvm" in argv or any(a.startswith("-emit-llvm") for a in argv):
+                out_ext = "ll"
+            elif "-S" in argv:
+                out_ext = "s"
+            elif "-E" in argv:
+                out_ext = "i"
         input_path = run_dir / f"input.{fmt}"
-        capture_path = run_dir / f"output.{fmt}"
+        capture_path = run_dir / f"output.{out_ext}"
         input_path.write_text(input_text, encoding="utf-8")
 
         tool_bin = self.tools[tool].resolve()
-        cmd = [
-            str(tool_bin),
-            *argv,
-            str(input_path.resolve()),
-            "-o",
-            str(capture_path.resolve()),
-        ]
+        cmd = _build_tool_cmd(
+            tool=tool,
+            tool_bin=tool_bin,
+            argv=argv,
+            input_path=input_path,
+            capture_path=capture_path,
+            resource_include=self.resource_include,
+        )
         env = os.environ.copy()
         cov_opts = UBSAN_COVERAGE_OPTS.format(dir=str(run_dir.resolve()))
         prev = env.get("UBSAN_OPTIONS", "").strip()
         env["UBSAN_OPTIONS"] = f"{cov_opts}:{prev}" if prev else cov_opts
 
+        bind_paths = [*self._tools_root_binds(tool_bin), run_dir.resolve()]
         timed_out = False
         try:
             proc = self.runner.run(
                 cmd,
                 env=env,
                 timeout_s=self.timeout_s,
-                bind_paths=[tool_bin, run_dir.resolve()],
+                bind_paths=bind_paths,
             )
             exit_code = proc.returncode
             stdout = proc.stdout or ""
@@ -371,31 +472,44 @@ class CoverageOracle:
         capture: str | None = None
         if capture_path.is_file():
             capture = capture_path.read_text(encoding="utf-8", errors="replace")
-        changed = capture is not None and capture != input_text
-        diff = (
-            _unified_diff(input_text, capture)
-            if capture is not None
-            else ("(no capture; process exited non-zero or produced no -o file)")
-        )
+        elif is_clang_tool(tool) and (stdout or stderr):
+            # -fsyntax-only / -verify / -ast-dump: treat process streams as output.
+            capture = stdout if stdout.strip() else stderr
 
-        sancov_path = _find_sancov(run_dir, tool)
+        if is_source_format(fmt):
+            changed = capture is not None and bool(capture.strip())
+            preview = (capture or "")[:4000]
+            diff = (
+                f"(source run; output preview)\n{preview}"
+                if capture is not None
+                else "(no capture; process exited non-zero or produced no output)"
+            )
+        else:
+            changed = capture is not None and capture != input_text
+            diff = (
+                _unified_diff(input_text, capture)
+                if capture is not None
+                else ("(no capture; process exited non-zero or produced no -o file)")
+            )
+
+        dumps = find_sancov_files(run_dir, tool)
+        sancov_path = dumps[-1] if dumps else None
         hit_points: set[str] = set()
-        if sancov_path is not None:
+        for dump in dumps:
             try:
                 printed = self.runner.run(
                     [
                         str(self.sancov_bin.resolve()),
                         "--print",
-                        str(sancov_path.resolve()),
+                        str(dump.resolve()),
                     ],
                     timeout_s=self.timeout_s,
-                    bind_paths=[self.sancov_bin.resolve(), sancov_path.resolve()],
+                    bind_paths=[self.sancov_bin.resolve(), dump.resolve()],
                     check=True,
                 )
-                hit_points = Sancov.parse_print_output(printed.stdout)
+                hit_points |= Sancov.parse_print_output(printed.stdout)
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError):
-                hit_points = set()
-
+                continue
         measure = measure_hits(self.indexes[tool], self.target, hit_points)
         return RunResult(
             tool=tool,

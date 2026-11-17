@@ -9,13 +9,20 @@ NEW_COVERAGE_COLUMNS = frozenset({"test_name", "file", "line", "covered-points"}
 
 
 def llvm_rel_source_path(abs_path: str) -> str:
-    """Path under llvm/... as used in fuzz-fill config.json."""
+    """Path under llvm/... or clang/... as used in fuzz-fill config.json."""
     norm = abs_path.replace("\\", "/")
-    for needle in ("llvm/lib/", "llvm/include/", "llvm/utils/", "llvm/tools/"):
+    for needle in (
+        "llvm/lib/",
+        "llvm/include/",
+        "llvm/utils/",
+        "llvm/tools/",
+        "clang/lib/",
+        "clang/include/",
+    ):
         i = norm.find(needle)
         if i >= 0:
             return norm[i:]
-    raise ValueError(f"Could not derive llvm-relative path from: {abs_path!r}")
+    raise ValueError(f"Could not derive llvm/clang-relative path from: {abs_path!r}")
 
 
 def parse_covered_points_field(value: str) -> list[str]:

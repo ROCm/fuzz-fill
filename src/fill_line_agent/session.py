@@ -136,16 +136,18 @@ A likely_unreachable verdict needs at least 3 valid runs (exit 0) as evidence, p
 
 Rules:
 1. You may only use the provided MCP tools. There is no Bash, Read, Edit, or Write.
-2. First call select_tool with opt, llc, or none. If none of the available tools can reach this line, select none and include missing_action and why_needed feedback.
-3. Prefer format=ll for opt. MIR (format=mir) is only valid with llc.
-4. Call record_analysis before the first run_candidate and before give_up.
-5. After each run_candidate, use the nearby-line window as a closeness hint. Read the source of the closest newly hit lines and adjust the input toward the branch that reaches the target. Use instrumented_lines for a wider static range.
-6. Each run_candidate reply has a target field (status, n_hit, n_points) and changed. Only target.status == "covered" means the target was reached; a nearby hit is not success.
-7. A non-zero exit (or timeout) is a failed invocation. Read stdout/stderr tails for unknown flags, usage errors, or IR/MIR verifier messages, fix the input or flags, and do not treat that run as evidence about the pass. Use show_streams for more of either stream.
-8. After a run that exited 0, call compare_output to see what the compiler did.
-9. When the target line is inside a pass, prefer a positive test when possible: the pass is applied, changed is true, and the diff shows the change that pass exists to make. For llc, prefer asking for IR/MIR after that pass (-stop-after=<pass> on .ll, -run-pass=<pass> on .mir) so the diff is the pass output rather than final assembly. A run that covers the line only on a bailout with an empty diff is a negative test; try a variant that makes the pass fire before accept. If you cannot build a positive test, you may accept the negative one.
-10. Accept is your decision. Call accept(run=N) with any run whose target.status was "covered" (default: the latest run). Once a run covers the target, accept right away if it is a positive test. Otherwise try at most {POLISH_RUNS_AFTER_COVER} more runs to make it positive (the reply shows polish_runs_left and covered_runs), then accept the best covering run.
-11. Call give_up when stuck. Unless the latest analysis verdict is likely_unreachable, give_up also requires missing_action and why_needed. If you select_tool(none), provide the same missing_action and why_needed fields.
+2. First call select_tool with opt, llc, clang_cc1, clang, clangxx, or none. If none of the available tools can reach this line, select none and include missing_action and why_needed feedback.
+3. Tool strategy: for clang/ targets, prefer clang_cc1 (frontend/Sema/CodeGen) or the driver (clang/clangxx). For llvm/ targets, prefer opt/llc; use clang only when the gap depends on frontend-produced IR/MIR that would be contrived by hand. Prefer clang when the gap is frontend-only.
+4. Formats: prefer format=ll for opt. MIR (format=mir) is only valid with llc. For clang tools use c/cpp by default; hip when the target/diff is HIP/CUDA-specific; cl (OpenCL) only when the diff warrants it.
+5. clang_cc1 requires -triple. Sema tests may use -verify with expected-* comments (exit 0 means diagnostics matched). Prefer -emit-llvm -o - for CodeGen FileCheck tests.
+6. Call record_analysis before the first run_candidate and before give_up.
+7. After each run_candidate, use the nearby-line window as a closeness hint. Read the source of the closest newly hit lines and adjust the input toward the branch that reaches the target. Use instrumented_lines for a wider static range.
+8. Each run_candidate reply has a target field (status, n_hit, n_points) and changed. Only target.status == "covered" means the target was reached; a nearby hit is not success.
+9. A non-zero exit (or timeout) is a failed invocation (except intentional -verify mismatches you are still fixing). Read stdout/stderr tails for unknown flags, usage errors, or verifier messages, fix the input or flags, and do not treat that run as evidence about the pass. Use show_streams for more of either stream.
+10. After a run that exited 0, call compare_output to see what the compiler did.
+11. When the target line is inside a pass, prefer a positive test when possible: the pass is applied, changed is true, and the diff shows the change that pass exists to make. For llc, prefer asking for IR/MIR after that pass (-stop-after=<pass> on .ll, -run-pass=<pass> on .mir) so the diff is the pass output rather than final assembly. A run that covers the line only on a bailout with an empty diff is a negative test; try a variant that makes the pass fire before accept. If you cannot build a positive test, you may accept the negative one.
+12. Accept is your decision. Call accept(run=N) with any run whose target.status was "covered" (default: the latest run). Once a run covers the target, accept right away if it is a positive test. Otherwise try at most {POLISH_RUNS_AFTER_COVER} more runs to make it positive (the reply shows polish_runs_left and covered_runs), then accept the best covering run.
+13. Call give_up when stuck. Unless the latest analysis verdict is likely_unreachable, give_up also requires missing_action and why_needed. If you select_tool(none), provide the same missing_action and why_needed fields.
 
 Coverage rule: the target line is covered only when every SanitizerCoverage point on that line is hit in one run.
 """

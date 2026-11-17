@@ -19,7 +19,9 @@ from fill_line_agent.lit_file import (
     run_shape,
     strip_lit_if_wrapper,
     triple_from_argv,
+    verify_prefixes_from_argv,
 )
+from fill_line_agent.toolset import FORMAT_SUFFIX
 
 _LEADING_NOT = re.compile(r"^not\s+(.*)$")
 from fill_line_agent.oracle import CoverageOracle, RunResult, TargetLine, ToolName
@@ -33,7 +35,7 @@ class DeclaredStyle:
     """Agent-declared PR test style, grounded in files it actually read."""
 
     style_id: int
-    suffix: Literal["ll", "mir"]
+    suffix: str
     run_template: str
     shape: RunShape
     triple: str | None
@@ -42,9 +44,10 @@ class DeclaredStyle:
     rationale: str
     pr_grounded: bool
     extra_runs: list[str] = field(default_factory=list)
+    verify_prefixes: list[str] | None = None
 
     def matches(self, test_text: str, fmt: str) -> tuple[bool, list[str]]:
-        """Compare a proposal's first FileCheck RUN against this declaration."""
+        """Compare a proposal's primary RUN against this declaration."""
         reasons: list[str] = []
         if fmt != self.suffix:
             reasons.append(f"suffix {fmt} != {self.suffix}")
@@ -58,11 +61,25 @@ class DeclaredStyle:
         shape = run_shape(primary, fmt)
         if shape != self.shape:
             reasons.append(f"shape {shape} != {self.shape}")
-        triple = triple_from_argv(primary.argv)
-        if self.triple and triple != self.triple:
-            reasons.append(f"triple {triple!r} != {self.triple!r}")
+        clang_shapes = ("clang_codegen", "clang_verify", "clang_ast", "clang_driver")
+        # Clang: triple is variable; an extra RUN may use a different one.
+        if self.triple and self.shape not in clang_shapes:
+            triple = triple_from_argv(primary.argv)
+            if triple != self.triple:
+                reasons.append(f"triple {triple!r} != {self.triple!r}")
+        if self.verify_prefixes is not None:
+            got = verify_prefixes_from_argv(primary.argv)
+            if got is None:
+                reasons.append("missing -verify")
+            elif sorted(got) != sorted(self.verify_prefixes):
+                reasons.append(
+                    f"verify prefixes {got!r} != {self.verify_prefixes!r}"
+                )
         got_flags = set(flags_from_argv(primary.argv))
-        missing = [f for f in self.flags if f not in got_flags]
+        required = [
+            f for f in self.flags if f != "-verify" and not f.startswith("-verify=")
+        ]
+        missing = [f for f in required if f not in got_flags]
         if missing:
             reasons.append(f"missing flags {missing}")
         return (not reasons), reasons
@@ -79,8 +96,10 @@ class DeclaredStyle:
             "rationale": self.rationale,
             "pr_grounded": self.pr_grounded,
             "extra_runs": list(self.extra_runs),
+            "verify_prefixes": (
+                list(self.verify_prefixes) if self.verify_prefixes is not None else None
+            ),
         }
-
 
 def parse_run_template(template: str, suffix: str) -> DeclaredStyle | str:
     """Parse a declared RUN template; return a partial DeclaredStyle or an error string.
@@ -93,13 +112,15 @@ def parse_run_template(template: str, suffix: str) -> DeclaredStyle | str:
     m_not = _LEADING_NOT.match(body)
     if m_not:
         body = m_not.group(1).strip()
+    if suffix not in FORMAT_SUFFIX:
+        return f"unsupported suffix {suffix!r}"
     parsed = parse_run_body(body)
     if parsed is None:
         return f"run_template does not parse as a supported RUN: {template!r}"
     shape = run_shape(parsed, suffix)
     return DeclaredStyle(
         style_id=0,
-        suffix=suffix,  # type: ignore[arg-type]
+        suffix=suffix,
         run_template=template.strip(),
         shape=shape,
         triple=triple_from_argv(parsed.argv),
@@ -107,6 +128,7 @@ def parse_run_template(template: str, suffix: str) -> DeclaredStyle | str:
         evidence=[],
         rationale="",
         pr_grounded=False,
+        verify_prefixes=verify_prefixes_from_argv(parsed.argv),
     )
 
 
