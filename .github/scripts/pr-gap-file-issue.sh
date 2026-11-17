@@ -18,7 +18,7 @@ REPO="${GITHUB_REPOSITORY:-}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-}"
 RUN_ID="${GITHUB_RUN_ID:-}"
 SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}"
-LABEL="pr-analysis-result"
+ISSUES_PY="$(dirname "${BASH_SOURCE[0]}")/pr_gap_github.py"
 CONTAINER_BUILD_PREFIX="/work/pr-llvm/"
 BODY_SOFT_LIMIT=60000
 MAX_ATTEMPTS=3
@@ -83,12 +83,20 @@ if [[ -z "$pr_id" || -z "$github_repo" || -z "$pr_head" ]]; then
     exit 1
 fi
 
-# redirect.github.com so GitHub does not autolink this into a backlink on the target PR.
-# The plain path is the form already written on earlier issues; keep matching it.
-tracking_key="Tracking-PR: https://redirect.github.com/${github_repo}/pull/${pr_id}"
-legacy_tracking_key="Tracking-PR: ${github_repo}/pull/${pr_id}"
-workflow_run_key="Workflow-Run: ${RUN_ID}"
-short_sha="${pr_head:0:12}"
+# Label and key lines come from pr_gap_github.py, which also matches them.
+mapfile -t issue_keys < <(
+    python3 "$ISSUES_PY" keys --llvm-repo "$github_repo" --pr "$pr_id" \
+        --run-id "$RUN_ID" --head "$pr_head"
+)
+if [[ "${#issue_keys[@]}" -ne 5 ]]; then
+    echo "error: ${ISSUES_PY} keys failed" >&2
+    exit 1
+fi
+LABEL="${issue_keys[0]}"
+tracking_key="${issue_keys[1]}"
+workflow_run_key="${issue_keys[2]}"
+analyzed_head_line="${issue_keys[3]}"
+analyzed_head_key="${issue_keys[4]}"
 issue_title="PR Analysis: ${github_repo} pull ${pr_id}"
 
 mapfile -t entries < <(
@@ -145,50 +153,14 @@ ensure_label() {
 }
 
 find_open_issue() {
-    local page=1 per_page=100 oldest=""
-    while true; do
-        local batch len match
-        batch="$(
-            gh_retry gh api \
-                "repos/${REPO}/issues?state=open&labels=${LABEL}&per_page=${per_page}&page=${page}"
-        )"
-        len="$(printf '%s' "$batch" | jq 'length')"
-        if [[ "$len" -eq 0 ]]; then
-            break
-        fi
-        while IFS= read -r match; do
-            [[ -n "$match" ]] || continue
-            if [[ -z "$oldest" || "$match" -lt "$oldest" ]]; then
-                oldest="$match"
-            fi
-        done < <(
-            printf '%s' "$batch" | jq -r --arg key "$tracking_key" --arg legacy "$legacy_tracking_key" \
-                '.[] | select((.body // "") | contains($key) or contains($legacy)) | .number'
-        )
-        if [[ "$len" -lt "$per_page" ]]; then
-            break
-        fi
-        page=$((page + 1))
-    done
-    printf '%s' "$oldest"
+    python3 "$ISSUES_PY" find-open --repo "$REPO" \
+        --llvm-repo "$github_repo" --pr "$pr_id"
 }
 
-already_posted_for_run() {
-    local issue_number="$1"
-    local body comments
-    body="$(gh_retry gh api "repos/${REPO}/issues/${issue_number}" --jq '.body // ""')"
-    if printf '%s\n' "$body" | grep -Fq "$workflow_run_key"; then
-        return 0
-    fi
-    comments="$(
-        gh_retry gh api --paginate \
-            "repos/${REPO}/issues/${issue_number}/comments" \
-            --jq '.[].body // ""'
-    )"
-    if printf '%s\n' "$comments" | grep -Fq "$workflow_run_key"; then
-        return 0
-    fi
-    return 1
+# Prints the issue number when this run already posted there, else nothing.
+posted_for_run() {
+    python3 "$ISSUES_PY" mentions --repo "$REPO" \
+        --issue "$1" --text "$workflow_run_key"
 }
 
 resolve_artifact_id() {
@@ -229,7 +201,7 @@ build_body() {
         body+="\`${pr_title}\`"$'\n'
     fi
     body+=$'\n'
-    body+="Analyzed head \`${short_sha}\` (\`${pr_head}\`)."$'\n'
+    body+="${analyzed_head_line}"$'\n'
     body+=$'\n'
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -300,6 +272,7 @@ build_body() {
 
     body+="${tracking_key}"$'\n'
     body+="${workflow_run_key}"$'\n'
+    body+="${analyzed_head_key}"$'\n'
     printf '%s' "$body"
 }
 
@@ -322,7 +295,8 @@ ensure_label
 
 existing="$(find_open_issue)"
 if [[ -n "${existing:-}" ]]; then
-    if already_posted_for_run "$existing"; then
+    posted="$(posted_for_run "$existing")"
+    if [[ -n "$posted" ]]; then
         echo "already posted for ${workflow_run_key} on issue #${existing}; skipping"
         echo "${SERVER_URL}/${REPO}/issues/${existing}"
         exit 0
