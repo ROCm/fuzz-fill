@@ -25,6 +25,9 @@ Usage: $0 <allowlist> <llvm_dir> <sancov_build_dir> --bootstrap-bin <dir> [ninja
   --ccache-compiler-check-version
                     With --enable-ccache, hash via '%compiler% --version' (off by default).
   --allow-inline    Do not pass -fno-inline to the instrumented build (off by default).
+  --prune           Enable SanitizerCoverage block pruning. Off by default, so
+                    the build passes no-prune. Pruning drops counters on blocks
+                    that still execute and can report those lines as uncovered.
   ninja_jobs        Optional parallel jobs for ninja (-j); omit to leave ninja unconstrained
 
 Configures one RelWithDebInfo + SanitizerCoverage tree and builds ninja all.
@@ -49,6 +52,7 @@ NINJA_JOBS=""
 ENABLE_CCACHE=0
 CCACHE_COMPILER_CHECK_VERSION=0
 ALLOW_INLINE=0
+PRUNE=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -116,6 +120,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --allow-inline)
             ALLOW_INLINE=1
+            shift
+            ;;
+        --prune)
+            PRUNE=1
             shift
             ;;
         --help|-h)
@@ -233,7 +241,11 @@ if [[ "$ENABLE_CCACHE" -eq 1 ]]; then
     )
 fi
 
-SANCOV_FLAGS="-fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=${INSTRUMENTATION_MODE},trace-pc-guard"
+COVERAGE_FEATURES="${INSTRUMENTATION_MODE},trace-pc-guard"
+if [[ "$PRUNE" -ne 1 ]]; then
+    COVERAGE_FEATURES+=",no-prune"
+fi
+SANCOV_FLAGS="-fsanitize-coverage-allowlist=$ALLOWLIST -fsanitize-coverage=${COVERAGE_FEATURES}"
 if [[ "$ALLOW_INLINE" -ne 1 ]]; then
     SANCOV_FLAGS="-fno-inline ${SANCOV_FLAGS}"
 fi
@@ -325,6 +337,7 @@ echo "  Linker:           lld ($LLD)"
 echo "  Release sancov:   $SANCOV_TOOL_BUILD_DIR"
 echo "  ccache:           $([[ "$ENABLE_CCACHE" -eq 1 ]] && echo enabled || echo disabled)"
 echo "  -fno-inline:      $([[ "$ALLOW_INLINE" -eq 1 ]] && echo omitted || echo enabled)"
+echo "  Block pruning:    $([[ "$PRUNE" -eq 1 ]] && echo enabled || echo disabled)"
 echo
 
 echo "=== Instrumented tree (RelWithDebInfo + SanitizerCoverage, ninja all) ==="
