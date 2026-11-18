@@ -194,6 +194,16 @@ def main():
             "(default: enabled). Use --no-require-sancov to allow an empty baseline."
         ),
     )
+    p_baseline.add_argument(
+        "--delete-raw-sancov",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Delete the raw_sancov directory after a successful merge and "
+            "symbolize, before writing address-line maps (default: enabled). "
+            "Use --no-delete-raw-sancov to keep the individual dumps."
+        ),
+    )
 
     p_candidate_test.add_argument(
         "--llc",
@@ -437,6 +447,7 @@ def main():
                     lit_allow_failures=args.lit_allow_failures,
                     lit_priority_slow_tests=args.lit_priority_slow_tests,
                     require_sancov=args.require_sancov,
+                    delete_raw_sancov=args.delete_raw_sancov,
                     debug=args.debug,
                 )
                 test_runner.run()

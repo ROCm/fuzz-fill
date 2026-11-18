@@ -163,6 +163,62 @@ class AggregateLitTemporaryCoverageTest(unittest.TestCase):
             self.assertIn("no sancov files", str(ctx.exception))
             self.assertIn("FileCheck", stdout.getvalue())
 
+    def test_deletes_raw_sancov_after_successful_merge_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = _runner(Path(tmp))
+            raw = runner.raw_sancov_output_dir
+            _dump(raw, "llc.42.sancov")
+
+            def fake_merge(
+                sancovs: list[Sancov],
+                dumps_by_tool: dict[str, list[str]],
+                workers: int,
+            ) -> None:
+                del dumps_by_tool, workers
+                for sancov in sancovs:
+                    sancov.get_merged_symcov_path().write_text("{}", encoding="utf-8")
+
+            covered = pd.DataFrame(
+                [{"file": "a.cpp", "line": 1, "point": "0x1", "covered": 0}]
+            )
+            with (
+                patch("coverage.test_runner._merge_and_symbolize_sancovs", fake_merge),
+                patch.object(Sancov, "load_coverage_dfs", return_value=[covered]),
+            ):
+                runner.get_aggregate_coverage()
+
+            self.assertFalse(raw.exists())
+            self.assertTrue(
+                (runner.filepaths.output_dir / "llc_address_line_map.csv").is_file()
+            )
+
+    def test_keeps_raw_sancov_when_delete_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = _runner(Path(tmp))
+            runner.delete_raw_sancov = False
+            raw = runner.raw_sancov_output_dir
+            _dump(raw, "llc.42.sancov")
+
+            def fake_merge(
+                sancovs: list[Sancov],
+                dumps_by_tool: dict[str, list[str]],
+                workers: int,
+            ) -> None:
+                del dumps_by_tool, workers
+                for sancov in sancovs:
+                    sancov.get_merged_symcov_path().write_text("{}", encoding="utf-8")
+
+            covered = pd.DataFrame(
+                [{"file": "a.cpp", "line": 1, "point": "0x1", "covered": 0}]
+            )
+            with (
+                patch("coverage.test_runner._merge_and_symbolize_sancovs", fake_merge),
+                patch.object(Sancov, "load_coverage_dfs", return_value=[covered]),
+            ):
+                runner.get_aggregate_coverage()
+
+            self.assertTrue((raw / "llc.42.sancov").is_file())
+
     def test_missing_real_binary_still_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runner = _runner(Path(tmp))

@@ -358,6 +358,7 @@ class TestRunner:
         lit_allow_failures: bool = False,
         lit_priority_slow_tests: bool = True,
         require_sancov: bool = True,
+        delete_raw_sancov: bool = True,
         candidate_tests_limit: int | None = None,
         llc_flag_variants: list[str] | None = None,
         timeout: int = 5,
@@ -371,6 +372,7 @@ class TestRunner:
         self.lit_allow_failures = lit_allow_failures
         self.lit_priority_slow_tests = lit_priority_slow_tests
         self.require_sancov = require_sancov
+        self.delete_raw_sancov = delete_raw_sancov
         self.debug = debug
         self._lit_selected_no_tests = False
 
@@ -714,6 +716,12 @@ class TestRunner:
             # symbolize memory budget inside _merge_and_symbolize_sancovs.
             workers = resolve_lit_job_count(self.jobs)
             _merge_and_symbolize_sancovs(sancovs, filtered_dumps, workers)
+
+        # Free individual dumps before writing address-line maps. Later steps
+        # only need processed_sancov/ and the CSVs.
+        if self.delete_raw_sancov and self.raw_sancov_output_dir.is_dir():
+            with log_timing(logger, "delete raw sancov dumps"):
+                shutil.rmtree(self.raw_sancov_output_dir)
 
         coverage_dfs = []
         for tool, sancov in zip(tools, sancovs):
