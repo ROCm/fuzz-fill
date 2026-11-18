@@ -23,6 +23,7 @@ RUN_ID=""
 REFERENCE=""
 LATEST_TOOLS=0
 TOOLS_RUNNER=""
+MODEL=""
 API_KEY=""
 KEY_FILE=""
 BASE_URL="${LLM_GATEWAY_BASE_URL:-}"
@@ -48,6 +49,8 @@ Optional:
   --reference <path>            Local llvm-project for git clone --reference
   --target <path:line>          Repeatable; fill uses these instead of targets.txt
   --tools-runner <host|docker>  Passed through to fill-line / usher-test when set
+  --model <name>                Passed through to fill-line / usher-test
+                                (e.g. Claude-Haiku-5-5, haiku; default: gateway setting)
   --api-key <key>               Explicit raw gateway key
   --key-file <path>             Gateway key file
   --base-url <url>              Gateway base URL (or set LLM_GATEWAY_BASE_URL)
@@ -130,6 +133,11 @@ while [[ $# -gt 0 ]]; do
     --tools-runner)
       [[ $# -ge 2 ]] || die "--tools-runner requires a value"
       TOOLS_RUNNER="$2"
+      shift 2
+      ;;
+    --model)
+      [[ $# -ge 2 ]] || die "--model requires a value"
+      MODEL="$2"
       shift 2
       ;;
     --api-key)
@@ -306,6 +314,7 @@ cmd_fill() {
     --work-dir "${FILL_WORK}"
   )
   [[ -n "$TOOLS_RUNNER" ]] && args+=(--tools-runner "$TOOLS_RUNNER")
+  [[ -n "$MODEL" ]] && args+=(--model "$MODEL")
   args+=("${target_args[@]}")
   append_gateway_args args
   args+=("${EXTRA_ARGS[@]}")
@@ -336,6 +345,7 @@ cmd_usher() {
     --filecheck "${filecheck}"
   )
   [[ -n "$TOOLS_RUNNER" ]] && args+=(--tools-runner "$TOOLS_RUNNER")
+  [[ -n "$MODEL" ]] && args+=(--model "$MODEL")
   append_gateway_args args
   args+=("${EXTRA_ARGS[@]}")
 

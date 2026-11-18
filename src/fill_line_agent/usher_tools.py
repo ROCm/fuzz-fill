@@ -404,8 +404,9 @@ def run_filecheck_pipeline(
 ) -> dict[str, Any]:
     """Run ``opt|llc|%clang* … | FileCheck``.
 
-    The instrumented tool half goes through ``ToolRunner`` (host or docker, same
-    as coverage). FileCheck stays on the host. Clang expands like the oracle
+    Both halves go through ``ToolRunner`` (host or docker, same as coverage),
+    so an instrumented FileCheck binary runs in the tools image instead of on
+    a host whose glibc is too old. Clang expands like the oracle
     (``-cc1`` + resource include for ``clang_cc1``).
     """
     if parsed.filecheck_args is None:
@@ -486,17 +487,19 @@ def run_filecheck_pipeline(
             "error": "instrumented tool failed before FileCheck",
         }
 
-    fc_cmd = [str(state.filecheck_bin.resolve()), *parsed.filecheck_args, str(test_path)]
+    fc_bin = state.filecheck_bin.resolve()
+    fc_cmd = [str(fc_bin), *parsed.filecheck_args, str(test_path)]
     try:
-        fc_proc = subprocess.run(
+        fc_proc = state.oracle.runner.run(
             fc_cmd,
+            timeout_s=timeout,
+            bind_paths=[fc_bin, test_path],
             input=combined,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "FileCheck timed out", "timed_out": True}
+    except RuntimeError as exc:
+        return {"ok": False, "error": str(exc)}
 
     ok = fc_proc.returncode == 0
     return {
