@@ -888,6 +888,7 @@ The main suite under `integration-tests/` needs the SanitizerCoverage LLVM `bin`
   --llvm-build llvm-project/build-sancov/bin/ \
   --llvm-sancov-build llvm-project/build-sancov/bin/ \
   --llvm-src llvm-project/ \
+  --host-bin /usr/lib/llvm-24/bin \
   integration-tests/
 ```
 
@@ -915,6 +916,7 @@ export GH_TOKEN="$(gh auth token)"   # or ${{ github.token }} in CI
   --venv ./venv/ \
   --llvm-build /usr/lib/llvm-24/bin \
   --llvm-src llvm-project/ \
+  --host-bin /usr/lib/llvm-24/bin \
   --param e2e=1 \
   -v integration-tests/e2e/gap-finding-pr/
 ```

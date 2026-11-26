@@ -7,8 +7,8 @@
 #   ./scripts/build-llvm-sancov.sh scripts/allowlist-amdgpu.txt llvm-project \
 #       llvm-project/build-sancov --bootstrap-bin /path/to/llvm/bin
 #
-# Usage:
-#   ./scripts/corpus_vs_suite_coverage.sh
+# Usage (HOST_BIN is required: non-instrumented LLVM bin with llvm-profdata/llvm-cov):
+#   HOST_BIN=/usr/lib/llvm-24/bin ./scripts/corpus_vs_suite_coverage.sh
 #   CORPUS_N=100 ./scripts/corpus_vs_suite_coverage.sh          # smoke: first 100 files
 #   FILTER='CodeGen/AMDGPU/loop' ./scripts/corpus_vs_suite_coverage.sh
 #   FILTER='(?:^|/)AMDGPU(?:/|$)' ./scripts/corpus_vs_suite_coverage.sh
@@ -27,7 +27,7 @@ LLVM="${LLVM:-$FUZZ_FILL/llvm-project}"
 LLVM_BIN="${LLVM_BIN:-$LLVM/build-sancov/bin}"
 INSTRUMENTED_BIN="${INSTRUMENTED_BIN:-$LLVM/build-sancov/bin}"
 COVERAGE_BUILD_DIR="${COVERAGE_BUILD_DIR:-$LLVM/build-coverage}"
-HOST_BIN="${HOST_BIN:-$COVERAGE_BUILD_DIR/bin}"
+HOST_BIN="${HOST_BIN:-}"
 CORPUS="${CORPUS:-$FUZZ_FILL/amdgpu-tests}"
 FILTER="${FILTER:-(?:^|/)AMDGPU(?:/|$)}"
 OUTPUT_DIR="${OUTPUT_DIR:-$FUZZ_FILL/data/coverage_output/corpus_vs_suite_$(date +%y%m%d_%H%M%S)}"
@@ -71,6 +71,10 @@ if [[ ! -d "$CORPUS" ]]; then
   exit 1
 fi
 
+if [[ -z "$HOST_BIN" ]]; then
+  echo "error: set HOST_BIN to a non-instrumented LLVM bin dir with llvm-profdata and llvm-cov" >&2
+  exit 1
+fi
 require_bin "$HOST_BIN" llvm-profdata
 require_bin "$HOST_BIN" llvm-cov
 require_bin "$INSTRUMENTED_BIN" sancov

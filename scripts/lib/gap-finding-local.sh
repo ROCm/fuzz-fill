@@ -35,6 +35,8 @@ gap_finding_local_usage_llvm_options() {
   --llvm-bin <path>             Source-coverage build bin dir (required; parent is --build-dir)
   --instrumented-bin-dir <path> SanitizerCoverage bin dir (optional for baseline/PR finding;
                                 required by gap-fill / reduce entrypoints)
+  FUZZ_FILL_HOST_BIN (env)      Non-instrumented LLVM bin dir with llvm-profdata and llvm-cov
+                                (required for baseline / PR finding)
 EOF
 }
 

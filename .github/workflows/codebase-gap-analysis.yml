@@ -199,6 +199,7 @@ jobs:
         run: |
           source "${VENV_DIR}/bin/activate"
           export FUZZ_FILL_COVERAGE_BUILD_DIR="${MAIN_BUILD_DIR}"
+          export FUZZ_FILL_HOST_BIN="${LLVM_RELEASE_BIN}"
           ./scripts/gap-finding-baseline.sh \
             --output-dir "${OUT_DIR}" \
             --llvm-repo "${MAIN_LLVM_DIR}" \

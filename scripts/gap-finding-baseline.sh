@@ -32,13 +32,13 @@ Options:
 $(gap_finding_local_usage_common_options)
 
 Examples:
-  $(basename "$0") \\
+  FUZZ_FILL_HOST_BIN=/usr/lib/llvm-24/bin $(basename "$0") \\
       --output-dir ./data/baseline-run \\
       --llvm-repo /path/llvm-project \\
       --llvm-bin /path/llvm-project/build-coverage/bin \\
       -j "\$(nproc)"
 
-  $(basename "$0") \\
+  FUZZ_FILL_HOST_BIN=/usr/lib/llvm-24/bin $(basename "$0") \\
       --output-dir ./data/baseline-codegen \\
       --llvm-repo /path/llvm-project \\
       --llvm-bin /path/llvm-project/build-coverage/bin \\

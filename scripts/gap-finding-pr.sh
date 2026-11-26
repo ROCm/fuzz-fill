@@ -72,14 +72,14 @@ Options:
 $(gap_finding_local_usage_common_options)
 
 Examples:
-  $(basename "$0") \\
+  FUZZ_FILL_HOST_BIN=/usr/lib/llvm-24/bin $(basename "$0") \\
       --output-dir ./data/gap-finding-pr \\
       --llvm-repo /path/llvm-project \\
       --llvm-bin /path/llvm-project/build-coverage/bin \\
       --commit HEAD \\
       --auto -j "\$(nproc)"
 
-  $(basename "$0") \\
+  FUZZ_FILL_HOST_BIN=/usr/lib/llvm-24/bin $(basename "$0") \\
       --output-dir ./data/gap-finding-pr-214457 \\
       --llvm-repo /path/llvm-project \\
       --llvm-bin /path/to/pr-tree/build-coverage/bin \\

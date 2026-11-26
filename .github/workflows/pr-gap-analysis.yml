@@ -306,11 +306,10 @@ jobs:
 
       - name: Run gap finding
         if: ${{ !inputs.build_only && steps.scope.outputs.action == 'run' }}
-        env:
-          LIT_ALLOW_FAILURES: "1"
         run: |
           source "${VENV_DIR}/bin/activate"
           export FUZZ_FILL_COVERAGE_BUILD_DIR="${PR_BUILD_DIR}"
+          export FUZZ_FILL_HOST_BIN="${LLVM_RELEASE_BIN}"
           ./scripts/gap-finding-pr.sh \
             --output-dir "${OUT_DIR}" \
             --llvm-repo "${PR_LLVM_DIR}" \

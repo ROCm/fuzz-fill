@@ -148,7 +148,11 @@ if [[ -n "$llvm_coverage_build" && ! -d "$llvm_coverage_build" ]]; then
 fi
 
 if [[ -z "$host_bin" ]]; then
-    host_bin="${FUZZ_FILL_HOST_BIN:-$llvm_build}"
+    host_bin="${FUZZ_FILL_HOST_BIN:-}"
+fi
+if [[ -z "$host_bin" ]]; then
+    echo "error: pass --host-bin or set FUZZ_FILL_HOST_BIN (non-instrumented LLVM bin dir)" >&2
+    exit 2
 fi
 if [[ ! -d "$host_bin" ]]; then
     echo "error: host bin directory does not exist: $host_bin" >&2

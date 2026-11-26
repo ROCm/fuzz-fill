@@ -87,4 +87,4 @@
 
 # COM: Drop the llvm-project clone and builds after coverage runs to save disk space.
 # COM: Delete at the end so it is deleted only on success.
-# RUN: rm -rf %t/llvm-project %t/build-coverage %t/build-sancov %t/build-sancov-helpers
+# RUN: rm -rf %t/llvm-project %t/build-coverage %t/build-sancov %t/build-sancov.sancov-release

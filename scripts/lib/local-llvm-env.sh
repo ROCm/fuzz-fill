@@ -20,10 +20,12 @@ setup_local_llvm_env() {
     LLVM_REPO="$(realpath "$llvm_repo")"
     LLVM_BIN="$(realpath "$llvm_bin")"
     coverage_build_dir="${FUZZ_FILL_COVERAGE_BUILD_DIR:-${COVERAGE_BUILD_DIR:-$(realpath "${LLVM_BIN}/..")}}"
-    host_bin="${FUZZ_FILL_HOST_BIN:-${COVERAGE_HOST_BIN:-${LLVM_BIN}}}"
+    host_bin="${FUZZ_FILL_HOST_BIN:-${COVERAGE_HOST_BIN:-}}"
 
     export FUZZ_FILL_COVERAGE_BUILD_DIR="$(realpath "${coverage_build_dir}")"
-    export FUZZ_FILL_HOST_BIN="$(realpath "${host_bin}")"
+    if [[ -n "$host_bin" ]]; then
+        export FUZZ_FILL_HOST_BIN="$(realpath "${host_bin}")"
+    fi
     export FUZZ_FILL_LLVM_SRC="${LLVM_REPO}"
 
     if [[ -n "$instrumented_bin_dir" ]]; then
@@ -42,7 +44,11 @@ setup_local_llvm_env() {
 }
 
 require_local_coverage_bins() {
-    local host_bin="${FUZZ_FILL_HOST_BIN:-${COVERAGE_HOST_BIN:-$LLVM_BIN}}"
+    local host_bin="${FUZZ_FILL_HOST_BIN:-${COVERAGE_HOST_BIN:-}}"
+    if [[ -z "$host_bin" ]]; then
+        echo "error: set FUZZ_FILL_HOST_BIN to a non-instrumented LLVM bin dir with llvm-profdata and llvm-cov" >&2
+        exit 1
+    fi
     require_bin "$host_bin" llvm-profdata
     require_bin "$host_bin" llvm-cov
 }
