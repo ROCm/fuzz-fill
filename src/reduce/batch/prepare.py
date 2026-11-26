@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 from reduce.batch.candidate_test import TestShInfo, copy_input_bc
@@ -19,7 +18,6 @@ def prepare_test_case(
     file_col: str,
     line: int,
     covered: str,
-    hexes_sorted: list[str],
     out_parent: Path,
     template_interesting: str,
     pipeline_steps: list[dict],
@@ -28,19 +26,15 @@ def prepare_test_case(
     pass_under_test: str | None,
     mtriple: str | None,
     mir_codegen_only: bool,
-) -> tuple[bool, Path]:
-    """Create ``t-NNNNN-<short>/`` with config.json and interesting scripts."""
+) -> Path:
+    """Create ``t-NNNNN-<short>/`` with config.json and interesting scripts.
+
+    ``covered`` is a space-separated ``0x``-prefixed list of every instrumentation
+    point on the target line (full-line interestingness predicate).
+    """
     short = Path(test_name).stem[:8] if test_name else f"r{row_index}"
     dest_dir = out_parent / f"t-{row_index:05d}-{short}"
     dest_dir.mkdir(parents=True, exist_ok=True)
-
-    if len(hexes_sorted) > 1:
-        detail = ", ".join(f"0x{h}" for h in hexes_sorted)
-        print(
-            f"Row {row_index}: ambiguous COVERED - {len(hexes_sorted)} "
-            f"addresses on source line {line}; using {covered}; all: {detail}",
-            file=sys.stderr,
-        )
 
     _write_case_files(
         dest_dir,
@@ -56,7 +50,7 @@ def prepare_test_case(
         mtriple=mtriple,
         mir_codegen_only=mir_codegen_only,
     )
-    return len(hexes_sorted) > 1, dest_dir
+    return dest_dir
 
 
 def _write_case_files(
