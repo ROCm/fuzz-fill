@@ -43,27 +43,28 @@ validate_gap_profile_csv() {
     fi
 }
 
-# Resolve and validate gap-list profile CSVs (names of caller variables).
+# Resolve and validate the uncovered-lines CSV (name of caller variable).
+# Optional second variable: precomputed address map (validated only when set).
 resolve_gap_profile_csv_paths() {
     local uncovered_var="$1"
-    local llc_map_var="$2"
+    local llc_map_var="${2:-}"
     local uncovered llc_map
 
     uncovered="${!uncovered_var:-}"
-    llc_map="${!llc_map_var:-}"
 
     if [[ -z "$uncovered" ]]; then
         echo "error: --line-coverage-uncovered-csv is required" >&2
         exit 1
     fi
-    if [[ -z "$llc_map" ]]; then
-        echo "error: --llc-address-line-map-csv is required" >&2
-        exit 1
-    fi
 
     validate_gap_profile_csv "--line-coverage-uncovered-csv" "$uncovered"
-    validate_gap_profile_csv "--llc-address-line-map-csv" "$llc_map"
-
     printf -v "$uncovered_var" '%s' "$(realpath "$uncovered")"
-    printf -v "$llc_map_var" '%s' "$(realpath "$llc_map")"
+
+    if [[ -n "$llc_map_var" ]]; then
+        llc_map="${!llc_map_var:-}"
+        if [[ -n "$llc_map" ]]; then
+            validate_gap_profile_csv "--address-line-map-csv" "$llc_map"
+            printf -v "$llc_map_var" '%s' "$(realpath "$llc_map")"
+        fi
+    fi
 }

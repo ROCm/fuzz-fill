@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import stat
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +16,16 @@ from reduce.batch.coverage import (
 )
 from reduce.batch.gap_fill import resolve_batch_inputs
 from reduce.batch.pipeline import build_pipeline_steps, parse_pipeline_arg
+from reduce.batch.templates import render_interesting_ir
+
+
+def _interesting_ir_template() -> str:
+    return (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "reduce"
+        / "template_interesting_ir.sh"
+    ).read_text(encoding="utf-8")
 
 
 class ParseCoveredPointsTest(unittest.TestCase):
@@ -26,10 +39,81 @@ class ParseCoveredPointsTest(unittest.TestCase):
             ["1000", "2000"],
         )
 
-    def test_resolve_picks_lowest_address(self) -> None:
+    def test_resolve_returns_all_points_space_separated(self) -> None:
         covered, hexes = resolve_covered_hexes("0x3000;0x2000")
-        self.assertEqual(covered, "0x2000")
+        self.assertEqual(covered, "0x2000 0x3000")
         self.assertEqual(hexes, ["2000", "3000"])
+
+    def test_resolve_single_point(self) -> None:
+        covered, hexes = resolve_covered_hexes("0xabc")
+        self.assertEqual(covered, "0xabc")
+        self.assertEqual(hexes, ["abc"])
+
+
+class InterestingIrFullLineTest(unittest.TestCase):
+    def _run_interesting(
+        self, *, print_addrs: list[str], covered: str
+    ) -> subprocess.CompletedProcess[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            llc = bin_dir / "llc"
+            llc.write_text(
+                "#!/bin/bash\n"
+                'covdir="${UBSAN_OPTIONS#*coverage_dir=}"\n'
+                'covdir="${covdir%%:*}"\n'
+                'touch "$covdir/llc.$$.sancov"\n',
+                encoding="utf-8",
+            )
+            llc.chmod(llc.stat().st_mode | stat.S_IXUSR)
+            sancov = bin_dir / "sancov"
+            print_body = "\n".join(print_addrs) + "\n"
+            sancov.write_text(
+                "#!/bin/bash\n"
+                'if [[ "$1" == "--print" ]]; then\n'
+                f"  cat <<'EOF'\n{print_body}EOF\n"
+                "  exit 0\n"
+                "fi\n"
+                "exit 1\n",
+                encoding="utf-8",
+            )
+            sancov.chmod(sancov.stat().st_mode | stat.S_IXUSR)
+
+            script = root / "interesting_ir.sh"
+            script.write_text(
+                render_interesting_ir(
+                    _interesting_ir_template(),
+                    covered=covered,
+                    llvm_bin=bin_dir,
+                    llc_flags=(),
+                ),
+                encoding="utf-8",
+            )
+            script.chmod(script.stat().st_mode | stat.S_IXUSR)
+            candidate = root / "candidate.ll"
+            candidate.write_text("define void @f() { ret void }\n", encoding="utf-8")
+            return subprocess.run(
+                [str(script), str(candidate)],
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PATH": os.environ.get("PATH", "")},
+            )
+
+    def test_interesting_when_all_points_present(self) -> None:
+        proc = self._run_interesting(
+            print_addrs=["0x1000", "0x2000", "0x9999"],
+            covered="0x1000 0x2000",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_not_interesting_when_one_point_missing(self) -> None:
+        proc = self._run_interesting(
+            print_addrs=["0x1000"],
+            covered="0x1000 0x2000",
+        )
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertIn("0x2000 is NOT present", proc.stderr)
 
 
 class ParseTestShTest(unittest.TestCase):

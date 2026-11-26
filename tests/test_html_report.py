@@ -38,7 +38,7 @@ class WriteHtmlReportTest(unittest.TestCase):
                 [
                     ["file", "line", "coverage"],
                     [str(file_high), 1, "covered"],
-                    [str(file_high), 2, "partially"],
+                    [str(file_high), 2, "covered"],
                     [str(file_high), 3, "uncovered"],
                     [str(file_high), 4, "uncovered"],
                     [str(file_low), 1, "covered"],
@@ -71,9 +71,9 @@ class WriteHtmlReportTest(unittest.TestCase):
             ).read_text(encoding="utf-8")
 
             self.assertIn("Instrumented lines: 5", index)
-            self.assertIn("Covered: 2 (40.0%)", index)
-            self.assertIn("Partially: 1 (20.0%)", index)
+            self.assertIn("Covered: 3 (60.0%)", index)
             self.assertIn("Uncovered: 2 (40.0%)", index)
+            self.assertNotIn("Partially:", index)
 
             self.assertIn("Directory Tree", index)
             self.assertIn("Coverage Gaps Report", index)
@@ -81,8 +81,8 @@ class WriteHtmlReportTest(unittest.TestCase):
             self.assertIn('<span class="dir-name">llvm/</span>', index)
             self.assertIn('<span class="dir-name">Foo/</span>', index)
             self.assertIn("unc=2 (40.0%)", index)
-            self.assertIn("cov=2 (40.0%)", index)
-            self.assertIn("part=1 (20.0%)", index)
+            self.assertIn("cov=3 (60.0%)", index)
+            self.assertNotIn("part=", index)
 
             # Nested tree: High (more uncovered) before Low at the same level.
             high_pos = index.find(">High.cpp</a>")
@@ -95,11 +95,16 @@ class WriteHtmlReportTest(unittest.TestCase):
             self.assertIn("coverage gaps", index)
             self.assertIn("this test-suite run.", index)
             self.assertNotIn("as explained", index)
-            self.assertIn("SanitizerCoverage", index)
-            self.assertIn("maps them to source", index)
-            self.assertIn("via debug information", index)
+            self.assertIn("source-based coverage instrumentation", index)
+            self.assertIn("-fprofile-instr-generate", index)
+            self.assertIn("-fcoverage-mapping", index)
+            self.assertIn("LCOV <code>DA</code>", index)
+            self.assertNotIn("SanitizerCoverage", index)
             self.assertIn('class="status-list"', index)
-            self.assertIn("<strong>uncovered</strong> (none ran)", index)
+            self.assertIn(
+                "<strong>uncovered</strong> (zero execution count)",
+                index,
+            )
             # Index keeps a high-level intro; per-line legend is on file pages.
             self.assertNotIn("Green — covered.", index)
             self.assertNotIn(
@@ -112,28 +117,29 @@ class WriteHtmlReportTest(unittest.TestCase):
             self.assertIn('id="L3"', high_page)
             self.assertIn('href="#L1"', high_page)
             self.assertIn('class="line covered"', high_page)
-            self.assertIn('class="line partially-covered"', high_page)
+            self.assertNotIn('class="line partially-covered"', high_page)
             self.assertIn('class="line not-covered"', high_page)
             self.assertIn('class="code"', high_page)
             self.assertIn('<div class="source">', high_page)
             self.assertNotIn("highlight.min.js", high_page)
             self.assertIn("Green — covered.", high_page)
-            self.assertIn(
-                "when a dominator already implies they ran",
-                high_page,
-            )
+            self.assertIn("non-zero execution count", high_page)
+            self.assertIn("zero execution count", high_page)
+            self.assertIn("LCOV <code>DA</code>", high_page)
+            self.assertNotIn("when a dominator already implies they ran", high_page)
+            self.assertNotIn("SanitizerCoverage", high_page)
             self.assertIn('href="../../../index.html"', high_page)
             self.assertIn('id="jump-next"', high_page)
             self.assertIn('id="jump-bar"', high_page)
             self.assertIn('data-mode="uncovered"', high_page)
-            self.assertIn('data-mode="partially"', high_page)
+            self.assertNotIn('data-mode="partially"', high_page)
             self.assertIn('data-mode="covered"', high_page)
             self.assertIn('data-mode="instrumented"', high_page)
             self.assertIn("<kbd>n</kbd> next", high_page)
             self.assertIn("<kbd>j</kbd> previous", high_page)
             self.assertIn("<kbd>m</kbd> mode", high_page)
             self.assertIn("div.line.not-covered", high_page)
-            self.assertIn("div.line.partially-covered", high_page)
+            self.assertNotIn("div.line.partially-covered", high_page)
             self.assertIn("div.line.covered", high_page)
 
             # Line 5 is uninstrumented: present with no status class.

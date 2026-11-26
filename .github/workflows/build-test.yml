@@ -50,7 +50,7 @@ env:
 jobs:
   build-and-test:
     runs-on: aws-linux-scale-rocm-medium
-    timeout-minutes: 30
+    timeout-minutes: 90
     permissions:
       contents: read
       actions: write
@@ -62,6 +62,7 @@ jobs:
       LLVM_PROJECT_DIR: /work/llvm-project
       LLVM_BUILD_DIR: /work/llvm-build-sancov
       LLVM_BUILD_BIN: /work/llvm-build-sancov/bin
+      LLVM_COVERAGE_BUILD_DIR: /work/llvm-build-coverage
       FUZZ_FILL_SANCOV: /work/llvm-build-sancov/bin/sancov
       FUZZ_FILL_LLVM_LIT: /work/llvm-build-sancov/bin/llvm-lit
       FUZZ_FILL_LLC: /work/llvm-build-sancov/bin/llc
@@ -69,6 +70,9 @@ jobs:
       FUZZ_FILL_LLVM_REDUCE: /work/llvm-build-sancov/bin/llvm-reduce
       FUZZ_FILL_LLVM_DIS: /work/llvm-build-sancov/bin/llvm-dis
       FUZZ_FILL_LLVM_REPO: /work/llvm-project
+      FUZZ_FILL_LLVM_SRC: /work/llvm-project
+      FUZZ_FILL_COVERAGE_BUILD_DIR: /work/llvm-build-coverage
+      FUZZ_FILL_HOST_BIN: /usr/lib/llvm-24/bin
 
     steps:
       - name: Report container resources
@@ -95,8 +99,13 @@ jobs:
       - name: Install CMake
         run: ./scripts/image/install-cmake.sh
 
-      - name: Install apt.llvm.org bootstrap
-        run: ./scripts/image/install-llvm-apt.sh "${LLVM_APT_MAJOR}"
+      - name: Install apt.llvm.org bootstrap and host tools
+        run: |
+          ./scripts/image/install-llvm-apt.sh "${LLVM_APT_MAJOR}"
+          apt-get update
+          apt-get install -y --no-install-recommends "llvm-${LLVM_APT_MAJOR}"
+          test -x "${LLVM_RELEASE_BIN}/llvm-profdata"
+          test -x "${LLVM_RELEASE_BIN}/llvm-cov"
 
       - name: Restore LLVM source
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -112,20 +121,21 @@ jobs:
           curl -fsSL "https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-${LLVM_RELEASE_VERSION}.tar.gz" \
             | tar -xz --strip-components=1 -C "${LLVM_PROJECT_DIR}"
 
-      - name: Restore ccache
+      - name: Restore sancov ccache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        id: cache-ccache
+        id: cache-ccache-sancov
         with:
-          path: ${{ env.CCACHE_DIR }}
+          path: /work/ccache-sancov
           key: fuzz-fill-llvm-sancov-ccache-build-test-${{ env.LLVM_RELEASE_VERSION }}-${{ github.run_id }}
           restore-keys: |
             fuzz-fill-llvm-sancov-ccache-build-test-${{ env.LLVM_RELEASE_VERSION }}-
 
-      - name: Reset ccache stats for this run
-        run: ccache --zero-stats
-
       - name: Build sancov LLVM
+        env:
+          CCACHE_DIR: /work/ccache-sancov
         run: |
+          mkdir -p "${CCACHE_DIR}"
+          ccache --zero-stats
           bash ./scripts/ci-cgroup-memstat.sh 30 &
           memstat_pid=$!
           trap 'kill "$memstat_pid" 2>/dev/null || true' EXIT
@@ -138,17 +148,51 @@ jobs:
             --enable-ccache \
             --ccache-compiler-check-version \
             "${FUZZ_FILL_E2E_JOBS}"
+          ccache --show-stats -v
 
-      - name: Show ccache stats
-        if: always()
-        run: ccache --show-stats -v
-
-      - name: Save ccache
+      - name: Save sancov ccache
         if: always()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ steps.cache-ccache.outputs.cache-primary-key }}
+          path: /work/ccache-sancov
+          key: ${{ steps.cache-ccache-sancov.outputs.cache-primary-key }}
+
+      - name: Restore coverage ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache-ccache-coverage
+        with:
+          path: /work/ccache-coverage
+          key: fuzz-fill-llvm-coverage-ccache-build-test-${{ env.LLVM_RELEASE_VERSION }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-fill-llvm-coverage-ccache-build-test-${{ env.LLVM_RELEASE_VERSION }}-
+
+      - name: Build coverage LLVM
+        env:
+          CCACHE_DIR: /work/ccache-coverage
+        run: |
+          mkdir -p "${CCACHE_DIR}"
+          ccache --zero-stats
+          bash ./scripts/ci-cgroup-memstat.sh 30 &
+          memstat_pid=$!
+          trap 'kill "$memstat_pid" 2>/dev/null || true' EXIT
+          ./scripts/build-llvm-coverage.sh \
+            "${LLVM_PROJECT_DIR}" \
+            "${LLVM_COVERAGE_BUILD_DIR}" \
+            --bootstrap-bin "${LLVM_RELEASE_BIN}" \
+            --targets "X86;AMDGPU;SPIRV" \
+            --enable-projects clang \
+            --disable-clangir \
+            --enable-ccache \
+            --ccache-compiler-check-version \
+            "${FUZZ_FILL_E2E_JOBS}"
+          ccache --show-stats -v
+
+      - name: Save coverage ccache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /work/ccache-coverage
+          key: ${{ steps.cache-ccache-coverage.outputs.cache-primary-key }}
 
       - name: Install fuzz-fill venv
         run: |
@@ -170,6 +214,8 @@ jobs:
             --venv "${VENV_DIR}" \
             --llvm-build "${LLVM_BUILD_BIN}" \
             --llvm-sancov-build "${LLVM_BUILD_BIN}" \
+            --llvm-coverage-build "${LLVM_COVERAGE_BUILD_DIR}" \
+            --host-bin "${LLVM_RELEASE_BIN}" \
             --llvm-src "${LLVM_PROJECT_DIR}" \
             -v integration-tests/
 

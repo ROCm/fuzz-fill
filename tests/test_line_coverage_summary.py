@@ -9,7 +9,6 @@ from pathlib import Path
 
 from coverage.constants import (
     DEFAULT_LINE_COVERAGE_COVERED_FILE,
-    DEFAULT_LINE_COVERAGE_PARTIALLY_FILE,
     DEFAULT_LINE_COVERAGE_UNCOVERED_FILE,
 )
 from coverage.line_coverage_summary import (
@@ -35,7 +34,6 @@ class LoadLineCoverageSummaryTest(unittest.TestCase):
                 [
                     ["file", "line", "coverage"],
                     [FILE, 10, "covered"],
-                    [FILE, 20, "partially"],
                     [FILE, 30, "uncovered"],
                     [FILE, 40, "uncovered"],
                 ],
@@ -43,7 +41,6 @@ class LoadLineCoverageSummaryTest(unittest.TestCase):
             coverage_by_line, baseline_uncovered = load_line_coverage_summary(path)
 
         self.assertEqual(coverage_by_line[(FILE, 10)], "covered")
-        self.assertEqual(coverage_by_line[(FILE, 20)], "partially")
         self.assertEqual(coverage_by_line[(FILE, 30)], "uncovered")
         self.assertEqual(baseline_uncovered, frozenset({(FILE, 30), (FILE, 40)}))
 
@@ -74,7 +71,7 @@ class LoadLineCoverageSummaryTest(unittest.TestCase):
 
 
 class WriteLineCoverageSummarySplitsTest(unittest.TestCase):
-    def test_writes_three_status_files(self) -> None:
+    def test_writes_two_status_files(self) -> None:
         import pandas as pd
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -82,7 +79,6 @@ class WriteLineCoverageSummarySplitsTest(unittest.TestCase):
             coverage = pd.DataFrame(
                 [
                     {"file": FILE, "line": 10, "coverage": "covered"},
-                    {"file": FILE, "line": 20, "coverage": "partially"},
                     {"file": FILE, "line": 30, "coverage": "uncovered"},
                     {"file": FILE, "line": 40, "coverage": "uncovered"},
                 ]
@@ -91,15 +87,11 @@ class WriteLineCoverageSummarySplitsTest(unittest.TestCase):
 
             self.assertEqual(
                 set(paths),
-                {"covered", "partially", "uncovered"},
+                {"covered", "uncovered"},
             )
             with paths["covered"].open(encoding="utf-8") as f:
                 covered_rows = list(csv.reader(f))
             self.assertEqual(covered_rows, [["file", "line"], [FILE, "10"]])
-
-            with paths["partially"].open(encoding="utf-8") as f:
-                partially_rows = list(csv.reader(f))
-            self.assertEqual(partially_rows, [["file", "line"], [FILE, "20"]])
 
             with paths["uncovered"].open(encoding="utf-8") as f:
                 uncovered_rows = list(csv.reader(f))
@@ -118,7 +110,7 @@ class WriteLineCoverageSummarySplitsTest(unittest.TestCase):
             )
             paths = write_line_coverage_summary_splits(coverage, out)
 
-            with paths["partially"].open(encoding="utf-8") as f:
+            with paths["uncovered"].open(encoding="utf-8") as f:
                 lines = f.read().strip().splitlines()
             self.assertEqual(lines, ["file,line"])
 

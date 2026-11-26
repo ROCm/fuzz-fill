@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coverage.lit_config import llvm_source_root
 from fuzz_fill.git_revision import (
     commit_file_path,
     read_commit_file,
@@ -16,26 +15,15 @@ from fuzz_fill.log import get_logger
 logger = get_logger("coverage.revision_check")
 
 
-def record_baseline_revision(llvm_lit: Path, output_dir: Path) -> None:
-    """Record the revision of the LLVM source tree the baseline was run against.
-
-    The tree is the one configured in the build's ``lit.site.cfg.py``. Nothing
-    is recorded when it cannot be located or is not a git checkout.
-    """
-    try:
-        source_root = llvm_source_root(llvm_lit)
-    except (FileNotFoundError, ValueError) as e:
-        logger.info("not recording the baseline revision: %s", e)
-        return
-
-    revision = resolve_revision(source_root)
+def record_baseline_revision_from_src(llvm_src: Path, output_dir: Path) -> None:
+    """Record HEAD of ``llvm_src`` into ``COMMIT``, or skip for non-git trees."""
+    revision = resolve_revision(llvm_src)
     if revision is None:
         logger.info(
             "not recording the baseline revision, %s is not a git checkout",
-            source_root,
+            llvm_src,
         )
         return
-
     path = write_commit_file(output_dir, revision)
     logger.info("recorded baseline revision %s in %s", revision, path)
 

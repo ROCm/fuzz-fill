@@ -9,10 +9,11 @@ DEFAULT_SOURCE_CODE_FILTER = r"(?:^|/)(?:llvm|clang)/lib/"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "coverage_output" / f"cov_<timestamp>"
 
 # CSV file names
-DEFAULT_LLC_ADDRESS_LINE_MAP_FILE = "llc_address_line_map.csv"
+DEFAULT_ADDRESS_LINE_MAP_FILE = "llc_address_line_map.csv"
+# Back-compat alias used until remaining call sites are renamed.
+DEFAULT_LLC_ADDRESS_LINE_MAP_FILE = DEFAULT_ADDRESS_LINE_MAP_FILE
 DEFAULT_LINE_COVERAGE_SUMMARY_FILE = "line_coverage_summary.csv"
 DEFAULT_LINE_COVERAGE_COVERED_FILE = "line_coverage_covered.csv"
-DEFAULT_LINE_COVERAGE_PARTIALLY_FILE = "line_coverage_partially.csv"
 DEFAULT_LINE_COVERAGE_UNCOVERED_FILE = "line_coverage_uncovered.csv"
 DEFAULT_CANDIDATE_TEST_SETTINGS_FILE = "candidate_test_settings.csv"
 DEFAULT_CANDIDATE_TEST_MANIFEST_FILE = "candidate_test_manifest.csv"
@@ -21,6 +22,8 @@ DEFAULT_MIN_CANDIDATE_TESTS_POINTS_CSV = "min_candidate_tests_points.csv"
 DEFAULT_MIN_CANDIDATE_TESTS_SOURCE_FILES_CSV = "min_candidate_tests_source_files.csv"
 DEFAULT_MIN_CANDIDATE_TESTS_BATCH_SIZE = 1000
 DEFAULT_NEW_COVERAGE_CSV = "new_coverage.csv"
+# Address-map rows whose (file, line) appear in the uncovered CSV (written by incremental).
+DEFAULT_GAP_ADDRESS_LINE_MAP_FILE = "gap_address_line_map.csv"
 DEFAULT_TARGET_LINES_REPORT = "target_lines_uncovered.csv"
 DEFAULT_TARGET_LINES_COVERAGE_SUMMARY = "target_lines_coverage_summary.csv"
 DEFAULT_LIT_FAILURES_REPORT = "lit_failures.json"
@@ -31,13 +34,3 @@ SYMBOLIZE_MEMORY_BYTES = 8 * 1024**3
 
 # llvm-lit parallelism cap (workaround for high core-count Docker hosts)
 MAX_LIT_JOBS = 384
-
-# Slowest AMDGPU tests (path_in_suite) seeded into .lit_test_times.txt by default
-# so llvm-lit --order=smart schedules them first on baseline runs.
-BASELINE_LIT_PRIORITY_TESTS = (
-    "CodeGen/AMDGPU/memintrinsic-unroll.ll",
-    "CodeGen/AMDGPU/amdgcn.bitcast.1024bit.ll",
-    "CodeGen/AMDGPU/sched-group-barrier-pipeline-solver.mir",
-    "CodeGen/AMDGPU/bf16.ll",
-)
-BASELINE_LIT_PRIORITY_ELAPSED = 1e6

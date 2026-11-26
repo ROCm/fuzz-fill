@@ -60,19 +60,19 @@ RUN --mount=type=bind,from=llvm,source=.,target=/llvm-src,ro \
  && echo "=== fuzz-fill: LLVM bootstrap: $(cat /work/.llvm-bootstrap) ==="
 
 COPY scripts/build-llvm-sancov.sh /usr/local/bin/
+COPY scripts/build-llvm-coverage.sh /usr/local/bin/
 COPY scripts/allowlist-amdgpu.txt /work/allowlist-amdgpu.txt
 COPY scripts/allowlist-spirv.txt /work/allowlist-spirv.txt
 COPY scripts/allowlist-llvm.txt /work/allowlist-llvm.txt
 COPY scripts/allowlist-clang.txt /work/allowlist-clang.txt
 COPY scripts/allowlist-llvm-clang.txt /work/allowlist-llvm-clang.txt
-RUN chmod +x /usr/local/bin/build-llvm-sancov.sh
+RUN chmod +x /usr/local/bin/build-llvm-sancov.sh /usr/local/bin/build-llvm-coverage.sh
 
 ARG SANCOV_ALLOWLIST=amdgpu
 ARG SANCOV_INSTRUMENTATION_MODE=bb
 ARG NINJA_JOBS=""
 ARG LLVM_TARGETS_TO_BUILD="X86;AMDGPU;SPIRV"
 ARG LLVM_ENABLE_PROJECTS=""
-ARG GAP_TEST_SUITES="llvm/test"
 RUN case "${SANCOV_INSTRUMENTATION_MODE:-bb}" in \
         func|bb|edge) sancov_mode="${SANCOV_INSTRUMENTATION_MODE:-bb}" ;; \
         *) echo "error: SANCOV_INSTRUMENTATION_MODE must be func, bb, or edge: ${SANCOV_INSTRUMENTATION_MODE:-<unset>}" >&2; exit 1 ;; \
@@ -89,12 +89,10 @@ RUN case "${SANCOV_INSTRUMENTATION_MODE:-bb}" in \
  && echo "${sancov_mode}" > /work/.sancov-instrumentation-mode \
  && echo "${LLVM_TARGETS_TO_BUILD}" > /work/.llvm-targets \
  && echo "${LLVM_ENABLE_PROJECTS}" > /work/.llvm-enable-projects \
- && printf '%s\n' ${GAP_TEST_SUITES} > /work/.gap-test-suites \
  && echo "=== fuzz-fill: SanitizerCoverage allowlist = ${SANCOV_ALLOWLIST} ===" \
  && echo "=== fuzz-fill: SanitizerCoverage instrumentation mode = ${sancov_mode} (default: bb) ===" \
  && echo "=== fuzz-fill: LLVM_TARGETS_TO_BUILD = ${LLVM_TARGETS_TO_BUILD} ===" \
  && echo "=== fuzz-fill: LLVM_ENABLE_PROJECTS = ${LLVM_ENABLE_PROJECTS:-<none>} ===" \
- && echo "=== fuzz-fill: gap test suites = ${GAP_TEST_SUITES} ===" \
  && llvm_build_start=$(date +%s) \
  && /usr/local/bin/build-llvm-sancov.sh \
         "${allowlist}" \
@@ -105,6 +103,14 @@ RUN case "${SANCOV_INSTRUMENTATION_MODE:-bb}" in \
         --targets "${LLVM_TARGETS_TO_BUILD}" \
         --enable-projects "${LLVM_ENABLE_PROJECTS}" \
         "${NINJA_JOBS}" \
+ && /usr/local/bin/build-llvm-coverage.sh \
+        /work/llvm-project \
+        /work/llvm-build-coverage \
+        --bootstrap-bin /usr/lib/llvm-${LLVM_APT_MAJOR}/bin \
+        --targets "${LLVM_TARGETS_TO_BUILD}" \
+        --enable-projects "${LLVM_ENABLE_PROJECTS}" \
+        --disable-clangir \
+        "${NINJA_JOBS}" \
  && llvm_build_secs=$(( $(date +%s) - llvm_build_start )) \
  && echo "${llvm_build_secs}" > /work/.llvm-build-time \
  && echo "=== fuzz-fill: LLVM build wall time: ${llvm_build_secs}s ==="
@@ -112,13 +118,18 @@ RUN case "${SANCOV_INSTRUMENTATION_MODE:-bb}" in \
 FROM ubuntu:24.04 AS final
 
 ARG DEBIAN_FRONTEND=noninteractive
+ARG LLVM_APT_MAJOR=24
 ARG UID=1000
 ARG GID=1000
 ARG USERNAME=developer
 
 COPY scripts/image/install-apt-packages.sh /usr/local/lib/fuzz-fill-image/
 COPY scripts/image/apt/ /usr/local/lib/fuzz-fill-image/apt/
+COPY scripts/image/install-llvm-apt.sh /usr/local/lib/fuzz-fill-image/
+COPY scripts/image/install-cmake.sh /usr/local/lib/fuzz-fill-image/
 RUN /usr/local/lib/fuzz-fill-image/install-apt-packages.sh runtime \
+    && /usr/local/lib/fuzz-fill-image/install-llvm-apt.sh "${LLVM_APT_MAJOR}" \
+    && /usr/local/lib/fuzz-fill-image/install-cmake.sh \
     && groupadd -g "${GID}" "${USERNAME}" \
     && useradd -l -m -u "${UID}" -g "${GID}" -s /bin/bash "${USERNAME}"
 
@@ -128,10 +139,10 @@ COPY --chown=${UID}:${GID} --from=llvm-builder /work/.sancov-allowlist /work/.sa
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.sancov-instrumentation-mode /work/.sancov-instrumentation-mode
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.llvm-targets /work/.llvm-targets
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.llvm-enable-projects /work/.llvm-enable-projects
-COPY --chown=${UID}:${GID} --from=llvm-builder /work/.gap-test-suites /work/.gap-test-suites
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/.llvm-build-time /work/.llvm-build-time
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-project /work/llvm-project
 COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-build-sancov /work/llvm-build-sancov
+COPY --chown=${UID}:${GID} --from=llvm-builder /work/llvm-build-coverage /work/llvm-build-coverage
 
 COPY --chown=${UID}:${GID} pyproject.toml LICENCE.txt README.md /work/fuzz-fill/
 COPY --chown=${UID}:${GID} src /work/fuzz-fill/src
@@ -145,7 +156,6 @@ RUN echo "=== fuzz-fill image LLVM source: $(cat /work/.llvm-source) ===" \
  && echo "=== fuzz-fill image SanitizerCoverage instrumentation mode: $(cat /work/.sancov-instrumentation-mode) ===" \
  && echo "=== fuzz-fill image LLVM_TARGETS_TO_BUILD: $(cat /work/.llvm-targets) ===" \
  && echo "=== fuzz-fill image LLVM_ENABLE_PROJECTS: $(cat /work/.llvm-enable-projects) ===" \
- && echo "=== fuzz-fill image gap test suites: $(tr '\n' ' ' < /work/.gap-test-suites) ===" \
  && echo "=== fuzz-fill image LLVM build wall time: $(cat /work/.llvm-build-time)s ==="
 
 USER "${UID}"
@@ -163,7 +173,10 @@ ENV VIRTUAL_ENV=/work/fuzz-fill-venv \
     FUZZ_FILL_OPT=/work/llvm-build-sancov/bin/opt \
     FUZZ_FILL_LLVM_REDUCE=/work/llvm-build-sancov/bin/llvm-reduce \
     FUZZ_FILL_LLVM_DIS=/work/llvm-build-sancov/bin/llvm-dis \
-    FUZZ_FILL_LLVM_REPO=/work/llvm-project
+    FUZZ_FILL_LLVM_REPO=/work/llvm-project \
+    FUZZ_FILL_LLVM_SRC=/work/llvm-project \
+    FUZZ_FILL_COVERAGE_BUILD_DIR=/work/llvm-build-coverage \
+    FUZZ_FILL_HOST_BIN=/usr/lib/llvm-${LLVM_APT_MAJOR}/bin
 
 # Dev/batch image: runs to completion or interactively, no health check applicable.
 HEALTHCHECK NONE

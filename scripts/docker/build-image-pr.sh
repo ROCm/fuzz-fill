@@ -23,7 +23,6 @@ sancov_instrumentation_mode=""
 ninja_jobs=""
 keep_clone=0
 no_cache=0
-test_suites=()
 
 usage() {
     cat <<EOF
@@ -36,12 +35,11 @@ Required:
   --llvm-repo <path>     Local llvm-project git clone (must contain llvm/)
   --pr-id <n>            GitHub pull request number
 
-Scope (default: all backends, llvm/test and clang/test, llvm-clang allowlist):
-  --auto                 Classify backends, tests, and allowlist from the PR
+Scope (default: all backends and llvm-clang allowlist):
+  --auto                 Classify backends and allowlist from the PR
   --allowlist <target>   Preset or allowlist file: amdgpu, spirv, llvm, clang,
                          or llvm-clang
   --targets <list>       LLVM_TARGETS_TO_BUILD
-  --tests <suite>        Lit suite recorded in the image (repeatable)
   --enable-projects <list>
                          Override LLVM_ENABLE_PROJECTS. By default Clang is built
                          only for the clang and llvm-clang allowlists.
@@ -150,21 +148,6 @@ while [[ $# -gt 0 ]]; do
             enable_projects_set=1
             shift 2
             ;;
-        --tests)
-            if [[ $# -lt 2 ]]; then
-                echo "error: --tests requires a value" >&2
-                exit 1
-            fi
-            case "$2" in
-                */test|*/test/*) ;;
-                *)
-                    echo "error: --tests must be <project>/test or a subdirectory: $2" >&2
-                    exit 1
-                    ;;
-            esac
-            test_suites+=("$2")
-            shift 2
-            ;;
         --sancov-instrumentation-mode)
             if [[ $# -lt 2 ]]; then
                 echo "error: --sancov-instrumentation-mode requires a value" >&2
@@ -229,8 +212,8 @@ if [[ -z "$pr_id" ]]; then
 fi
 
 if [[ "$auto_scope" -eq 1 ]]; then
-    if [[ -n "$allowlist" || -n "$targets" || ${#test_suites[@]} -gt 0 || "$enable_projects_set" -eq 1 ]]; then
-        echo "error: --auto cannot be combined with --allowlist, --targets, --tests, or --enable-projects" >&2
+    if [[ -n "$allowlist" || -n "$targets" || "$enable_projects_set" -eq 1 ]]; then
+        echo "error: --auto cannot be combined with --allowlist, --targets, or --enable-projects" >&2
         exit 1
     fi
 fi
@@ -303,13 +286,12 @@ if [[ "$auto_scope" -eq 1 ]]; then
         exit 2
     fi
     gap_scope_apply_classification
-    echo "gap-scope: rule=${gap_scope_rule} backends=${backends} tests=${tests[*]} allowlist=${allowlist} enable_projects=${enable_projects:-<none>}"
+    echo "gap-scope: rule=${gap_scope_rule} backends=${backends} allowlist=${allowlist} enable_projects=${enable_projects:-<none>}"
     echo "gap-scope: ${gap_scope_reason}"
 else
     local_enable_projects="$enable_projects"
     local_enable_projects_set="$enable_projects_set"
     backends="$targets"
-    tests=("${test_suites[@]}")
     gap_scope_fill_build_scope || exit 1
     if [[ "$local_enable_projects_set" -eq 1 ]]; then
         enable_projects="$local_enable_projects"
@@ -317,7 +299,6 @@ else
 fi
 
 targets="$backends"
-test_suites=("${tests[@]}")
 allowlist="$(gap_scope_allowlist_preset "$allowlist")" || exit 1
 enable_projects_set=1
 
@@ -327,11 +308,6 @@ if [[ -n "$targets" ]]; then
 fi
 if [[ "$enable_projects_set" -eq 1 ]]; then
     build_args+=(--enable-projects "$enable_projects")
-fi
-if [[ ${#test_suites[@]} -gt 0 ]]; then
-    for suite in "${test_suites[@]}"; do
-        build_args+=(--tests "$suite")
-    done
 fi
 if [[ -n "$sancov_instrumentation_mode" ]]; then
     build_args+=(--sancov-instrumentation-mode "$sancov_instrumentation_mode")

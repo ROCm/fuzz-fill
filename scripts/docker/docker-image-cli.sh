@@ -16,7 +16,6 @@ docker_image_cli_init_vars() {
     github_repo=""
     backends=""
     allowlist=""
-    tests=()
     auto_scope=0
 }
 
@@ -67,19 +66,6 @@ docker_image_cli_try_parse() {
         --allowlist)
             [[ $# -ge 2 ]] || { echo "error: --allowlist requires a value" >&2; exit 2; }
             allowlist="$2"
-            DOCKER_IMAGE_CLI_SHIFT=2
-            return 0
-            ;;
-        --tests)
-            [[ $# -ge 2 ]] || { echo "error: --tests requires a value" >&2; exit 2; }
-            case "$2" in
-                */test|*/test/*) ;;
-                *)
-                    echo "error: --tests must be <project>/test or a subdirectory: $2" >&2
-                    exit 1
-                    ;;
-            esac
-            tests+=("$2")
             DOCKER_IMAGE_CLI_SHIFT=2
             return 0
             ;;

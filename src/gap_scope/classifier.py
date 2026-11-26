@@ -1,4 +1,4 @@
-"""Classify changed paths into gap-analysis backends, tests, and allowlist."""
+"""Classify changed paths into gap-analysis backends and allowlist."""
 
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ class GapScope:
     rule: int
     action: str  # "run" or "skip"
     backends: str  # "all" or "X86;AMDGPU;..."
-    tests: tuple[str, ...]  # ("llvm/test",) and/or ("clang/test",)
     allowlist: str  # absolute path, or "" when skip
     reason: str
 
@@ -82,7 +81,6 @@ def classify_changed_paths(paths: list[str]) -> GapScope:
             rule=4,
             action="skip",
             backends="",
-            tests=(),
             allowlist="",
             reason="no non-test changes under llvm/lib or clang/lib",
         )
@@ -106,7 +104,6 @@ def classify_changed_paths(paths: list[str]) -> GapScope:
             rule=1,
             action="run",
             backends=";".join(targets),
-            tests=("llvm/test",),
             allowlist=str(ALLOWLIST_LLVM.resolve()),
             reason=(
                 "backend-only changes under llvm/lib/Target/"
@@ -119,7 +116,6 @@ def classify_changed_paths(paths: list[str]) -> GapScope:
             rule=2,
             action="run",
             backends="all",
-            tests=("clang/test",),
             allowlist=str(ALLOWLIST_CLANG.resolve()),
             reason="changes only under clang/lib/",
         )
@@ -129,7 +125,6 @@ def classify_changed_paths(paths: list[str]) -> GapScope:
             rule=3,
             action="run",
             backends="all",
-            tests=("llvm/test", "clang/test"),
             allowlist=str(ALLOWLIST_LLVM_CLANG.resolve()),
             reason="changes under llvm/lib/ and/or clang/lib/",
         )
@@ -138,7 +133,6 @@ def classify_changed_paths(paths: list[str]) -> GapScope:
         rule=4,
         action="skip",
         backends="",
-        tests=(),
         allowlist="",
         reason="no matching llvm/lib or clang/lib changes",
     )
@@ -178,7 +172,5 @@ def classify_commit(repo: Path, commit: str) -> GapScope:
 
 
 def scope_to_json(scope: GapScope) -> str:
-    """Serialize *scope* as JSON (tests as a list)."""
-    data = asdict(scope)
-    data["tests"] = list(scope.tests)
-    return json.dumps(data, indent=2) + "\n"
+    """Serialize *scope* as JSON."""
+    return json.dumps(asdict(scope), indent=2) + "\n"

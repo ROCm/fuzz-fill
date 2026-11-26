@@ -34,12 +34,17 @@ def parse_covered_points_field(value: str) -> list[str]:
 
 
 def resolve_covered_hexes(covered_points_cell: str) -> tuple[str, list[str]]:
-    """Return (COVERED value with 0x prefix, sorted hex-without-0x list for logging)."""
+    """Return (COVERED string, sorted hex-without-0x list for logging).
+
+    ``COVERED`` is a space-separated list of ``0x``-prefixed addresses for every
+    instrumentation point on the target line (full-line coverage predicate).
+    """
     hexes = parse_covered_points_field(covered_points_cell)
     if not hexes:
         raise ValueError("covered-points is empty or has no valid hex values")
     hexes_sorted = sorted(hexes, key=lambda h: int(h, 16))
-    return "0x" + hexes_sorted[0], hexes_sorted
+    covered = " ".join(f"0x{h}" for h in hexes_sorted)
+    return covered, hexes_sorted
 
 
 def load_new_coverage_rows(csv_path: Path, *, limit: int | None = None) -> list[dict[str, str]]:

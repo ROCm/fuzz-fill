@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import io
 import struct
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from coverage.sancov import Sancov, _quote_rsp_path
 from coverage.sancov_union import (
@@ -123,6 +124,71 @@ class UnionFilesSubprocessTest(unittest.TestCase):
                 out.read_bytes(),
                 _sancov_bytes(SANCOV_BITNESS64, [0x10, 0x20, 0x30]),
             )
+
+    def test_single_file_copies_without_subprocess(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "a.sancov"
+            src.write_bytes(b"raw")
+            out = root / "out.sancov"
+            sancov = Sancov(root / "sancov")
+            with patch("coverage.sancov.run_subprocess") as run:
+                sancov.union_files([src], out)
+            run.assert_not_called()
+            self.assertEqual(out.read_bytes(), b"raw")
+
+    def test_multi_file_runs_union_utility_with_response_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spaced = root / "dir with space"
+            spaced.mkdir()
+            a = spaced / "a.sancov"
+            b = spaced / 'b"quote.sancov'
+            a.write_bytes(b"a")
+            b.write_bytes(b"b")
+            out = root / "out.sancov"
+            sancov_bin = root / "sancov"
+            sancov = Sancov(sancov_bin)
+            captured: dict[str, object] = {}
+
+            def fake_run(logger, cmd, **kwargs):
+                del logger, kwargs
+                captured["cmd"] = list(cmd)
+                rsp = Path(str(cmd[-3])[1:])
+                captured["rsp_text"] = rsp.read_text(encoding="utf-8")
+                out.write_bytes(b"merged")
+                return MagicMock(returncode=0)
+
+            with patch("coverage.sancov.run_subprocess", side_effect=fake_run):
+                sancov.union_files([a, b], out)
+
+            cmd = captured["cmd"]
+            assert isinstance(cmd, list)
+            self.assertEqual(cmd[:-3], [sys.executable, "-m", "coverage.sancov_union"])
+            self.assertTrue(str(cmd[-3]).startswith("@"))
+            self.assertEqual(cmd[-2:], ["--output", str(out)])
+            self.assertEqual(
+                captured["rsp_text"],
+                f"{_quote_rsp_path(str(a))}\n{_quote_rsp_path(str(b))}\n",
+            )
+            self.assertFalse(Path(str(cmd[-3])[1:]).exists())
+            self.assertEqual(out.read_bytes(), b"merged")
+
+    def test_unknown_impl_raises_before_running(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = root / "a.sancov"
+            a.write_bytes(b"a")
+            out = root / "out.sancov"
+            sancov = Sancov(root / "sancov")
+            with patch("coverage.sancov.run_subprocess") as run:
+                with self.assertRaises(ValueError):
+                    sancov.union_files([a, a], out, impl="bogus")
+                with self.assertRaises(ValueError):
+                    sancov.union_files([a], out, impl="bogus")
+            run.assert_not_called()
+            self.assertFalse(out.exists())
+            self.assertEqual(list(root.glob("*.rsp")), [])
 
 
 if __name__ == "__main__":

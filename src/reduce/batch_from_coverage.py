@@ -241,7 +241,7 @@ def _process_rows(
     creduce_n: int | None,
 ) -> int:
     ok = 0
-    ambiguous_rows = 0
+    multi_point_rows = 0
     for i, row in enumerate(rows, start=1):
         try:
             line = int(row["line"])
@@ -265,14 +265,21 @@ def _process_rows(
                 extract_ir_output=extract_ir_output,
                 creduce_n=creduce_n,
             )
-            amb, dest = prepare_test_case(
+            if len(hexes_sorted) > 1:
+                detail = ", ".join(f"0x{h}" for h in hexes_sorted)
+                print(
+                    f"Row {i}: full-line COVERED ({len(hexes_sorted)} points) "
+                    f"on source line {line}: {detail}",
+                    file=sys.stderr,
+                )
+                multi_point_rows += 1
+            dest = prepare_test_case(
                 row_index=i,
                 test_name=test_name,
                 test_info=test_info,
                 file_col=row["file"].strip(),
                 line=line,
                 covered=covered,
-                hexes_sorted=hexes_sorted,
                 out_parent=out_parent,
                 template_interesting=templates.interesting_ir,
                 pipeline_steps=row_pipeline,
@@ -291,37 +298,36 @@ def _process_rows(
                 run_case_reduce(case_dir=dest, tools=tools)
             print(dest)
             ok += 1
-            if amb:
-                ambiguous_rows += 1
         except (OSError, ValueError, FileNotFoundError, SystemExit) as e:
             print(f"Row {i}: {e}", file=sys.stderr)
 
-    _print_summary(ok, len(rows), ambiguous_rows)
+    _print_summary(ok, len(rows), multi_point_rows)
     if ok == 0:
         return 1
     return 0 if ok == len(rows) else 1
 
 
-def _print_summary(ok: int, total: int, ambiguous_rows: int) -> None:
-    if ambiguous_rows:
+def _print_summary(ok: int, total: int, multi_point_rows: int) -> None:
+    if ok <= 0:
+        return
+    if multi_point_rows:
         print(
-            f"Summary: {ambiguous_rows} row(s) had multiple COVERED candidates on the same "
-            "source line (lowest address was used; see messages above).",
+            f"Summary: {ok}/{total} case(s) prepared; "
+            f"{multi_point_rows} require all instrumentation points on the line.",
             file=sys.stderr,
         )
-    elif ok > 0:
-        if ok == total:
-            print(
-                "Summary: every row matched to a unique COVERED address "
-                "(one instrumentation site per file/source line).",
-                file=sys.stderr,
-            )
-        else:
-            print(
-                f"Summary: each of the {ok} successful row(s) matched to a unique COVERED "
-                "address (one instrumentation site per file/source line).",
-                file=sys.stderr,
-            )
+    elif ok == total:
+        print(
+            f"Summary: {ok}/{total} case(s) prepared "
+            "(interestingness requires every COVERED point).",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"Summary: {ok}/{total} case(s) prepared "
+            "(interestingness requires every COVERED point).",
+            file=sys.stderr,
+        )
 
 
 def main(argv: list[str] | None = None) -> int:

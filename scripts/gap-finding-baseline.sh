@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Gap finding (baseline): run coverage baseline over a filtered LIT slice.
 #
-# Produces line_coverage_uncovered.csv and llc_address_line_map.csv under
-# <output-dir>/baseline/.
+# Produces line_coverage_uncovered.csv (and pruned) under <output-dir>/baseline/.
+# Address maps are produced by gap-filling (``coverage export-address-map``).
 
 set -euo pipefail
 
@@ -19,7 +19,7 @@ source "${SCRIPT_DIR}/lib/coverage-baseline.sh"
 usage() {
     cat <<EOF
 Usage: $(basename "$0") --output-dir <path> --llvm-repo <path> --llvm-bin <path> \\
-    --instrumented-bin-dir <path> [options]
+    [options]
 
 Run coverage baseline locally (no Docker).
 Artifacts are written under --output-dir/baseline/.
@@ -32,19 +32,17 @@ Options:
 $(gap_finding_local_usage_common_options)
 
 Examples:
-  $(basename "$0") \\
+  FUZZ_FILL_HOST_BIN=/usr/lib/llvm-24/bin $(basename "$0") \\
       --output-dir ./data/baseline-run \\
       --llvm-repo /path/llvm-project \\
-      --llvm-bin /path/llvm-project/build/bin \\
-      --instrumented-bin-dir /path/llvm-project/build-sancov/bin \\
-      --tests llvm/test/CodeGen/AMDGPU -j "\$(nproc)"
+      --llvm-bin /path/llvm-project/build-coverage/bin \\
+      -j "\$(nproc)"
 
-  $(basename "$0") \\
+  FUZZ_FILL_HOST_BIN=/usr/lib/llvm-24/bin $(basename "$0") \\
       --output-dir ./data/baseline-codegen \\
       --llvm-repo /path/llvm-project \\
-      --llvm-bin /path/llvm-project/build/bin \\
-      --instrumented-bin-dir /path/llvm-project/build-sancov/bin \\
-      --tests llvm/test --lit-filter CodeGen/AMDGPU -j "\$(nproc)"
+      --llvm-bin /path/llvm-project/build-coverage/bin \\
+      --filter CodeGen/AMDGPU -j "\$(nproc)"
 EOF
 }
 
@@ -78,7 +76,7 @@ activate_venv_if_present "$REPO_ROOT"
 baseline_output_dir="${output_dir}/baseline"
 rm -rf "$baseline_output_dir"
 
-run_coverage_baseline "$baseline_output_dir" "${lit_filters[@]}"
+run_coverage_baseline "$baseline_output_dir" "${filters[@]}"
 
 echo "Uncovered baseline lines: ${baseline_output_dir}/line_coverage_uncovered.csv"
 echo "Uncovered baseline lines (pruned): ${baseline_output_dir}/line_coverage_uncovered_pruned.csv"

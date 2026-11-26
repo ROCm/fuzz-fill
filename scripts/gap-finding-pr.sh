@@ -55,7 +55,7 @@ gap_finding_local_try_parse_extra() {
 usage() {
     cat <<EOF
 Usage: $(basename "$0") --output-dir <path> --llvm-repo <path> --llvm-bin <path> \\
-    --instrumented-bin-dir <path> (--commit <rev> | --pr-id <n>) [options]
+    (--commit <rev> | --pr-id <n>) [options]
 
 Run PR gap finding locally (no Docker): baseline, added_lines, target-lines.
 Artifacts are written under --output-dir/.
@@ -72,19 +72,17 @@ Options:
 $(gap_finding_local_usage_common_options)
 
 Examples:
-  $(basename "$0") \\
+  FUZZ_FILL_HOST_BIN=/usr/lib/llvm-24/bin $(basename "$0") \\
       --output-dir ./data/gap-finding-pr \\
       --llvm-repo /path/llvm-project \\
-      --llvm-bin /path/llvm-project/build-sancov/bin \\
-      --instrumented-bin-dir /path/llvm-project/build-sancov/bin \\
+      --llvm-bin /path/llvm-project/build-coverage/bin \\
       --commit HEAD \\
       --auto -j "\$(nproc)"
 
-  $(basename "$0") \\
+  FUZZ_FILL_HOST_BIN=/usr/lib/llvm-24/bin $(basename "$0") \\
       --output-dir ./data/gap-finding-pr-214457 \\
       --llvm-repo /path/llvm-project \\
-      --llvm-bin /path/to/pr-tree/build-sancov/bin \\
-      --instrumented-bin-dir /path/to/pr-tree/build-sancov/bin \\
+      --llvm-bin /path/to/pr-tree/build-coverage/bin \\
       --pr-id 214457 \\
       --auto -j "\$(nproc)"
 EOF
@@ -152,7 +150,7 @@ require_local_coverage_bins
 cd "$REPO_ROOT"
 activate_venv_if_present "$REPO_ROOT"
 
-run_gap_finding_pr "$output_dir" "$commit_rev" "$LLVM_REPO" "${lit_filters[@]}"
+run_gap_finding_pr "$output_dir" "$commit_rev" "$LLVM_REPO" "${filters[@]}"
 
 report="${output_dir}/commit_lines_report/target_lines_uncovered.csv"
 pruned_report="${output_dir}/commit_lines_report/target_lines_uncovered_pruned.csv"

@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# Gap-analysis scope helpers (backends, tests, allowlist).
+# Gap-analysis scope helpers (backends, allowlist).
 # Source from entrypoints; do not execute directly.
 
 : "${REPO_ROOT:?REPO_ROOT must be set before sourcing gap-scope.sh}"
 
 GAP_SCOPE_DEFAULT_ALLOWLIST="${REPO_ROOT}/scripts/allowlist-llvm-clang.txt"
 GAP_SCOPE_DEFAULT_BACKENDS="all"
-GAP_SCOPE_DEFAULT_TESTS=("llvm/test" "clang/test")
-
 # Map an allowlist file path or preset name to a Docker SANCOV_ALLOWLIST preset.
 gap_scope_allowlist_preset() {
     local value="$1"
@@ -63,7 +61,7 @@ gap_scope_enable_projects_for_allowlist() {
 }
 
 # Parse gap_scope CLI key=value lines into shell variables.
-# Sets: gap_scope_action, gap_scope_rule, gap_scope_backends, gap_scope_tests
+# Sets: gap_scope_action, gap_scope_rule, gap_scope_backends,
 #        gap_scope_allowlist, gap_scope_reason
 gap_scope_classify_commit() {
     local llvm_repo="$1"
@@ -73,7 +71,6 @@ gap_scope_classify_commit() {
     gap_scope_action=""
     gap_scope_rule=""
     gap_scope_backends=""
-    gap_scope_tests=""
     gap_scope_allowlist=""
     gap_scope_reason=""
 
@@ -85,7 +82,6 @@ gap_scope_classify_commit() {
             action) gap_scope_action="$value" ;;
             rule) gap_scope_rule="$value" ;;
             backends) gap_scope_backends="$value" ;;
-            tests) gap_scope_tests="$value" ;;
             allowlist) gap_scope_allowlist="$value" ;;
             reason) gap_scope_reason="$value" ;;
         esac
@@ -93,15 +89,11 @@ gap_scope_classify_commit() {
         python -m gap_scope --llvm-repo "$llvm_repo" --commit "$commit")
 }
 
-# Copy a classification into backends, tests[], allowlist, and enable_projects.
+# Copy a classification into backends, allowlist, and enable_projects.
 # enable_projects comes from the allowlist preset, not from the classifier.
 gap_scope_apply_classification() {
     backends="$gap_scope_backends"
     allowlist="$gap_scope_allowlist"
-    tests=()
-    if [[ -n "$gap_scope_tests" ]]; then
-        IFS=',' read -r -a tests <<< "$gap_scope_tests"
-    fi
     enable_projects="$(gap_scope_enable_projects_for_allowlist "$allowlist")"
 }
 
@@ -113,8 +105,5 @@ gap_scope_fill_build_scope() {
         allowlist="$GAP_SCOPE_DEFAULT_ALLOWLIST"
     fi
     backends="${backends:-$GAP_SCOPE_DEFAULT_BACKENDS}"
-    if [[ ${#tests[@]} -eq 0 ]]; then
-        tests=("${GAP_SCOPE_DEFAULT_TESTS[@]}")
-    fi
     enable_projects="$(gap_scope_enable_projects_for_allowlist "$allowlist")"
 }

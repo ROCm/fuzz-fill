@@ -3,6 +3,6 @@
 # RUN: %sancov-opt --version
 # RUN: %coverage --help
 # RUN: %reduce --help
-# RUN: creduce --version
+# RUN: %if creduce %{creduce --version%}
 # RUN: %sancov --version
 # RUN: %FileCheck --version

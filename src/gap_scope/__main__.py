@@ -13,8 +13,8 @@ from gap_scope.classifier import classify_commit, scope_to_json
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Classify an LLVM commit into gap-analysis backends, tests, "
-            "and allowlist (first-match-wins rules)."
+            "Classify an LLVM commit into gap-analysis backends and allowlist "
+            "(first-match-wins rules)."
         )
     )
     parser.add_argument(
@@ -48,7 +48,6 @@ def main(argv: list[str] | None = None) -> int:
     print(f"action={scope.action}")
     print(f"rule={scope.rule}")
     print(f"backends={scope.backends}")
-    print(f"tests={','.join(scope.tests)}")
     print(f"allowlist={scope.allowlist}")
     print(f"reason={scope.reason}")
     return 0

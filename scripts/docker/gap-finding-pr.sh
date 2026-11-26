@@ -9,19 +9,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 if [[ "${IN_CONTAINER:-}" == 1 ]]; then
+    # shellcheck source=scripts/lib/docker-coverage-env.sh
+    source "${REPO_ROOT}/scripts/lib/docker-coverage-env.sh"
     # shellcheck source=scripts/lib/gap-finding-pr.sh
     source "${REPO_ROOT}/scripts/lib/gap-finding-pr.sh"
 
     commit="${COMMIT_REV:-$(git -C /work/llvm-project rev-parse HEAD)}"
 
-    mapfile -t lit_filters < /mounted-output/.lit-filters
-    if [[ -s /mounted-output/.gap-test-suites ]]; then
-        mapfile -t tests < /mounted-output/.gap-test-suites
-    fi
+    docker_export_coverage_env
+    mapfile -t filters < /mounted-output/.filters
 
-    export LIT_ALLOW_FAILURES=1
-
-    run_gap_finding_pr /mounted-output "$commit" "" "${lit_filters[@]}"
+    run_gap_finding_pr /mounted-output "$commit" "" "${filters[@]}"
     exit 0
 fi
 
@@ -63,11 +61,10 @@ Required:
 
 Options:
 $(docker_gap_finding_usage_image_build_options)
-  --tests <suite>          Lit suite (<project>/test or a subdirectory; default: image suites)
-  --lit-filter <regex>     llvm-lit --filter= regex for every suite; repeatable
+  --filter <regex>         Lit --filter= regex for check-all; repeatable
   --commit <rev>           Revision for added_lines (default: HEAD in image llvm-project)
   --bind-repo              Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
-  -j <n>, --jobs <n>       Parallel jobs for llvm-lit; with --build-image, also for ninja
+  -j <n>, --jobs <n>       Parallel jobs for check-all; with --build-image, also for ninja
   --help, -h               Show this help
 
 Examples:
@@ -75,7 +72,7 @@ Examples:
       --auto --output-dir ./data/gap-finding-pr-203468 -j "\$(nproc)"
   $(basename "$0") --pr-id 203468 --output-dir ./data/gap-finding-pr-203468
   $(basename "$0") --pr-id 203468 --output-dir ./data/gap-finding-pr-203468 \\
-      --tests llvm/test --lit-filter CodeGen/AMDGPU -j "\$(nproc)"
+      --filter CodeGen/AMDGPU -j "\$(nproc)"
 EOF
 }
 
@@ -94,10 +91,8 @@ if ! docker_gap_finding_validate_host_prerequisites; then
     exit 1
 fi
 
-DOCKER_IMAGE_MISSING_HINT="pass --build-image with --llvm-repo and --auto (or --backends/--tests/--allowlist) to build it first"
+DOCKER_IMAGE_MISSING_HINT="pass --build-image with --llvm-repo and --auto (or --backends/--allowlist) to build it first"
 docker_image_cli_prepare
-
-docker_gap_default_lit_suites_from_image
 
 docker_gap_finding_prepare_output_dir
 docker_gap_finding_write_scope_files
@@ -113,9 +108,8 @@ summary_report="${output_dir}/commit_lines_report/target_lines_coverage_summary.
 echo "Wrote ${report}"
 echo "PR target lines coverage summary: ${summary_report}"
 echo "Image: ${image_ref}"
-echo "LIT suites: ${tests[*]}"
-if [[ ${#lit_filters[@]} -gt 0 ]]; then
-    echo "LIT filters: ${lit_filters[*]}"
+if [[ ${#filters[@]} -gt 0 ]]; then
+    echo "Filters: ${filters[*]}"
 fi
 
 emit_lit_failures_warning "$output_dir" "target_lines_uncovered.csv"

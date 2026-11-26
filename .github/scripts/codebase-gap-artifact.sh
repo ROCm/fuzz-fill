@@ -87,7 +87,7 @@ finalize() {
     find "${ARTIFACT_DIR}" -type f \( -name '*.sancov' -o -name '*.symcov' \) -print -delete
 
     local forbidden
-    for forbidden in llvm-main llvm-project build-sancov build-sancov-main llvm-release candidate-tests-dataset pr-llvm; do
+    for forbidden in llvm-main llvm-project build-coverage build-coverage-main build-sancov build-sancov-main llvm-release candidate-tests-dataset pr-llvm; do
         if [[ -e "${ARTIFACT_DIR}/${forbidden}" ]]; then
             echo "error: artifact must not contain ${forbidden}" >&2
             exit 1

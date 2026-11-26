@@ -15,7 +15,6 @@ ninja_jobs=""
 llvm_targets=""
 llvm_enable_projects="clang"
 enable_projects_explicit=0
-gap_test_suites=()
 no_cache=0
 
 usage() {
@@ -41,7 +40,6 @@ Options:
                                  (default: X86;AMDGPU;SPIRV)
   --enable-projects <list>       Semicolon-separated LLVM_ENABLE_PROJECTS
                                  (default: clang). Pass an empty string to build no extra projects.
-  --tests <suite>                Lit suite recorded in the image (repeatable; default: llvm/test)
   -j <n>, --jobs <n>             Parallel jobs for ninja when building LLVM (default: unconstrained)
   --no-cache                     Pass --no-cache to docker build (ignore layer cache)
 
@@ -134,14 +132,6 @@ while [[ $# -gt 0 ]]; do
             enable_projects_explicit=1
             shift 2
             ;;
-        --tests)
-            if [[ $# -lt 2 ]]; then
-                echo "error: --tests requires a value" >&2
-                exit 1
-            fi
-            gap_test_suites+=("$2")
-            shift 2
-            ;;
         --no-cache)
             no_cache=1
             shift
@@ -226,9 +216,6 @@ if [[ -n "$llvm_targets" ]]; then
 fi
 if [[ "$enable_projects_explicit" -eq 1 || -n "$llvm_enable_projects" ]]; then
     docker_build_args+=(--build-arg LLVM_ENABLE_PROJECTS="${llvm_enable_projects}")
-fi
-if [[ ${#gap_test_suites[@]} -gt 0 ]]; then
-    docker_build_args+=(--build-arg GAP_TEST_SUITES="${gap_test_suites[*]}")
 fi
 if [[ "$no_cache" -eq 1 ]]; then
     docker_build_args+=(--no-cache)

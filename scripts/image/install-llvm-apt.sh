@@ -45,13 +45,14 @@ apt-get update
 apt-get install -y --no-install-recommends \
     "clang-${LLVM_MAJOR}" \
     "lld-${LLVM_MAJOR}" \
+    "llvm-${LLVM_MAJOR}" \
     "libclang-rt-${LLVM_MAJOR}-dev"
 
 if [[ -z "${GITHUB_ACTIONS:-}" ]]; then
     rm -rf /var/lib/apt/lists/*
 fi
 
-for tool in clang clang++ ld.lld; do
+for tool in clang clang++ ld.lld llvm-cov llvm-profdata; do
     if [[ ! -x "${BOOTSTRAP_BIN}/${tool}" ]]; then
         echo "error: expected executable missing: ${BOOTSTRAP_BIN}/${tool}" >&2
         exit 1

@@ -24,7 +24,7 @@ docker_gap_finding_source_host_libs() {
 
     docker_image_cli_init_vars
     output_dir=""
-    lit_filters=()
+    filters=()
     jobs=""
     bind_repo=0
 }
@@ -44,16 +44,15 @@ docker_gap_finding_usage_image_build_options() {
   --force-build                 Rebuild PR image even when the tag already exists
   --keep-image                  Keep PR image after run (default: remove when --build-image)
   --llvm-repo <path>            Local llvm-project clone (required with --build-image)
-  --auto                        Derive backends, tests, and allowlist from the PR
+  --auto                        Derive backends and allowlist from the PR
   --backends <list>             LLVM_TARGETS_TO_BUILD for --build-image
-  --tests <suite>               Lit suite (<project>/test or a subdirectory; repeatable)
   --allowlist <path|preset>     Allowlist preset or file for --build-image
   --github-repo <owner/repo>    GitHub repo hosting the PR (default: llvm/llvm-project)
   --image-name <name>           Image name when using --pr-id (default: fuzz-fill-test)
 EOF
 }
 
-# Parse --output-dir or --lit-filter. Returns 0 if consumed; sets DOCKER_GAP_FINDING_SHIFT.
+# Parse --output-dir or --filter. Returns 0 if consumed; sets DOCKER_GAP_FINDING_SHIFT.
 docker_gap_finding_try_parse_workflow() {
     DOCKER_GAP_FINDING_SHIFT=0
 
@@ -64,9 +63,9 @@ docker_gap_finding_try_parse_workflow() {
             DOCKER_GAP_FINDING_SHIFT=2
             return 0
             ;;
-        --lit-filter)
-            [[ $# -ge 2 ]] || { echo "error: --lit-filter requires a value" >&2; exit 2; }
-            lit_filters+=("$2")
+        --filter)
+            [[ $# -ge 2 ]] || { echo "error: --filter requires a value" >&2; exit 2; }
+            filters+=("$2")
             DOCKER_GAP_FINDING_SHIFT=2
             return 0
             ;;
@@ -97,26 +96,13 @@ docker_gap_finding_prepare_output_dir() {
     output_dir="$(realpath "$output_dir")"
 }
 
-docker_gap_default_lit_suites_from_image() {
-    if [[ ${#tests[@]} -gt 0 ]]; then
-        return 0
-    fi
-    mapfile -t tests < <(docker_image_read_test_suites | sed '/^$/d')
-    if [[ ${#tests[@]} -eq 0 ]]; then
-        tests=("llvm/test")
-    fi
-    echo "Image gap test suites: ${tests[*]}"
-}
-
 docker_gap_finding_write_scope_files() {
-    local filters_file="${output_dir}/.lit-filters"
-    local suites_file="${output_dir}/.gap-test-suites"
-    if [[ ${#lit_filters[@]} -gt 0 ]]; then
-        printf '%s\n' "${lit_filters[@]}" > "$filters_file"
+    local filters_file="${output_dir}/.filters"
+    if [[ ${#filters[@]} -gt 0 ]]; then
+        printf '%s\n' "${filters[@]}" > "$filters_file"
     else
         : > "$filters_file"
     fi
-    printf '%s\n' "${tests[@]}" > "$suites_file"
 }
 
 # Override in entrypoints to parse workflow-specific flags (e.g. --commit).

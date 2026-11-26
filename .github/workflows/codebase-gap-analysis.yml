@@ -30,18 +30,11 @@ on:
         default: all
       enable_clang:
         description: >-
-          Build and test Clang with the instrumented LLVM tree. Clang is the
+          Build and test Clang with the coverage LLVM tree. Clang is the
           only project this workflow can enable. On by default.
         required: false
         type: boolean
         default: true
-      allow_inline:
-        description: >-
-          Allow inlining in the instrumented LLVM build (passes --allow-inline
-          to build-llvm-sancov.sh). Off by default so the build keeps -fno-inline.
-        required: false
-        type: boolean
-        default: false
       upload_raw:
         description: Upload raw baseline CSVs (large; off by default)
         required: false
@@ -49,8 +42,8 @@ on:
         default: false
       upload_tools:
         description: >-
-          Upload instrumented opt/llc (and clang/clang++ when built) plus
-          Release sancov/FileCheck (large; ~1.2 GB uncompressed, off by default)
+          Upload coverage opt/llc (and clang/clang++ with resource headers when
+          built; large, off by default)
         required: false
         type: boolean
         default: false
@@ -77,8 +70,8 @@ env:
   LLVM_APT_MAJOR: "24"
   LLVM_RELEASE_BIN: /usr/lib/llvm-24/bin
   MAIN_LLVM_DIR: /work/llvm-main
-  MAIN_BUILD_DIR: /work/build-sancov-main
-  MAIN_BUILD_BIN: /work/build-sancov-main/bin
+  MAIN_BUILD_DIR: /work/build-coverage-main
+  MAIN_BUILD_BIN: /work/build-coverage-main/bin
   OUT_DIR: /work/out
   MAIN_COMMIT_FILE: /work/main-commit
   VENV_DIR: /work/fuzz-fill-venv
@@ -98,7 +91,6 @@ jobs:
       INPUT_GITHUB_REPO: ${{ inputs.github_repo }}
       INPUT_LLVM_REF: ${{ inputs.llvm_ref }}
       INPUT_TARGETS: ${{ inputs.targets }}
-      SCOPE_ALLOWLIST: "${{ inputs.enable_clang && 'scripts/allowlist-llvm-clang.txt' || 'scripts/allowlist-llvm.txt' }}"
       SCOPE_ENABLE_PROJECTS: "${{ inputs.enable_clang && 'clang' || '' }}"
     steps:
       - name: Checkout fuzz-fill
@@ -113,7 +105,10 @@ jobs:
         run: ./scripts/image/install-cmake.sh
 
       - name: Install apt.llvm.org bootstrap
-        run: ./scripts/image/install-llvm-apt.sh "${LLVM_APT_MAJOR}"
+        run: |
+          ./scripts/image/install-llvm-apt.sh "${LLVM_APT_MAJOR}"
+          apt-get update
+          apt-get install -y --no-install-recommends "llvm-${LLVM_APT_MAJOR}"
 
       - name: Checkout llvm main
         run: |
@@ -133,39 +128,29 @@ jobs:
         id: cache-ccache
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: fuzz-fill-llvm-sancov-ccache-codebase-${{ env.LLVM_APT_MAJOR }}-${{ github.run_id }}
+          key: fuzz-fill-llvm-coverage-ccache-codebase-${{ env.LLVM_APT_MAJOR }}-${{ github.run_id }}
           restore-keys: |
-            fuzz-fill-llvm-sancov-ccache-codebase-${{ env.LLVM_APT_MAJOR }}-
+            fuzz-fill-llvm-coverage-ccache-codebase-${{ env.LLVM_APT_MAJOR }}-
 
       - name: Reset ccache stats for this run
         run: ccache --zero-stats
 
-      - name: Build instrumented LLVM for main
-        env:
-          ALLOW_INLINE: ${{ inputs.allow_inline }}
+      - name: Build coverage LLVM for main
         run: |
           build_args=(
-            "${SCOPE_ALLOWLIST}"
             "${MAIN_LLVM_DIR}"
             "${MAIN_BUILD_DIR}"
             --bootstrap-bin "${LLVM_RELEASE_BIN}"
             --targets "${INPUT_TARGETS}"
+            --enable-projects "${SCOPE_ENABLE_PROJECTS}"
+            --disable-clangir
             --enable-ccache
             --ccache-compiler-check-version
           )
-          if [[ -n "${SCOPE_ENABLE_PROJECTS}" ]]; then
-            build_args+=(--enable-projects "${SCOPE_ENABLE_PROJECTS}")
-          fi
-          if [[ "${ALLOW_INLINE}" == "true" ]]; then
-            build_args+=(--allow-inline)
-          fi
           build_args+=("$(nproc)")
-          ./scripts/build-llvm-sancov.sh "${build_args[@]}"
-
-      - name: Stage instrumented tools artifact
+          ./scripts/build-llvm-coverage.sh "${build_args[@]}"
+      - name: Stage coverage tools artifact
         if: inputs.upload_tools
-        env:
-          ALLOW_INLINE: ${{ inputs.allow_inline }}
         run: |
           chmod +x .github/scripts/stage-instrumented-tools.sh
           .github/scripts/stage-instrumented-tools.sh \
@@ -174,10 +159,8 @@ jobs:
             --commit-file "${MAIN_COMMIT_FILE}" \
             --out-dir "${INSTRUMENTED_TOOLS_DIR}" \
             --github-repo "${INPUT_GITHUB_REPO}" \
-            --allowlist "${SCOPE_ALLOWLIST}" \
             --targets "${INPUT_TARGETS}" \
-            --enable-projects "${SCOPE_ENABLE_PROJECTS}" \
-            --allow-inline "${ALLOW_INLINE}"
+            --enable-projects "${SCOPE_ENABLE_PROJECTS}"
 
       - name: Upload instrumented tools artifact
         if: inputs.upload_tools
@@ -215,16 +198,13 @@ jobs:
       - name: Run baseline gap finding
         run: |
           source "${VENV_DIR}/bin/activate"
-          test_args=(--tests llvm/test)
-          if [[ -n "${SCOPE_ENABLE_PROJECTS}" ]]; then
-            test_args+=(--tests clang/test)
-          fi
+          export FUZZ_FILL_COVERAGE_BUILD_DIR="${MAIN_BUILD_DIR}"
+          export FUZZ_FILL_HOST_BIN="${LLVM_RELEASE_BIN}"
           ./scripts/gap-finding-baseline.sh \
             --output-dir "${OUT_DIR}" \
             --llvm-repo "${MAIN_LLVM_DIR}" \
-            --llvm-bin "${MAIN_BUILD_BIN}" \
+            --llvm-bin "${LLVM_RELEASE_BIN}" \
             --instrumented-bin-dir "${MAIN_BUILD_BIN}" \
-            "${test_args[@]}" \
             -j "$(nproc)"
 
       - name: Write HTML coverage report
@@ -259,11 +239,9 @@ jobs:
             echo "github_repo: ${INPUT_GITHUB_REPO}"
             echo "llvm_ref: ${INPUT_LLVM_REF}"
             echo "main_head: $(cat "${MAIN_COMMIT_FILE}")"
-            echo "allowlist: ${SCOPE_ALLOWLIST}"
             echo "targets: ${INPUT_TARGETS}"
             echo "enable_projects: ${SCOPE_ENABLE_PROJECTS:-<none>}"
             echo "tests: ${tests}"
-            echo "allow_inline: ${{ inputs.allow_inline }}"
             echo "upload_raw: ${{ inputs.upload_raw }}"
             echo "upload_tools: ${{ inputs.upload_tools }}"
             echo "generate_html: ${{ inputs.generate_html }}"

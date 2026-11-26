@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Gap filling: candidate-test -> incremental inside a one-shot Docker container.
+# Gap filling: export-address-map -> candidate-test -> incremental in a one-shot
+# Docker container.
 #
-# Requires a gap list from gap finding (baseline or PR), passed as explicit CSV
-# paths (same flags as ``coverage incremental``). By default the host corpus is
-# bind-mounted read-only at /mounted-candidate-tests (no copy); optional -n limits work
-# inside candidate-test. Pass --stage-candidate-tests to copy inputs to a temp dir
-# before mounting (first N when -n is set, otherwise the full corpus).
+# Requires an uncovered-lines CSV from gap finding (baseline or PR). The address
+# map is built inside the container unless --address-line-map-csv is passed.
+# By default the host corpus is bind-mounted read-only at /mounted-candidate-tests
+# (no copy); optional -n limits work inside candidate-test. Pass
+# --stage-candidate-tests to copy inputs to a temp dir before mounting (first N
+# when -n is set, otherwise the full corpus).
 #
 # Pass --bind-repo to run the local fuzz-fill checkout instead of the copy baked
 # into the image at build time.
@@ -16,18 +18,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 if [[ "${IN_CONTAINER:-}" == 1 ]]; then
+    # shellcheck source=scripts/lib/docker-coverage-env.sh
+    source "${REPO_ROOT}/scripts/lib/docker-coverage-env.sh"
     # shellcheck source=scripts/lib/gap-filling.sh
     source "${REPO_ROOT}/scripts/lib/gap-filling.sh"
 
     : "${UNCOVERED_CSV:?UNCOVERED_CSV is required}"
-    : "${LLC_MAP_CSV:?LLC_MAP_CSV is required}"
+
+    docker_export_coverage_env
+
+    address_map_csv="${LLC_MAP_CSV:-/mounted-output/llc_address_line_map.csv}"
+    if [[ -z "${LLC_MAP_CSV:-}" ]]; then
+        run_export_address_map "$address_map_csv"
+    fi
 
     run_candidate_test /mounted-output/candidate_tests /mounted-candidate-tests "${CANDIDATE_N:-}"
 
     run_incremental \
         /mounted-output/incremental \
         "$UNCOVERED_CSV" \
-        "$LLC_MAP_CSV" \
+        "$address_map_csv" \
         /mounted-output/candidate_tests
     exit 0
 fi
@@ -69,8 +79,6 @@ Required:
   --output-dir <path>           Host output directory (created if missing)
   --line-coverage-uncovered-csv <path>
                                 Uncovered-lines CSV (``file``, ``line`` columns)
-  --llc-address-line-map-csv <path>
-                                LLC address-to-line map CSV from the same baseline run
   --candidate-tests-dir <path>  Host corpus root (bind-mounted read-only by default)
 
 Image (one of):
@@ -82,14 +90,14 @@ Image build (optional; reuses existing image when omitted):
   --force-build                 Rebuild PR image even when the tag already exists
   --keep-image                  Keep PR image after run (default: remove when --build-image)
   --llvm-repo <path>            Local llvm-project clone (required with --build-image)
-  --auto                        Derive backends, tests, and allowlist from the PR
+  --auto                        Derive backends and allowlist from the PR
   --backends <list>             LLVM_TARGETS_TO_BUILD for --build-image
-  --tests <suite>               Lit suite for --build-image (repeatable)
   --allowlist <path|preset>     Allowlist for --build-image
   --github-repo <owner/repo>    GitHub repo hosting the PR (default: llvm/llvm-project)
   --image-name <name>           Image name when using --pr-id (default: fuzz-fill-test)
 
 Options:
+  --address-line-map-csv <path> Reuse an existing address map (skip export-address-map)
   --bind-repo                   Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
   --stage-candidate-tests       Copy candidate inputs to a temp dir before mounting
                                 (default: bind-mount the full --candidate-tests-dir)
@@ -101,17 +109,14 @@ Options:
 Examples:
   $(basename "$0") --output-dir ./data \\
       --line-coverage-uncovered-csv line_coverage_uncovered.csv \\
-      --llc-address-line-map-csv llc_address_line_map.csv \\
       --candidate-tests-dir /path/to/corpus -j "\$(nproc)"
 
   $(basename "$0") --output-dir ./data \\
       --line-coverage-uncovered-csv line_coverage_uncovered.csv \\
-      --llc-address-line-map-csv llc_address_line_map.csv \\
       --candidate-tests-dir /path/to/corpus -n 100 -j "\$(nproc)"
 
   $(basename "$0") --pr-id 203468 --output-dir ./data \\
       --line-coverage-uncovered-csv line_coverage_uncovered.csv \\
-      --llc-address-line-map-csv llc_address_line_map.csv \\
       --candidate-tests-dir /path/to/corpus -n 100 -j "\$(nproc)"
 EOF
 }
@@ -143,8 +148,8 @@ while [[ $# -gt 0 ]]; do
             line_coverage_uncovered_csv="$2"
             shift 2
             ;;
-        --llc-address-line-map-csv)
-            [[ $# -ge 2 ]] || { echo "error: --llc-address-line-map-csv requires a value" >&2; exit 2; }
+        --address-line-map-csv)
+            [[ $# -ge 2 ]] || { echo "error: --address-line-map-csv requires a value" >&2; exit 2; }
             llc_address_line_map_csv="$2"
             shift 2
             ;;
@@ -210,7 +215,7 @@ fi
 resolve_gap_profile_csv_paths line_coverage_uncovered_csv llc_address_line_map_csv
 validate_jobs "$jobs"
 
-DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --auto (or --backends/--tests/--allowlist)"
+DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --auto (or --backends/--allowlist)"
 docker_image_cli_prepare
 
 container_uncovered_csv="/mounted-profile/line_coverage_uncovered.csv"
@@ -218,7 +223,11 @@ container_llc_map_csv="/mounted-profile/llc_address_line_map.csv"
 
 echo "Using coverage profile:"
 echo "  uncovered lines: ${line_coverage_uncovered_csv}"
-echo "  address map:     ${llc_address_line_map_csv}"
+if [[ -n "$llc_address_line_map_csv" ]]; then
+    echo "  address map:     ${llc_address_line_map_csv} (reuse)"
+else
+    echo "  address map:     export-address-map inside container"
+fi
 
 mkdir -p "$output_dir"
 output_dir="$(realpath "$output_dir")"
@@ -248,14 +257,18 @@ docker_env=(
     -e "IN_CONTAINER=1"
     -e "CANDIDATE_N=${candidate_n}"
     -e "UNCOVERED_CSV=${container_uncovered_csv}"
-    -e "LLC_MAP_CSV=${container_llc_map_csv}"
 )
+if [[ -n "$llc_address_line_map_csv" ]]; then
+    docker_env+=(-e "LLC_MAP_CSV=${container_llc_map_csv}")
+fi
 docker_gap_append_jobs_env docker_env
 
 extra_mounts=(
     -v "${line_coverage_uncovered_csv}:${container_uncovered_csv}:ro"
-    -v "${llc_address_line_map_csv}:${container_llc_map_csv}:ro"
 )
+if [[ -n "$llc_address_line_map_csv" ]]; then
+    extra_mounts+=(-v "${llc_address_line_map_csv}:${container_llc_map_csv}:ro")
+fi
 extra_mounts+=("${candidate_mount[@]}")
 docker_gap_append_bind_repo_mount extra_mounts
 

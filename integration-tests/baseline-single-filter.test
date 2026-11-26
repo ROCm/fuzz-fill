@@ -1,44 +1,26 @@
-# COM: Run `coverage baseline` with a filter that matches exactly one lit test,
-# COM: without -j (llvm-lit picks its own default), and with --lit-verbose,
-# COM: --lit-allow-failures, and --lit-priority-slow-tests. Validate baseline
-# COM: coverage artifacts are produced.
+# COM: Source-coverage baseline over a tiny filtered check-all slice.
+# COM: The baseline writes only covered/uncovered line splits and relative paths.
 
 # RUN: rm -rf %t && mkdir -p %t/baseline
-# RUN: %coverage baseline --output-dir %t/baseline --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --tests llvm/test/CodeGen/AMDGPU --lit-filter 'CodeGen/AMDGPU/loop-live-out-copy-undef-subrange\.ll$' --lit-priority-slow-tests --lit-verbose --lit-allow-failures | tee %t/baseline.log
+# RUN: %coverage baseline --output-dir %t/baseline --build-dir %coverage-build --llvm-src %llvm-repo --host-bin %host-bin --filter 'CodeGen/AMDGPU/loop-live-out-copy-undef-subrange\.ll$' --binary %coverage-build/bin/llc -j1 2>&1 | tee %t/baseline.log
 
-# COM: --lit-verbose forwards -vv to llvm-lit; expect per-test PASS output.
-# RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=VERBOSE
-# VERBOSE: PASS:
-
-# COM: --lit-allow-failures must not warn when llvm-lit succeeds.
-# RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=ALLOW_OK
-# ALLOW_OK-NOT: warning: llvm-lit exited with code
-
-# COM: --lit-priority-slow-tests must seed .lit_test_times.txt without warnings
-# COM: when the configured priority tests exist in the LLVM source tree.
-# RUN: %FileCheck %s --input-file=%t/baseline.log --check-prefix=PRIORITY_OK
-# PRIORITY_OK-NOT: warning: skipping lit priority scheduling for missing test(s)
-# PRIORITY_OK-NOT: warning: no configured lit priority tests exist in the LLVM
-
-# COM: A successful single-test suite run must emit the baseline artifacts.
 # RUN: test -f %t/baseline/line_coverage_summary.csv
 # RUN: test -f %t/baseline/line_coverage_covered.csv
-# RUN: test -f %t/baseline/line_coverage_partially.csv
+# RUN: test ! -f %t/baseline/line_coverage_partially.csv
 # RUN: test -f %t/baseline/line_coverage_uncovered.csv
-# RUN: test -f %t/baseline/llc_address_line_map.csv
 # RUN: test -f %t/baseline/lit_failures.json
-# RUN: test -f %t/baseline/llc_line_point_summary.csv
+# RUN: test -f %t/baseline/check-all.log
+# RUN: test -f %t/baseline/coverage.lcov
 
-# COM: lit_failures.json is always written; with no lit failures the tests array is empty.
 # RUN: %FileCheck %s --input-file=%t/baseline/lit_failures.json --check-prefix=LIT_FAILURES
-# LIT_FAILURES: "__version__":
-# LIT_FAILURES: "elapsed":
 # LIT_FAILURES: "tests": []
 # LIT_FAILURES-NOT: "code":
 
-# COM: Verify the test actually executed by confirming non-empty coverage: the
-# COM: address map must contain at least one real data row (an AMDGPU source path with a
-# COM: line number and llc point), not just the header.
-# RUN: %FileCheck %s --input-file=%t/baseline/llc_address_line_map.csv --check-prefix=COVERAGE
-# COVERAGE: file,line,point
-# COVERAGE: {{.*}}/AMDGPU/{{.*}}.cpp,{{[0-9]+}},0x{{[0-9a-f]+}}
+# RUN: %FileCheck %s --input-file=%t/baseline/line_coverage_summary.csv --check-prefix=SUMMARY
+# SUMMARY: file,line,coverage
+# SUMMARY: llvm/lib/Target/AMDGPU/{{.*}}.cpp,{{[0-9]+}},{{covered|uncovered}}
+
+# RUN: %FileCheck %s --input-file=%t/baseline/line_coverage_covered.csv --check-prefix=SPLIT
+# RUN: %FileCheck %s --input-file=%t/baseline/line_coverage_uncovered.csv --check-prefix=SPLIT
+# SPLIT: file,line
+# SPLIT-NOT: {{^}}file,line,coverage

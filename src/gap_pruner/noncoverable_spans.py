@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 
 # An identifier followed by a balanced "(...)" prunes every line that construct
-# spans. Two kinds qualify, for the same reason: neither is a meaningful place
-# to ask "did a test reach this?". Add more names as needed.
+# spans. These calls/macros are not meaningful places to ask "did a test reach
+# this?". Add more names as needed.
 NONCOVERABLE_NAMES = frozenset(
     {
         # never executed / compile-time only
@@ -22,7 +22,12 @@ NONCOVERABLE_NAMES = frozenset(
         "reportFatalUsageError",
         "reportFatalInternalError",
         "PrintFatalError",
-        # control flow: the branch decision, not the branch body
+    }
+)
+
+CONTROL_FLOW_NAMES = frozenset(
+    {
+        # the branch decision, not the branch body
         "if",
         "while",
         "for",
@@ -48,24 +53,29 @@ _TOKEN_RE = re.compile(
 )
 
 
-def find_noncoverable_lines(source_file: Path) -> set[int]:
+def find_noncoverable_lines(source_file: Path, prune_control_flow: bool = False) -> set[int]:
     """Line numbers in ``source_file`` that are not meaningful coverage
     targets: blank, a standalone '{' or '}', or part of a NONCOVERABLE_NAMES
-    construct, whether that construct spans one line or many.
+    construct, whether that construct spans one line or many. When
+    ``prune_control_flow`` is true, also prune ``if``/``while``/``for``
+    condition spans.
 
     Everything is read straight off ``source_file`` -- never off a CSV's own
     ``text`` column, which may be stale, absent, or simply not trusted -- so
     the file is the one source of truth for what a line actually is.
 
     The test is purely lexical: a macro (``assert``), an ordinary call
-    (``report_fatal_error``) and a keyword (``if``) all read as an identifier
-    followed by a balanced ``(...)``, so one pass over the text covers all
-    three and adding a name needs no other change. Qualified calls such as
-    ``llvm::report_fatal_error(...)`` match; member calls such as
+    (``report_fatal_error``) and, when opted in, a keyword (``if``) all read as
+    an identifier followed by a balanced ``(...)``, so one pass over the text
+    covers all enabled names and adding a name needs no other change. Qualified
+    calls such as ``llvm::report_fatal_error(...)`` match; member calls such as
     ``obj.assert(...)`` deliberately do not.
     """
     text = source_file.read_text(encoding="utf-8")
     line_starts = [0, *(m.end() for m in re.finditer("\n", text))]
+    noncoverable_names = NONCOVERABLE_NAMES
+    if prune_control_flow:
+        noncoverable_names |= CONTROL_FLOW_NAMES
 
     pruned: set[int] = {
         i + 1 for i, line in enumerate(text.splitlines()) if line.strip() in ("", "{", "}")
@@ -78,7 +88,7 @@ def find_noncoverable_lines(source_file: Path) -> set[int]:
         if tok[0] == "/":
             continue  # only comments start with "/"; skip without losing history
         if not depth:
-            if tok == "(" and prev in NONCOVERABLE_NAMES and prev2 not in _MEMBER_ACCESS:
+            if tok == "(" and prev in noncoverable_names and prev2 not in _MEMBER_ACCESS:
                 start, depth = prev_start, 1
         elif tok == "(":
             depth += 1

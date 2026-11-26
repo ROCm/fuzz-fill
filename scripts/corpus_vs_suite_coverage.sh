@@ -7,8 +7,8 @@
 #   ./scripts/build-llvm-sancov.sh scripts/allowlist-amdgpu.txt llvm-project \
 #       llvm-project/build-sancov --bootstrap-bin /path/to/llvm/bin
 #
-# Usage:
-#   ./scripts/corpus_vs_suite_coverage.sh
+# Usage (HOST_BIN is required: non-instrumented LLVM bin with llvm-profdata/llvm-cov):
+#   HOST_BIN=/usr/lib/llvm-24/bin ./scripts/corpus_vs_suite_coverage.sh
 #   CORPUS_N=100 ./scripts/corpus_vs_suite_coverage.sh          # smoke: first 100 files
 #   FILTER='CodeGen/AMDGPU/loop' ./scripts/corpus_vs_suite_coverage.sh
 #   FILTER='(?:^|/)AMDGPU(?:/|$)' ./scripts/corpus_vs_suite_coverage.sh
@@ -26,6 +26,8 @@ FUZZ_FILL="$(cd "$SCRIPT_DIR/.." && pwd)"
 LLVM="${LLVM:-$FUZZ_FILL/llvm-project}"
 LLVM_BIN="${LLVM_BIN:-$LLVM/build-sancov/bin}"
 INSTRUMENTED_BIN="${INSTRUMENTED_BIN:-$LLVM/build-sancov/bin}"
+COVERAGE_BUILD_DIR="${COVERAGE_BUILD_DIR:-$LLVM/build-coverage}"
+HOST_BIN="${HOST_BIN:-}"
 CORPUS="${CORPUS:-$FUZZ_FILL/amdgpu-tests}"
 FILTER="${FILTER:-(?:^|/)AMDGPU(?:/|$)}"
 OUTPUT_DIR="${OUTPUT_DIR:-$FUZZ_FILL/data/coverage_output/corpus_vs_suite_$(date +%y%m%d_%H%M%S)}"
@@ -69,7 +71,13 @@ if [[ ! -d "$CORPUS" ]]; then
   exit 1
 fi
 
-require_bin "$LLVM_BIN" sancov
+if [[ -z "$HOST_BIN" ]]; then
+  echo "error: set HOST_BIN to a non-instrumented LLVM bin dir with llvm-profdata and llvm-cov" >&2
+  exit 1
+fi
+require_bin "$HOST_BIN" llvm-profdata
+require_bin "$HOST_BIN" llvm-cov
+require_bin "$INSTRUMENTED_BIN" sancov
 require_bin "$INSTRUMENTED_BIN" llvm-lit
 require_bin "$INSTRUMENTED_BIN" llc
 require_bin "$INSTRUMENTED_BIN" opt
@@ -101,7 +109,8 @@ mkdir -p "$OUTPUT_DIR"
 
 echo "=== corpus vs LLVM test suite coverage ==="
 echo "fuzz-fill:      $FUZZ_FILL"
-echo "llvm-bin:       $LLVM_BIN"
+echo "coverage build: $COVERAGE_BUILD_DIR"
+echo "host-bin:       $HOST_BIN"
 echo "instrumented:   $INSTRUMENTED_BIN"
 echo "corpus:         $CORPUS"
 echo "corpus tests:   ${CORPUS_N:-all}"
@@ -119,12 +128,10 @@ if [[ -z "${SKIP_TEST_SUITE:-}" ]]; then
   step_start=$SECONDS
   python -m coverage baseline \
     --output-dir "$TEST_SUITE_OUTPUT_DIR" \
-    --sancov "$LLVM_BIN/sancov" \
-    --llvm-lit "$INSTRUMENTED_BIN/llvm-lit" \
-    --llc "$INSTRUMENTED_BIN/llc" \
-    --opt "$INSTRUMENTED_BIN/opt" \
-    --tests llvm/test \
-    --lit-filter "$FILTER"
+    --build-dir "$COVERAGE_BUILD_DIR" \
+    --host-bin "$HOST_BIN" \
+    --llvm-src "$LLVM" \
+    --filter "$FILTER"
   STEP1_ELAPSED="$(format_duration $((SECONDS - step_start)))"
   echo "    finished in $STEP1_ELAPSED"
 else
@@ -155,9 +162,9 @@ if [[ -z "${SKIP_DIFF:-}" ]]; then
   step_start=$SECONDS
   python -m coverage incremental \
     --output-dir "$DIFF_OUTPUT_DIR" \
-    --sancov "$LLVM_BIN/sancov" \
+    --sancov "$INSTRUMENTED_BIN/sancov" \
     --line-coverage-uncovered-csv "$TEST_SUITE_OUTPUT_DIR/line_coverage_uncovered.csv" \
-    --llc-address-line-map-csv "$TEST_SUITE_OUTPUT_DIR/llc_address_line_map.csv" \
+    --address-line-map-csv "$TEST_SUITE_OUTPUT_DIR/llc_address_line_map.csv" \
     --candidate-tests-output-dir "$NEW_TESTS_OUTPUT_DIR"
   STEP3_ELAPSED="$(format_duration $((SECONDS - step_start)))"
   echo "    finished in $STEP3_ELAPSED"
