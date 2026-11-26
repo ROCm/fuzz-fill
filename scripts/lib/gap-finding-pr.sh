@@ -53,6 +53,13 @@ run_gap_finding_pr() {
     "${target_args[@]}"
 
     echo "=== gap-pruner ==="
-    python -m gap_pruner "${target_lines_dir}/target_lines_uncovered.csv" \
+    local llvm_src="${llvm_repo:-${FUZZ_FILL_LLVM_SRC:-${COVERAGE_LLVM_SRC:-${LLVM_SRC:-}}}}"
+    local -a pruner_args=(
+        python -m gap_pruner "${target_lines_dir}/target_lines_uncovered.csv"
         --output "${target_lines_dir}/target_lines_uncovered_pruned.csv"
+    )
+    if [[ -n "$llvm_src" ]]; then
+        pruner_args+=(--llvm-src-dir "$llvm_src")
+    fi
+    "${pruner_args[@]}"
 }
