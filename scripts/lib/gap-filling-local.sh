@@ -147,10 +147,6 @@ gap_filling_local_validate_required_paths() {
         echo "error: --line-coverage-uncovered-csv is required" >&2
         missing=1
     fi
-    if [[ -z "$llc_address_line_map_csv" ]]; then
-        echo "error: --address-line-map-csv is required" >&2
-        missing=1
-    fi
     if [[ -z "$candidate_tests_dir" ]]; then
         echo "error: --candidate-tests-dir is required" >&2
         missing=1

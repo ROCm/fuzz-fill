@@ -97,7 +97,6 @@ CORPUS="$(realpath "$CORPUS")"
 GAP_FINDING_OUT="${DATA}/gap-finding"
 GAP_FILL_OUT="${DATA}/gap-fill"
 UNCOVERED_CSV="${GAP_FINDING_OUT}/baseline/line_coverage_uncovered.csv"
-LLC_MAP_CSV="${GAP_FINDING_OUT}/baseline/llc_address_line_map.csv"
 NEW_COVERAGE_CSV="${GAP_FILL_OUT}/incremental/new_coverage.csv"
 
 mkdir -p "$DATA"
@@ -114,7 +113,6 @@ echo "=== gap filling (corpus=${CORPUS}, n=${GAP_FILL_N}) ==="
     "${BIND_REPO[@]}" \
     --output-dir "$GAP_FILL_OUT" \
     --line-coverage-uncovered-csv "$UNCOVERED_CSV" \
-    --address-line-map-csv "$LLC_MAP_CSV" \
     --candidate-tests-dir "$CORPUS" \
     -n "$GAP_FILL_N" \
     -j "$J"

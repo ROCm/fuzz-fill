@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Gap finding (baseline): run coverage baseline over a filtered LIT slice.
 #
-# Produces line_coverage_uncovered.csv and llc_address_line_map.csv under
-# <output-dir>/baseline/.
+# Produces line_coverage_uncovered.csv (and pruned) under <output-dir>/baseline/.
+# Address maps are produced by gap-filling (``coverage export-address-map``).
 
 set -euo pipefail
 

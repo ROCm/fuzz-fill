@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Gap filling: candidate-test -> incremental against a precomputed gap list.
+# Gap filling: export-address-map -> candidate-test -> incremental.
 #
 # Requires a gap list from gap finding (baseline or PR):
 #   baseline/line_coverage_uncovered.csv  or  commit_lines_report/target_lines_uncovered.csv
-#   plus baseline/llc_address_line_map.csv from the same baseline run.
+# Builds the PC-to-line map via ``coverage export-address-map`` on the sancov
+# instrumented llc (override with --address-line-map-csv to reuse a map).
 #
 # Produces <output-dir>/incremental/new_coverage.csv — candidate tests that fill gaps.
 
@@ -22,28 +23,27 @@ source "${SCRIPT_DIR}/lib/gap-filling.sh"
 usage() {
     cat <<EOF
 Usage: $(basename "$0") --output-dir <path> \\
-    --line-coverage-uncovered-csv <path> --address-line-map-csv <path> \\
+    --line-coverage-uncovered-csv <path> \\
     --candidate-tests-dir <path> \\
     --llvm-repo <path> --llvm-bin <path> --instrumented-bin-dir <path> [options]
 
-Run candidate-test and incremental locally (no Docker).
+Run export-address-map, candidate-test, and incremental locally (no Docker).
 Artifacts are written under --output-dir/candidate_tests/ and --output-dir/incremental/.
 
 Required:
   --output-dir <path>                   Output directory (created if missing)
   --line-coverage-uncovered-csv <path>  Uncovered-lines CSV (\`file\`, \`line\` columns)
-  --address-line-map-csv <path>         Address-to-line map from the same baseline run
   --candidate-tests-dir <path>          Fuzz corpus root
 $(gap_filling_local_usage_llvm_options)
 
 Options:
+  --address-line-map-csv <path>         Reuse an existing address map (skip export-address-map)
 $(gap_filling_local_usage_common_options)
 
 Examples:
   $(basename "$0") \\
       --output-dir ./gap-fill-out \\
       --line-coverage-uncovered-csv ./line_coverage_uncovered.csv \\
-      --address-line-map-csv ./llc_address_line_map.csv \\
       --candidate-tests-dir ./corpus \\
       --llvm-repo ./llvm-project \\
       --llvm-bin ./llvm-project/build/bin \\
@@ -53,7 +53,6 @@ Examples:
   $(basename "$0") \\
       --output-dir ./gap-fill-out \\
       --line-coverage-uncovered-csv ./target_lines_uncovered.csv \\
-      --address-line-map-csv ./llc_address_line_map.csv \\
       --candidate-tests-dir ./corpus \\
       -n 100 \\
       --llvm-repo ./llvm-project \\
@@ -82,10 +81,11 @@ activate_venv_if_present "$REPO_ROOT"
 
 candidate_tests_output_dir="$(gap_fill_candidate_tests_dir "$output_dir")"
 incremental_output_dir="${output_dir}/incremental"
+address_map_csv="${llc_address_line_map_csv:-${output_dir}/llc_address_line_map.csv}"
 
 echo "Using coverage profile:"
 echo "  uncovered lines: ${line_coverage_uncovered_csv}"
-echo "  address map:     ${llc_address_line_map_csv}"
+echo "  address map:     ${address_map_csv}"
 echo "  candidate dir:   ${candidate_tests_dir} (n=${candidate_n:-all})"
 if [[ -n "$settings_csv" ]]; then
     echo "  settings csv:    ${settings_csv}"
@@ -93,6 +93,10 @@ fi
 echo
 
 rm -rf "$candidate_tests_output_dir" "$incremental_output_dir"
+
+if [[ -z "$llc_address_line_map_csv" ]]; then
+    run_export_address_map "$address_map_csv"
+fi
 
 run_candidate_test \
     "$candidate_tests_output_dir" \
@@ -103,7 +107,7 @@ run_candidate_test \
 run_incremental \
     "$incremental_output_dir" \
     "$line_coverage_uncovered_csv" \
-    "$llc_address_line_map_csv" \
+    "$address_map_csv" \
     "$candidate_tests_output_dir"
 
 report="$(gap_fill_coverage_csv "$output_dir")"
