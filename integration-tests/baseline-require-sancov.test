@@ -1,18 +1,19 @@
-# COM: ``coverage baseline`` must fail when the lit filter matches no tests and
-# COM: no raw .sancov files are produced (--require-sancov, the default).
-# COM: ``--lit-allow-failures`` lets llvm-lit exit after a zero-match filter so
-# COM: aggregation runs and the sancov check can fire.
+# COM: ``coverage baseline`` must fail when the lit filter matches no tests
+# COM: (--require-profiles, the default). check-all may still emit incidental
+# COM: .profraw from non-lit deps; those must not count as a real baseline.
 
 # RUN: rm -rf %t && mkdir -p %t/baseline-fail
-# RUN: %not %coverage baseline --output-dir %t/baseline-fail --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --tests llvm/test/CodeGen/AMDGPU --lit-filter 'CodeGen/AMDGPU/fuzz-fill-no-tests' --lit-allow-failures -j1 2>&1 | tee %t/fail.log
+# RUN: %not %coverage baseline --output-dir %t/baseline-fail --build-dir %coverage-build --llvm-src %llvm-repo --host-bin %host-bin --filter 'CodeGen/AMDGPU/fuzz-fill-no-tests' --binary %coverage-build/bin/llc -j1 2>&1 | tee %t/fail.log
 # RUN: %FileCheck %s --input-file=%t/fail.log --check-prefix=REQUIRE_ERR
-# REQUIRE_ERR: error: no sancov files found
+# REQUIRE_ERR: no .profraw files
 
-# COM: ``--no-require-sancov`` restores the previous empty-baseline behavior.
+# COM: ``--no-require-profiles`` allows an empty source baseline.
 # RUN: rm -rf %t/baseline-ok && mkdir -p %t/baseline-ok
-# RUN: %coverage baseline --output-dir %t/baseline-ok --sancov %sancov --llvm-lit %llvm-lit --llc %sancov-llc --opt %sancov-opt --tests llvm/test/CodeGen/AMDGPU --lit-filter 'CodeGen/AMDGPU/fuzz-fill-no-tests' --lit-allow-failures --no-require-sancov -j1 2>&1 | tee %t/ok.log
+# RUN: %coverage baseline --output-dir %t/baseline-ok --build-dir %coverage-build --llvm-src %llvm-repo --host-bin %host-bin --filter 'CodeGen/AMDGPU/fuzz-fill-no-tests' --binary %coverage-build/bin/llc --no-require-profiles -j1 2>&1 | tee %t/ok.log
 # RUN: test -f %t/baseline-ok/line_coverage_summary.csv
 # RUN: test -f %t/baseline-ok/line_coverage_covered.csv
-# RUN: test -f %t/baseline-ok/line_coverage_partially.csv
+# RUN: test ! -f %t/baseline-ok/line_coverage_partially.csv
 # RUN: test -f %t/baseline-ok/line_coverage_uncovered.csv
-# RUN: test ! -f %t/baseline-ok/llc_address_line_map.csv
+# RUN: %FileCheck %s --input-file=%t/baseline-ok/line_coverage_summary.csv --check-prefix=EMPTY
+# EMPTY: file,line,coverage
+# EMPTY-NOT: {{.}}

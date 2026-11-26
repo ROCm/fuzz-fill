@@ -4,13 +4,16 @@ import pandas as pd
 from pathlib import Path
 from typing import Literal
 
-from coverage.constants import DEFAULT_SOURCE_CODE_FILTER
+from coverage.constants import (
+    DEFAULT_GAP_ADDRESS_LINE_MAP_FILE,
+    DEFAULT_SOURCE_CODE_FILTER,
+)
 from coverage.filepaths import Filepaths
 from coverage.line_coverage_summary import load_uncovered_lines_csv
 from coverage.line_rules import (
     filter_uncovered_lines,
     gap_address_line_map,
-    normalize_llc_address_line_map,
+    normalize_address_line_map,
 )
 from coverage.sancov import Sancov
 from fuzz_fill.log import get_logger, log_timing
@@ -27,11 +30,11 @@ class CoverageAnalyzer:
         self.filepaths = filepaths
         self.mode = mode
         self.source_filter = source_filter
-        if filepaths.llc_address_line_map_csv is None:
-            raise ValueError("llc_address_line_map_csv is required for incremental coverage")
+        if filepaths.address_line_map_csv is None:
+            raise ValueError("address_line_map_csv is required for incremental coverage")
         if filepaths.line_coverage_uncovered_csv is None:
             raise ValueError("line_coverage_uncovered_csv is required for incremental coverage")
-        self.llc_address_line_map_file = filepaths.llc_address_line_map_csv
+        self.address_line_map_file = filepaths.address_line_map_csv
         self.new_coverage_csv = filepaths.output_dir / filepaths.new_coverage_csv
 
     def get_incremental_coverage(self) -> None:
@@ -47,8 +50,8 @@ class CoverageAnalyzer:
             baseline_uncovered = load_uncovered_lines_csv(
                 self.filepaths.line_coverage_uncovered_csv
             )
-            llc_address_line_map = normalize_llc_address_line_map(
-                pd.read_csv(self.llc_address_line_map_file)
+            address_line_map = normalize_address_line_map(
+                pd.read_csv(self.address_line_map_file)
             )
             total_uncovered = len(baseline_uncovered)
             if self.source_filter:
@@ -61,16 +64,23 @@ class CoverageAnalyzer:
                     len(baseline_uncovered),
                     total_uncovered,
                 )
-            gap_map = gap_address_line_map(llc_address_line_map, baseline_uncovered)
+            gap_map = gap_address_line_map(address_line_map, baseline_uncovered)
             logger.info(
                 "baseline gap address map: %d rows on %d uncovered lines "
                 "(from %d total address-map rows)",
                 len(gap_map),
                 len(baseline_uncovered),
-                len(llc_address_line_map),
+                len(address_line_map),
             )
 
             self.new_coverage_csv.parent.mkdir(parents=True, exist_ok=True)
+            gap_map_csv = self.filepaths.output_dir / DEFAULT_GAP_ADDRESS_LINE_MAP_FILE
+            gap_map.to_csv(gap_map_csv, index=False)
+            logger.info(
+                "wrote address-map ∩ uncovered (%d rows) to %s",
+                len(gap_map),
+                gap_map_csv,
+            )
             with self.new_coverage_csv.open("w", newline="", encoding="utf-8") as new_coverage_csv_f:
                 csv.writer(new_coverage_csv_f).writerow(
                     ["test_name", "file", "line", "covered-points"]

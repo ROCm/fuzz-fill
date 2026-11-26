@@ -75,7 +75,7 @@ Examples:
   $(basename "$0") \\
       --output-dir ./data/gap-finding-pr \\
       --llvm-repo /path/llvm-project \\
-      --llvm-bin /path/llvm-project/build-sancov/bin \\
+      --llvm-bin /path/llvm-project/build-coverage/bin \\
       --instrumented-bin-dir /path/llvm-project/build-sancov/bin \\
       --commit HEAD \\
       --auto -j "\$(nproc)"
@@ -83,7 +83,7 @@ Examples:
   $(basename "$0") \\
       --output-dir ./data/gap-finding-pr-214457 \\
       --llvm-repo /path/llvm-project \\
-      --llvm-bin /path/to/pr-tree/build-sancov/bin \\
+      --llvm-bin /path/to/pr-tree/build-coverage/bin \\
       --instrumented-bin-dir /path/to/pr-tree/build-sancov/bin \\
       --pr-id 214457 \\
       --auto -j "\$(nproc)"
@@ -152,7 +152,7 @@ require_local_coverage_bins
 cd "$REPO_ROOT"
 activate_venv_if_present "$REPO_ROOT"
 
-run_gap_finding_pr "$output_dir" "$commit_rev" "$LLVM_REPO" "${lit_filters[@]}"
+run_gap_finding_pr "$output_dir" "$commit_rev" "$LLVM_REPO" "${filters[@]}"
 
 report="${output_dir}/commit_lines_report/target_lines_uncovered.csv"
 pruned_report="${output_dir}/commit_lines_report/target_lines_uncovered_pruned.csv"

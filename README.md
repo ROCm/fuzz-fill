@@ -66,7 +66,7 @@ cd fuzz-fill
   -j "$(nproc)"
 ```
 
-With `--build-image`, `--auto` chooses the backends, lit suites, and SanitizerCoverage allowlist from the PR so the build matches the code under change ([automatic PR image scope](#automatic-pr-image-scope)). Pass `--backends`, `--tests`, and `--allowlist` instead when you want a fixed scope.
+With `--build-image`, `--auto` chooses the backends and SanitizerCoverage allowlist from the PR so the build matches the code under change ([automatic PR image scope](#automatic-pr-image-scope)). Pass `--backends` and `--allowlist` instead when you want a fixed scope.
 
 **Local commit** — build from your `llvm-project` checkout (the local checkout remains unchanged). This command only finds gaps in lines changed in a single commit rather than a full PR. Replace `HEAD` with a hash, branch, or `main~3` as needed:
 
@@ -124,12 +124,13 @@ pip install -e .
 
 ### LLVM builds
 
-You need a bootstrap LLVM bin directory (`clang`, `clang++`, `ld.lld`) and one **SanitizerCoverage** build of llvm-project:
+You need two LLVM builds from the same `llvm-project` source tree plus a host LLVM bin directory:
 
 | Component | Purpose | How |
 |-----------|---------|-----|
-| **Bootstrap** | `clang`, `clang++`, `ld.lld` for compiling LLVM | Any LLVM install's `bin/` directory containing those tools |
-| **SanitizerCoverage** | Instrumented LLVM tree (`llc`, `opt`, `sancov`, …) | `./scripts/build-llvm-sancov.sh ./scripts/allowlist-amdgpu.txt llvm-project llvm-project/build-sancov --bootstrap-bin /path/to/llvm/bin` |
+| **Source coverage** | Baseline line coverage from `ninja check-all`, `llvm-profdata`, and `llvm-cov` | CMake with LLVM source-based coverage instrumentation enabled; pass the build dir as `--build-dir` |
+| **SanitizerCoverage** | Address maps and candidate-test coverage for gap filling (`llc`, `opt`, `sancov`, …) | `./scripts/build-llvm-sancov.sh ./scripts/allowlist-amdgpu.txt llvm-project llvm-project/build-sancov --bootstrap-bin /path/to/llvm/bin` |
+| **Host bin** | `llvm-profdata` and `llvm-cov` used to merge/export source coverage | Any compatible LLVM install's `bin/` directory containing those tools |
 
 `build-llvm-sancov.sh` builds one instrumented RelWithDebInfo tree (`ninja all`). Bootstrap supplies **clang/clang++/ld.lld**. The instrumented tree is usually built from a pinned llvm-project tag (default `llvmorg-22.1.8`) or a local checkout; that source revision is independent of the bootstrap version. Optional `--enable-ccache` uses ccache if installed.
 
@@ -145,20 +146,20 @@ Allowlist presets:
 
 #### Automatic PR image scope
 
-When building a PR image, `--auto` looks at the changed files and chooses the backends, lit suites, and SanitizerCoverage allowlist. That selects an instrumented build that can measure coverage for the code the PR touches. The first matching rule wins.
+When building a PR image, `--auto` looks at the changed files and chooses the backends and SanitizerCoverage allowlist. That selects an instrumented build that can measure coverage for the code the PR touches. The first matching rule wins.
 
-| Rule | Changed files | `LLVM_TARGETS_TO_BUILD` | Tests | Allowlist |
-|------|----------------|-------------------------|-------|-----------|
-| 1 | Only under `llvm/lib/Target/<Backend>/` | `X86` and each matched backend | `llvm/test` | `llvm` |
-| 2 | Only under `clang/lib/` | `all` | `clang/test` | `clang` |
-| 3 | Any other `llvm/lib/` or `clang/lib/` change | `all` | `llvm/test`, `clang/test` | `llvm-clang` |
-| 4 | No match | skip the build | skip tests | — |
-
-**`python -m coverage baseline`** patches **`<instrumented-build>/test/lit.site.cfg.py`** so LIT forwards **`UBSAN_OPTIONS`** to every test subprocess. The patch is idempotent and is re-applied if CMake regenerates that file.
+| Rule | Changed files | `LLVM_TARGETS_TO_BUILD` | Allowlist |
+|------|----------------|-------------------------|-----------|
+| 1 | Only under `llvm/lib/Target/<Backend>/` | `X86` and each matched backend | `llvm` |
+| 2 | Only under `clang/lib/` | `all` | `clang` |
+| 3 | Any other `llvm/lib/` or `clang/lib/` change | `all` | `llvm-clang` |
+| 4 | No match | skip the build | — |
 
 The example scripts below assume paths like:
 
-- `$LLVM/build-sancov/bin` — instrumented build (`llvm-lit`, `llc`, `opt`, `sancov`, …)
+- `$LLVM/build-coverage` — source-coverage build used by `coverage baseline`
+- `$LLVM/build-sancov/bin` — SanitizerCoverage build (`llc`, `opt`, `sancov`, …)
+- `/COD/LATEST/trunk/bin` — host tools (`llvm-profdata`, `llvm-cov`)
 
 Adjust these to match your trees before running.
 
@@ -173,33 +174,36 @@ Adjust these to match your trees before running.
 ### What it does
 
 ```text
-baseline  →  line_coverage_uncovered.csv
-(LIT run)     (+ llc_address_line_map.csv)
+baseline check-all  →  line_coverage_summary.csv  →  covered/uncovered split CSVs
+source profiles        (covered | uncovered)
 ```
 
-**`coverage baseline`** — identify uncovered lines by running a filtered slice of LLVM instrumented with SanitizerCoverage.
+**`coverage baseline`** identifies uncovered source lines by running `ninja check-all` in a source-coverage LLVM build, merging the generated profiles, exporting LCOV, and writing relative paths under `--llvm-src`.
 
 ### Configure and run
 
-Required flags: `--output-dir` and the LLVM paths. Omit `--tests` to run `llvm/test` and `clang/test`.
+Required flags: `--output-dir`, `--build-dir`, `--llvm-src`, and `--host-bin`.
 
 | Flag | Meaning |
 |------|---------|
 | `--output-dir` | Root for artifacts |
-| `--llvm-repo` | Path to your `llvm-project` checkout |
-| `--llvm-bin` | Uninstrumented `bin` directory (`sancov`) |
-| `--instrumented-bin-dir` | SanitizerCoverage `bin` directory (`llvm-lit`, `llc`, `opt`) |
-| `--tests` | Lit suite root or subdirectory (`llvm/test`, `clang/test/Sema`, …); repeatable |
-| `--lit-filter` | llvm-lit `--filter=` regex applied to every `--tests` suite; repeatable |
-| `-j`, `--jobs` | Parallel jobs for llvm-lit |
+| `--build-dir` | Source-coverage LLVM build directory |
+| `--llvm-src` | `llvm-project` checkout root; CSV paths are relative to this directory |
+| `--host-bin` | Host bin directory containing `llvm-profdata` and `llvm-cov` |
+| `--filter` | Lit `--filter=` regex added to `LIT_OPTS`; repeatable and OR'd |
+| `--binary` | Instrumented binary to include in `llvm-cov export`; repeatable (defaults to all ELF files under `<build-dir>/bin`) |
+| `-j`, `--jobs` | Parallel jobs for `ninja check-all` / LIT |
+| `--strict-check-all` | Fail if `check-all` exits non-zero |
+| `--require-profiles` / `--no-require-profiles` | Require profile data by default; opt out to allow an empty baseline |
 
 ```bash
-./scripts/gap-finding-baseline.sh \
+python -m coverage baseline \
   --output-dir ./data/baseline-run \
-  --llvm-repo /path/llvm-project \
-  --llvm-bin /path/llvm-project/build/bin \
-  --instrumented-bin-dir /path/llvm-project/build-sancov/bin \
-  --tests llvm/test/CodeGen/AMDGPU \
+  --build-dir /path/llvm-project/build-coverage \
+  --llvm-src /path/llvm-project \
+  --host-bin /COD/LATEST/trunk/bin \
+  --filter CodeGen/AMDGPU \
+  --binary /path/llvm-project/build-coverage/bin/llc \
   -j "$(nproc)"
 ```
 
@@ -209,13 +213,23 @@ Under `$OUTPUT_DIR/baseline/`:
 
 | Path | Contents |
 |------|----------|
-| `line_coverage_summary.csv` | Per-line baseline coverage (`covered` / `partially` / `uncovered`); input to `target-lines` and `html-report` |
+| `line_coverage_summary.csv` | Per-line baseline coverage (`covered` / `uncovered`); input to `target-lines` and `html-report` |
+| `line_coverage_covered.csv` | Covered lines (`file`, `line`) |
 | `line_coverage_uncovered.csv` | **Main gap list** — input to downstream gap filling |
-| `<tool>_address_line_map.csv` | Per-tool address-to-line map (e.g. `llc_address_line_map.csv`) |
-| `<tool>_line_point_summary.csv` | Per-tool covered/all points per `(file, line)` |
-| `lit_failures.json` | Failed LIT tests (`name`, `code`, `output`, `elapsed`) |
+| `lit_failures.json` | Failed LIT tests parsed from `check-all.log` (`name`, `code`) |
+| `coverage.lcov` | LCOV export when profiles are available |
 | `COMMIT` | Revision of the LLVM source tree the baseline ran against (omitted for a non-git tree) |
-| `processed_sancov/` | Per-tool merged `.sancov` / `.symcov` |
+| `check-all.log` | Captured `ninja check-all` output |
+
+Baseline writes only covered/uncovered splits and no address maps. Use `coverage export-address-map` against the SanitizerCoverage build when gap filling needs a PC-to-line map:
+
+```bash
+python -m coverage export-address-map \
+  --tool /path/llvm-project/build-sancov/bin/llc \
+  --sancov /path/llvm-project/build-sancov/bin/sancov \
+  --llvm-src /path/llvm-project \
+  --output ./data/baseline-run/llc_address_line_map.csv
+```
 
 ---
 
@@ -247,10 +261,10 @@ Step 3 does **not** re-run LIT; you can repeat it with different `added-lines.cs
 | `--pr-id` | GitHub PR number — squashes PR into `.fuzz-fill-llvm-pr-worktrees/pr-<n>/` (exclusive with `--commit`) |
 | `--github-repo` | With `--pr-id` (default: `llvm/llvm-project`) |
 | `--llvm-repo` | `llvm-project` checkout (`added-lines` tree; with `--pr-id`, used as clone reference) |
-| `--llvm-bin` / `--instrumented-bin-dir` | Same as [baseline gap finding](#gap-finding-baseline) |
+| `--build-dir` / `--llvm-src` / `--host-bin` | Same as [baseline gap finding](#gap-finding-baseline) |
+| `--address-line-map-csv` | Address map from `coverage export-address-map` for gap filling workflows |
 | `--auto` | Choose lit suites from `--commit` or `--pr-id`; does not rebuild LLVM |
-| `--tests` | Lit suites (cannot be combined with `--auto`) |
-| `--lit-filter` | llvm-lit `--filter=` regex for every suite |
+| `--filter` | Lit filter regex for the baseline check-all run |
 | `-j`, `--jobs` | Parallel jobs for llvm-lit |
 
 PR gap finding squashes all PR commits onto the merge-base in a self-contained worktree (same as the Docker PR image build). Use [`scripts/prepare-pr-llvm.sh`](scripts/prepare-pr-llvm.sh) directly if you only need the squashed tree:
@@ -267,8 +281,8 @@ PR gap finding squashes all PR commits onto the merge-base in a self-contained w
 ./scripts/gap-finding-pr.sh \
   --output-dir ./data/gap-finding-pr \
   --llvm-repo /path/llvm-project \
-  --llvm-bin /path/llvm-project/build/bin \
-  --instrumented-bin-dir /path/llvm-project/build-sancov/bin \
+  --build-dir /path/llvm-project/build-coverage \
+  --host-bin /COD/LATEST/trunk/bin \
   --commit HEAD \
   --auto \
   -j "$(nproc)"
@@ -280,8 +294,8 @@ GitHub pull request (squash + gap finding):
 ./scripts/gap-finding-pr.sh \
   --output-dir ./data/gap-finding-pr-214457 \
   --llvm-repo /path/llvm-project \
-  --llvm-bin ./.fuzz-fill-llvm-pr-worktrees/pr-214457/llvm-project/build-sancov/bin \
-  --instrumented-bin-dir ./.fuzz-fill-llvm-pr-worktrees/pr-214457/llvm-project/build-sancov/bin \
+  --build-dir ./.fuzz-fill-llvm-pr-worktrees/pr-214457/llvm-project/build-coverage \
+  --host-bin /COD/LATEST/trunk/bin \
   --pr-id 214457 \
   --auto \
   -j "$(nproc)"
@@ -296,10 +310,9 @@ Under `$OUTPUT_DIR`:
 | `added-lines/added-lines.csv` | Added lines from the commit (`path`, `line_no`, `text`) |
 | `added-lines/COMMIT` | Resolved hash of `--commit` |
 | `baseline/line_coverage_uncovered.csv` | Baseline uncovered lines |
-| `baseline/llc_address_line_map.csv` | LLC map from the baseline run |
 | `baseline/lit_failures.json` | Failed LIT tests from baseline |
 | `commit_lines_report/target_lines_coverage_summary.csv` | PR-added lines present in the baseline summary (`file`, `line`, `coverage`) |
-| `commit_lines_report/target_lines_uncovered.csv` | **Main result** — PR-added lines still uncovered (`file`, `line`, optional `text`; absolute paths) |
+| `commit_lines_report/target_lines_uncovered.csv` | **Main result** — PR-added lines still uncovered (`file`, `line`, optional `text`) |
 
 ---
 
@@ -307,7 +320,7 @@ Under `$OUTPUT_DIR`:
 
 [`scripts/gap-filling.sh`](scripts/gap-filling.sh) runs `coverage candidate-test` then `coverage incremental` against a gap list from [gap finding](#gap-finding-baseline) or [PR gap finding](#gap-finding-pr).
 
-**Inputs:** `line_coverage_uncovered.csv` (or `target_lines_uncovered.csv`) plus matching `llc_address_line_map.csv` from the same baseline run, and a fuzz corpus directory.
+**Inputs:** `line_coverage_uncovered.csv` (or `target_lines_uncovered.csv`) plus a matching address map from `coverage export-address-map`, and a fuzz corpus directory.
 
 **Main output:** `<output-dir>/incremental/new_coverage.csv` with columns `test_name`, `file`, `line`, `covered-points`.
 
@@ -315,7 +328,7 @@ Under `$OUTPUT_DIR`:
 ./scripts/gap-filling.sh \
   --output-dir ./data/gap-fill-out \
   --line-coverage-uncovered-csv ./data/baseline/line_coverage_uncovered.csv \
-  --llc-address-line-map-csv ./data/baseline/llc_address_line_map.csv \
+  --address-line-map-csv ./data/baseline/llc_address_line_map.csv \
   --candidate-tests-dir ./candidate-tests-dataset/amdgcn-amd-amdhsa \
   -n 100 \
   --llvm-repo /path/llvm-project \
@@ -381,10 +394,10 @@ Reduction runs an ordered **pipeline** of passes (see `config.json` or `--pipeli
 | Pass id | Description |
 |---------|-------------|
 | `snapshot` | Copy the input IR into the temp directory as a baseline checkpoint before later passes mutate it. |
-| `llvm_reduce_ir` | Run `llvm-reduce` on LLVM IR (`.ll` or `.bc`) using an **interesting-ness script** (`interesting_ir.sh`) that checks SanitizerCoverage still hits the target line. For `.bc` input, disassembles the reduced bitcode to `.ll` with `llvm-dis`. Default batch pipeline. |
+| `llvm_reduce_ir` | Run `llvm-reduce` on LLVM IR (`.ll` or `.bc`) using an **interesting-ness script** (`interesting_ir.sh`) that checks SanitizerCoverage still hits **every** instrumentation point on the target line (same full-line rule as gap fill). For `.bc` input, disassembles the reduced bitcode to `.ll` with `llvm-dis`. Default batch pipeline. |
 | `creduce` | Further shrink the current artifact with **C-Reduce**, using a copy of the interesting-ness script where `"$1"` is replaced by the candidate filename (C-Reduce runs tests in its own temp directory). Optional follow-on to `llvm_reduce_ir` or `llvm_reduce_mir` (`--with-creduce`). |
 | `extract_mir_before_pass` | Run `llc` with `-stop-before=<pass_under_test> -simplify-mir` to extract MIR immediately before a specific machine pass. Requires `pass_under_test`, `mtriple`, and `llc_O` on the step. Typical first step before `llvm_reduce_mir`. |
-| `llvm_reduce_mir` | Run `llvm-reduce -x=mir` on MIR using **interesting_mir.sh**, which re-runs `llc` through the pass under test and checks coverage. Requires `--pass-under-test` when scaffolding batch cases. |
+| `llvm_reduce_mir` | Run `llvm-reduce -x=mir` on MIR using **interesting_mir.sh**, which re-runs `llc` through the pass under test and checks coverage. Custom MIR templates must treat `COVERED` as a space-separated list and require every point (same as `template_interesting_ir.sh`). Requires `--pass-under-test` when scaffolding batch cases. |
 | `extract_ir_before_pass` | Like `extract_mir_before_pass`, but stops before the pass without `-simplify-mir` and normalizes `llc`'s print-before dump (strip `---` delimiters and common indentation) into valid LLVM IR for downstream IR reduction. |
 
 #### Extracting IR at the IR/MIR boundary
@@ -423,7 +436,8 @@ The scripts above call these modules. Use `--help` on any command for the full f
 
 | Command | Role |
 |---------|------|
-| `python -m coverage baseline` | Baseline LIT coverage (gap finding) |
+| `python -m coverage baseline` | Source-coverage baseline (gap finding) |
+| `python -m coverage export-address-map` | Export a SanitizerCoverage PC-to-line map for one tool |
 | `python -m coverage candidate-test` | Coverage from a fuzz-generated test corpus (gap filling) |
 | `python -m coverage incremental` | Suite gaps filled by fuzz tests (gap filling) |
 | `python -m coverage target-lines` | PR added lines vs `line_coverage_summary.csv` (`--summary`) |
@@ -433,7 +447,7 @@ The scripts above call these modules. Use `--help` on any command for the full f
 
 ### Uncovered-lines CSV contract
 
-PR gap finding output and baseline gap lists both use an uncovered-lines CSV with columns **`file`** and **`line`**. Paths are **absolute** and must match those in `llc_address_line_map.csv` (as produced by `coverage baseline`).
+PR gap finding output and baseline gap lists both use an uncovered-lines CSV with columns **`file`** and **`line`**. Paths are relative to `--llvm-src` and must match those in the address map produced by `coverage export-address-map`.
 
 | File | Role |
 |------|------|
@@ -446,12 +460,15 @@ PR gap finding input to `target-lines` remains `added-lines.csv` (`path`, `line_
 
 | Flag | Meaning |
 |------|---------|
-| `--tests` | Lit suite root or subdirectory; **repeat** for multiple. Required. |
-| `--lit-filter DIR` | llvm-lit `--filter=` regex applied to every suite; **repeat** for multiple (OR'd) |
+| `--filter REGEX` | Lit filter regex added to `LIT_OPTS`; **repeat** for multiple (OR'd) |
 
-There is no default lit filter. Narrow a suite with `--tests llvm/test/CodeGen/AMDGPU` or with `--lit-filter`.
+There is no default filter: omit `--filter` to run `check-all` unfiltered. Use narrow filters for expensive check-all runs.
 
-Baseline symcov CSVs include **all** instrumented source paths from the LIT run. Use `--source-filter` on `coverage incremental` to scope gap finding (default: `(?:^|/)(?:llvm|clang)/lib/`; see `DEFAULT_SOURCE_CODE_FILTER` in [`src/coverage/constants.py`](src/coverage/constants.py)).
+### `coverage export-address-map`
+
+`coverage export-address-map --tool --sancov --llvm-src [--tool-args ...]` runs one SanitizerCoverage-instrumented tool once and writes `<tool>_address_line_map.csv` by default. If `--tool-args` is omitted, the tool is run with `--version`. Paths are canonicalized relative to `--llvm-src`; rows outside the tree are dropped.
+
+Use the exported map with `coverage incremental --address-line-map-csv`.
 
 ### `coverage target-lines` consistency checks
 
@@ -492,10 +509,11 @@ Several commands accept LLVM tool paths via environment variables when the match
 
 | Env var | CLI flag | Commands |
 |---------|----------|----------|
-| `FUZZ_FILL_SANCOV` | `--sancov` | `coverage baseline`, `coverage incremental`, `coverage min-candidate-tests` (mainly for maintainers) |
-| `FUZZ_FILL_LLVM_LIT` | `--llvm-lit` | `coverage baseline` |
-| `FUZZ_FILL_LLC` | `--llc` | `coverage baseline`, `coverage candidate-test`, `reduce` |
-| `FUZZ_FILL_OPT` | `--opt` | `coverage baseline` |
+| `FUZZ_FILL_COVERAGE_BUILD_DIR` | `--build-dir` | `coverage baseline` |
+| `FUZZ_FILL_LLVM_SRC` | `--llvm-src` | `coverage baseline`, `coverage export-address-map` |
+| `FUZZ_FILL_HOST_BIN` | `--host-bin` | `coverage baseline` |
+| `FUZZ_FILL_SANCOV` | `--sancov` | `coverage export-address-map`, `coverage incremental`, `coverage min-candidate-tests` |
+| `FUZZ_FILL_LLC` | `--llc` | `coverage candidate-test`, `reduce` |
 | `FUZZ_FILL_LLVM_REDUCE` | `--llvm-reduce` | `reduce` |
 | `FUZZ_FILL_LLVM_DIS` | `--llvm-dis` | `reduce` (required for `.bc` input with `llvm_reduce_ir`) |
 | `FUZZ_FILL_LLVM_REPO` | `--llvm-repo` | `added_lines`, `coverage target-lines` |
@@ -505,13 +523,15 @@ The [Docker test image](#docker-test-image) sets these per-tool defaults so inte
 Example (paths match the Docker test image):
 
 ```bash
-export FUZZ_FILL_SANCOV=/work/llvm-build-sancov/bin/sancov
-export FUZZ_FILL_LLVM_LIT=/work/llvm-build-sancov/bin/llvm-lit
+export FUZZ_FILL_COVERAGE_BUILD_DIR=/work/llvm-build-coverage
+export FUZZ_FILL_LLVM_SRC=/work/llvm-project
+export FUZZ_FILL_HOST_BIN=/COD/LATEST/trunk/bin
 export FUZZ_FILL_LLC=/work/llvm-build-sancov/bin/llc
-export FUZZ_FILL_OPT=/work/llvm-build-sancov/bin/opt
+export FUZZ_FILL_SANCOV=/work/llvm-build-sancov/bin/sancov
 export FUZZ_FILL_LLVM_REPO=/work/llvm-project
 
 python -m coverage baseline --output-dir data/baseline
+python -m coverage export-address-map --tool "$FUZZ_FILL_LLC" --output data/baseline/llc_address_line_map.csv
 python -m added_lines --commit HEAD
 ```
 
@@ -520,7 +540,7 @@ CodeGen-only baseline:
 ```bash
 python -m coverage baseline \
   --output-dir data/baseline-codegen \
-  --lit-filter CodeGen/AMDGPU
+  --filter CodeGen/AMDGPU
 ```
 
 Or via the reference script:
@@ -529,9 +549,9 @@ Or via the reference script:
 ./scripts/gap-finding-baseline.sh \
   --output-dir ./data/baseline-codegen \
   --llvm-repo /path/llvm-project \
-  --llvm-bin /path/llvm-project/build/bin \
-  --instrumented-bin-dir /path/llvm-project/build-sancov/bin \
-  --lit-filter CodeGen/AMDGPU
+  --build-dir /path/llvm-project/build-coverage \
+  --host-bin /COD/LATEST/trunk/bin \
+  --filter CodeGen/AMDGPU
 ```
 
 Workflow shell scripts under `scripts/` may use their own names (`LLVM_BIN`, `INSTRUMENTED_BIN_DIR`, …); only the `FUZZ_FILL_*` variables are read by the Python CLIs.
@@ -571,7 +591,6 @@ By default the image is tagged `fuzz-fill-test:latest`. LLVM source is downloade
 | `--tag <tag>` | Docker image tag (default: `latest`) |
 | `--allowlist amdgpu\|spirv\|llvm\|clang\|llvm-clang` | SanitizerCoverage allowlist baked into the instrumented build (default: `amdgpu`) |
 | `--enable-projects <list>` | `LLVM_ENABLE_PROJECTS` (default: `clang`). Pass an empty string to skip Clang. |
-| `--tests <suite>` | Lit suite recorded in the image (repeatable; default: `llvm/test`) |
 | `--sancov-instrumentation-mode func\|bb\|edge` | SanitizerCoverage instrumentation mode (default: `bb`; produces `-fsanitize-coverage=<mode>,trace-pc-guard`) |
 | `-j <n>`, `--jobs <n>` | Limit ninja parallelism for the sancov build (default: unconstrained) |
 
@@ -601,7 +620,6 @@ Use this image with **`--image fuzz-fill-test:latest`** for local-commit gap fin
 | `--allowlist amdgpu\|spirv\|llvm\|clang\|llvm-clang` | SanitizerCoverage allowlist |
 | `--targets <list>` | `LLVM_TARGETS_TO_BUILD` |
 | `--enable-projects <list>` | `LLVM_ENABLE_PROJECTS` (empty string skips Clang) |
-| `--tests <suite>` | Lit suite recorded in the image (repeatable) |
 | `--sancov-instrumentation-mode func\|bb\|edge` | SanitizerCoverage instrumentation mode (default: `bb`) |
 | `--github-repo <owner/repo>` | GitHub repo hosting the PR (default: `llvm/llvm-project`) |
 | `-j <n>`, `--jobs <n>` | Limit ninja parallelism for both LLVM builds (default: unconstrained) |
@@ -619,8 +637,8 @@ Gap-finding Docker runners share [`ensure-image.sh`](scripts/docker/ensure-image
 | `--keep-image` | Do not remove the image after a `--build-image` run (default: remove) |
 | `--pr-id <n>` | Select `fuzz-fill-test:llvm-pr-<n>` |
 | `--llvm-repo <path>` | Required with `--build-image` |
-| `--auto` | Classify backends, tests, and allowlist from the PR ([automatic PR image scope](#automatic-pr-image-scope)) |
-| `--backends` / `--tests` / `--allowlist` | Explicit scope for `--build-image` |
+| `--auto` | Classify backends and allowlist from the PR ([automatic PR image scope](#automatic-pr-image-scope)) |
+| `--backends` / `--allowlist` | Explicit scope for `--build-image` |
 
 Build once, then reuse on later runs (omit `--build-image`):
 
@@ -651,8 +669,7 @@ Build once, then reuse on later runs (omit `--build-image`):
 | `--pr-id <n>` | PR image `fuzz-fill-test:llvm-pr-<n>` |
 | `--build-image` | Build PR image when missing (see [PR image build and reuse](#pr-image-build-and-reuse)) |
 | `--bind-repo` | Mount local fuzz-fill checkout over `/work/fuzz-fill` |
-| `--tests <suite>` | Lit suite (default: suites recorded in the image) |
-| `--lit-filter <regex>` | llvm-lit `--filter=` regex for every suite; repeatable |
+| `--filter <regex>` | Lit `--filter=` regex for the source baseline check-all run; repeatable |
 | `-j <n>`, `--jobs <n>` | Parallel jobs for llvm-lit and ninja (when building) |
 
 ### Gap finding (PR) in Docker
@@ -681,7 +698,7 @@ Build once, then reuse on later runs (omit `--build-image`):
   -j "$(nproc)"
 ```
 
-Lit suites come from the image (`/work/.gap-test-suites`, default `llvm/test`). Pass `--tests` or `--lit-filter` to narrow the run.
+Baseline always runs `check-all` in the source-coverage build. Pass `--filter` to narrow the lit tests matched by that check-all run.
 
 | Option | Meaning |
 |--------|---------|
@@ -692,10 +709,10 @@ Lit suites come from the image (`/work/.gap-test-suites`, default `llvm/test`). 
 | `--force-build` / `--keep-image` | Rebuild or retain PR image |
 | `--llvm-repo <path>` | Required with `--build-image` |
 | `--auto` | Classify scope when building ([automatic PR image scope](#automatic-pr-image-scope)) |
-| `--backends` / `--tests` / `--allowlist` | Explicit scope when building or running |
+| `--backends` / `--allowlist` | Explicit scope when building |
 | `--output-dir <path>` | Host output directory |
 | `-j <n>`, `--jobs <n>` | Parallel jobs |
-| `--lit-filter <regex>` | llvm-lit `--filter=` regex; repeat for multiple |
+| `--filter <regex>` | Lit `--filter=` regex for the source baseline check-all run; repeatable |
 | `--github-repo <owner/repo>` | When building (default: `llvm/llvm-project`) |
 
 Main output: `<output-dir>/commit_lines_report/target_lines_uncovered.csv`.
@@ -708,7 +725,7 @@ Main output: `<output-dir>/commit_lines_report/target_lines_uncovered.csv`.
 ./scripts/docker/gap-filling.sh \
   --output-dir ./data/gap-fill-out \
   --line-coverage-uncovered-csv ./data/baseline/line_coverage_uncovered.csv \
-  --llc-address-line-map-csv ./data/baseline/llc_address_line_map.csv \
+  --address-line-map-csv ./data/baseline/llc_address_line_map.csv \
   --candidate-tests-dir /path/to/corpus \
   -n 100 \
   -j "$(nproc)"

@@ -79,7 +79,6 @@ class RunTargetLinesCheckTest(unittest.TestCase):
                 [
                     ["file", "line", "coverage"],
                     [abs_path, 10, "covered"],
-                    [abs_path, 20, "partially"],
                     [abs_path, 30, "uncovered"],
                     [abs_path, 40, "uncovered"],
                 ],
@@ -91,7 +90,6 @@ class RunTargetLinesCheckTest(unittest.TestCase):
                 [
                     ["path", "line_no", "text"],
                     [REL, 10, "line 10"],
-                    [REL, 20, "line 20"],
                     [REL, 30, "uncovered line"],
                     [REL, 40, "uncovered line 2"],
                     [REL, 999, "not instrumented"],
@@ -119,7 +117,6 @@ class RunTargetLinesCheckTest(unittest.TestCase):
                 [(r["file"], int(r["line"]), r["coverage"]) for r in summary_rows],
                 [
                     (abs_path, 10, "covered"),
-                    (abs_path, 20, "partially"),
                     (abs_path, 30, "uncovered"),
                     (abs_path, 40, "uncovered"),
                 ],

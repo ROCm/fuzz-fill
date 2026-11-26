@@ -1,4 +1,4 @@
-# Legacy SPIRV llvm-lit --filter= fragment (optional --lit-filter).
+# Legacy SPIRV llvm-lit --filter= fragment (optional --filter).
 
 SPIRV_LIT_FILTERS=(
     '(?:^|/)SPIRV(?:/|$)'

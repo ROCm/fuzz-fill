@@ -50,7 +50,7 @@ run_incremental() {
         python -m coverage incremental
         --output-dir "$output_dir"
         --line-coverage-uncovered-csv "$uncovered_csv"
-        --llc-address-line-map-csv "$llc_map_csv"
+        --address-line-map-csv "$llc_map_csv"
         --candidate-tests-output-dir "$candidate_tests_output_dir"
     )
 

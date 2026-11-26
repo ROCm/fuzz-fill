@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Legacy LIT filter helpers. Gap-finding entrypoints no longer map allowlist
-# presets to these lists; keep the files for optional --lit-filter reuse.
+# presets to these lists; keep the files for optional --filter reuse.
 
 : "${LIB_DIR:=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 : "${SCRIPTS_DIR:=$(cd "${LIB_DIR}/.." && pwd)}"

@@ -57,12 +57,12 @@ resolve_gap_profile_csv_paths() {
         exit 1
     fi
     if [[ -z "$llc_map" ]]; then
-        echo "error: --llc-address-line-map-csv is required" >&2
+        echo "error: --address-line-map-csv is required" >&2
         exit 1
     fi
 
     validate_gap_profile_csv "--line-coverage-uncovered-csv" "$uncovered"
-    validate_gap_profile_csv "--llc-address-line-map-csv" "$llc_map"
+    validate_gap_profile_csv "--address-line-map-csv" "$llc_map"
 
     printf -v "$uncovered_var" '%s' "$(realpath "$uncovered")"
     printf -v "$llc_map_var" '%s' "$(realpath "$llc_map")"

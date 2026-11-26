@@ -2,9 +2,8 @@
 # PR gap-finding pipeline: baseline -> added_lines -> target-lines.
 # Source from entrypoints or other scripts/lib modules; do not execute directly.
 #
-# run_gap_finding_pr <output_root> <commit> [llvm_repo] [lit_filter ...]
+# run_gap_finding_pr <output_root> <commit> [llvm_repo] [filter ...]
 # Optional env: same tool-path and JOBS vars as coverage-baseline.sh;
-#   LIT_ALLOW_FAILURES applies to the baseline step.
 
 : "${LIB_DIR:=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 # shellcheck source=scripts/lib/coverage-baseline.sh
@@ -15,7 +14,7 @@ run_gap_finding_pr() {
     local commit="$2"
     local llvm_repo="${3:-}"
     shift 3
-    local -a lit_filters=("$@")
+    local -a filters=("$@")
 
     local baseline_dir="${output_root}/baseline"
     local added_lines_dir="${output_root}/added-lines"
@@ -23,12 +22,12 @@ run_gap_finding_pr() {
 
     mkdir -p "$added_lines_dir" "$target_lines_dir"
 
-    if [[ ${#lit_filters[@]} -gt 0 ]]; then
-        echo "=== coverage baseline (${#lit_filters[@]} lit-filter prefix(es)) ==="
+    if [[ ${#filters[@]} -gt 0 ]]; then
+        echo "=== coverage baseline (${#filters[@]} filter(s)) ==="
     else
         echo "=== coverage baseline ==="
     fi
-    run_coverage_baseline "$baseline_dir" "${lit_filters[@]}"
+    run_coverage_baseline "$baseline_dir" "${filters[@]}"
 
     echo "=== added_lines (commit=${commit}) ==="
     local -a added_args=(

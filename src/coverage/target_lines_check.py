@@ -37,9 +37,19 @@ def _read_source_lines(path: str) -> tuple[str, ...]:
         return tuple(f.readlines())
 
 
-def _source_text_mismatches(sym_file: str, line_no: int, text: str) -> bool:
+def _resolve_source_path(sym_file: str, llvm_repo: Path) -> str:
+    """Absolute path for reading source: join relative summary paths to ``llvm_repo``."""
+    path = Path(sym_file)
+    if path.is_absolute():
+        return str(path)
+    return str((llvm_repo / path).resolve())
+
+
+def _source_text_mismatches(
+    sym_file: str, line_no: int, text: str, *, llvm_repo: Path
+) -> bool:
     """True if the on-disk line ``line_no`` in ``sym_file`` differs from ``text``."""
-    lines = _read_source_lines(sym_file)
+    lines = _read_source_lines(_resolve_source_path(sym_file, llvm_repo))
     if not 1 <= line_no <= len(lines):
         return True
     return lines[line_no - 1].strip() != text.strip()
@@ -109,6 +119,8 @@ def run_target_lines_check(
             text = row.get("text", "")
 
             sym_file = _match_symcov_file(rel, summary_files)
+            if sym_file is None and rel in summary_files:
+                sym_file = rel
             if sym_file is None:
                 cand = (llvm_repo / rel).resolve()
                 if str(cand) in summary_files:
@@ -123,7 +135,9 @@ def run_target_lines_check(
                 stats["not_in_summary"] += 1
                 continue
 
-            if _source_text_mismatches(sym_file, line_no, text):
+            if _source_text_mismatches(
+                sym_file, line_no, text, llvm_repo=llvm_repo
+            ):
                 stats["source_mismatch"] += 1
                 if len(mismatch_sample) < MISMATCH_SAMPLE_SIZE:
                     mismatch_sample.append(f"{sym_file}:{line_no}")

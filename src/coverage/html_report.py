@@ -15,30 +15,25 @@ from coverage.line_coverage_summary import load_line_coverage_summary
 
 STATUS_TO_CLASS = {
     "covered": "covered",
-    "partially": "partially-covered",
     "uncovered": "not-covered",
 }
 
 # Per-file source pages: caveats + color meaning for the line view.
 SOURCE_LEGEND_HTML = """\
 <div class="legend">
-  <p>Colors come from debug information in an optimized build using
-    SanitizerCoverage, so a source line may have no color because its code was
-    removed or merged.</p>
-  <p>Some blocks are not instrumented when a dominator already implies they ran.
-    A source line can have no color even though it executes.</p>
+  <p>Colors come from LLVM source-based coverage instrumentation built with
+    <code>-fprofile-instr-generate</code> and
+    <code>-fcoverage-mapping</code>. The report reads LCOV <code>DA</code>
+    records emitted by <code>llvm-cov export</code>.</p>
   <p><span class="swatch covered"></span>
     <strong>Green — covered.</strong>
-    Every instrumentation point on this line ran.</p>
-  <p><span class="swatch partially-covered"></span>
-    <strong>Orange — partially.</strong>
-    SanitizerCoverage can insert several points on one line.
-    Some of the instrumentation points ran, but not all.</p>
+    This instrumented source line had a non-zero execution count.</p>
   <p><span class="swatch not-covered"></span>
     <strong>Red — uncovered.</strong>
-    No instrumentation point on this line ran.</p>
+    This instrumented source line had a zero execution count.</p>
   <p><strong>No color.</strong>
-    This line has no instrumentation points, so it is not in the coverage counts.</p>
+    This line has no LCOV <code>DA</code> record, so it is not in the coverage
+    counts.</p>
 </div>
 """
 
@@ -47,17 +42,17 @@ INDEX_INTRO_HTML = """\
 <div class="legend">
   <p>This report is designed to highlight <strong>coverage gaps</strong>:
     source lines that were uncovered in this test-suite run.</p>
-  <p>It comes from an LLVM build with <strong>SanitizerCoverage</strong>.
-    A test run records executed instrumentation points and maps them to source
-    lines via debug information.</p>
+  <p>It comes from LLVM source-based coverage instrumentation
+    (<code>-fprofile-instr-generate</code> and
+    <code>-fcoverage-mapping</code>). Test runs produce profile data that
+    <code>llvm-cov export</code> maps back to LCOV <code>DA</code> source-line
+    records.</p>
   <p>Lines are then:</p>
   <ul class="status-list">
     <li><span class="swatch covered"></span>
-      <strong>covered</strong> (every point on the line ran)</li>
-    <li><span class="swatch partially-covered"></span>
-      <strong>partial</strong> (some ran)</li>
+      <strong>covered</strong> (non-zero execution count)</li>
     <li><span class="swatch not-covered"></span>
-      <strong>uncovered</strong> (none ran)</li>
+      <strong>uncovered</strong> (zero execution count)</li>
   </ul>
   <p>The tree is sorted by uncovered count so gaps surface first;
     open a file for the line view.</p>
@@ -67,7 +62,6 @@ INDEX_INTRO_HTML = """\
 SHARED_CSS = """\
     body { font-family: sans-serif; margin: 1.5rem; }
     .covered { background: #d1fae5; }
-    .partially-covered { background: #fef3c7; }
     .not-covered { background: #ffe4e6; }
     /* Keep index prose, stats, and tree on one column width. */
     .legend, .totals, .tree, body > h2, body > p {
@@ -84,7 +78,6 @@ SHARED_CSS = """\
       vertical-align: middle; margin-right: 0.35rem; border: 1px solid #ccc;
     }
     .swatch.covered { background: #34d399; }
-    .swatch.partially-covered { background: #fbbf24; }
     .swatch.not-covered { background: #fb7185; }
     .totals { margin: 1rem 0; }
     .totals li { margin: 0.2rem 0; }
@@ -217,13 +210,6 @@ SOURCE_PAGE_SCRIPT = """\
       lines: Array.from(document.querySelectorAll("div.line.not-covered")),
     },
     {
-      id: "partially",
-      label: "partially",
-      lines: Array.from(
-        document.querySelectorAll("div.line.partially-covered")
-      ),
-    },
-    {
       id: "covered",
       label: "covered",
       lines: Array.from(document.querySelectorAll("div.line.covered")),
@@ -233,7 +219,7 @@ SOURCE_PAGE_SCRIPT = """\
       label: "instrumented",
       lines: Array.from(
         document.querySelectorAll(
-          "div.line.covered, div.line.partially-covered, div.line.not-covered"
+          "div.line.covered, div.line.not-covered"
         )
       ),
     },
@@ -340,12 +326,11 @@ class FileStats:
     path: str  # stripped display path
     source_path: Path  # absolute path from CSV
     covered: int
-    partially: int
     uncovered: int
 
     @property
     def instrumented(self) -> int:
-        return self.covered + self.partially + self.uncovered
+        return self.covered + self.uncovered
 
     @property
     def basename(self) -> str:
@@ -358,25 +343,38 @@ class TreeNode:
     children: dict[str, TreeNode] = field(default_factory=dict)
     files: list[FileStats] = field(default_factory=list)
     covered: int = 0
-    partially: int = 0
     uncovered: int = 0
 
     @property
     def instrumented(self) -> int:
-        return self.covered + self.partially + self.uncovered
+        return self.covered + self.uncovered
 
 
-def _strip_path(abs_path: str, strip_prefix: Path | None) -> str:
+def _strip_path(file_path: str, strip_prefix: Path | None) -> str:
+    """Display path for HTML pages; keep relative CSV paths as-is."""
+    path = Path(file_path)
+    if not path.is_absolute():
+        return path.as_posix()
     if strip_prefix is None:
-        return abs_path
+        return file_path
     prefix = str(strip_prefix.resolve())
-    path = str(Path(abs_path).resolve())
-    if path == prefix:
-        return Path(abs_path).name
+    resolved = str(path.resolve())
+    if resolved == prefix:
+        return path.name
     prefix_slash = prefix.rstrip("/") + "/"
-    if path.startswith(prefix_slash):
-        return path[len(prefix_slash) :]
-    return abs_path
+    if resolved.startswith(prefix_slash):
+        return resolved[len(prefix_slash) :]
+    return file_path
+
+
+def _source_file_path(file_path: str, strip_prefix: Path | None) -> Path:
+    """On-disk path for reading source: join relative CSV paths to strip_prefix."""
+    path = Path(file_path)
+    if path.is_absolute():
+        return path
+    if strip_prefix is None:
+        return path
+    return (strip_prefix / path).resolve()
 
 
 def _pct(part: int, whole: int) -> str:
@@ -396,13 +394,12 @@ def _page_relpath(stripped: str) -> str:
     return f"{stripped}.html"
 
 
-def _counts_span(covered: int, partially: int, uncovered: int) -> str:
-    instrumented = covered + partially + uncovered
+def _counts_span(covered: int, uncovered: int) -> str:
+    instrumented = covered + uncovered
     return (
         f'<span class="counts">'
         f"instr={instrumented} "
         f"cov={covered} ({_pct(covered, instrumented)}) "
-        f"part={partially} ({_pct(partially, instrumented)}) "
         f"unc={uncovered} ({_pct(uncovered, instrumented)})"
         f"</span>"
     )
@@ -414,7 +411,7 @@ def _aggregate(
 ) -> tuple[list[FileStats], TreeNode, dict[str, dict[int, str]]]:
     """Build per-file stats, a path tree, and line status maps."""
     by_file: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"covered": 0, "partially": 0, "uncovered": 0}
+        lambda: {"covered": 0, "uncovered": 0}
     )
     source_by_stripped: dict[str, Path] = {}
     lines_by_stripped: dict[str, dict[int, str]] = defaultdict(dict)
@@ -426,7 +423,7 @@ def _aggregate(
             )
         stripped = _strip_path(file_path, strip_prefix)
         by_file[stripped][status] += 1
-        source_by_stripped[stripped] = Path(file_path)
+        source_by_stripped[stripped] = _source_file_path(file_path, strip_prefix)
         lines_by_stripped[stripped][int(line)] = status
 
     files = [
@@ -434,7 +431,6 @@ def _aggregate(
             path=path,
             source_path=source_by_stripped[path],
             covered=counts["covered"],
-            partially=counts["partially"],
             uncovered=counts["uncovered"],
         )
         for path, counts in by_file.items()
@@ -454,18 +450,15 @@ def _aggregate(
         node.files.append(f)
 
     def _rollup(node: TreeNode) -> None:
-        covered = partially = uncovered = 0
+        covered = uncovered = 0
         for child in node.children.values():
             _rollup(child)
             covered += child.covered
-            partially += child.partially
             uncovered += child.uncovered
         for f in node.files:
             covered += f.covered
-            partially += f.partially
             uncovered += f.uncovered
         node.covered = covered
-        node.partially = partially
         node.uncovered = uncovered
         node.files.sort(key=lambda f: (-f.uncovered, f.basename))
         # Sort child dirs by uncovered descending, then name.
@@ -489,7 +482,7 @@ def _render_tree_node(
         body = _render_tree_node(child, written_pages)
         summary = (
             f'<span class="dir-name">{html.escape(child.name)}/</span>'
-            f"{_counts_span(child.covered, child.partially, child.uncovered)}"
+            f"{_counts_span(child.covered, child.uncovered)}"
         )
         entries.append(
             (
@@ -510,7 +503,7 @@ def _render_tree_node(
                 f.uncovered,
                 f.basename,
                 f'<div class="file-row">{label}'
-                f"{_counts_span(f.covered, f.partially, f.uncovered)}</div>",
+                f"{_counts_span(f.covered, f.uncovered)}</div>",
             )
         )
     entries.sort(key=lambda item: (-item[0], item[1]))
@@ -525,7 +518,7 @@ def _render_source_page(
     index_href: str,
 ) -> str:
     rows: list[str] = []
-    counts = {"covered": 0, "partially": 0, "uncovered": 0}
+    counts = {"covered": 0, "uncovered": 0}
     for line_no, line in enumerate(source_text.splitlines(), start=1):
         status = line_status.get(line_no)
         status_cls = STATUS_TO_CLASS.get(status, "") if status else ""
@@ -540,16 +533,12 @@ def _render_source_page(
             f'<span class="code">{escaped}</span></div>'
         )
     body = "".join(rows)
-    instrumented = counts["covered"] + counts["partially"] + counts["uncovered"]
+    instrumented = counts["covered"] + counts["uncovered"]
     if instrumented:
         mode_btns: list[str] = []
         if counts["uncovered"]:
             mode_btns.append(
                 '<button type="button" data-mode="uncovered">uncovered</button>'
-            )
-        if counts["partially"]:
-            mode_btns.append(
-                '<button type="button" data-mode="partially">partially</button>'
             )
         if counts["covered"]:
             mode_btns.append(
@@ -560,8 +549,6 @@ def _render_source_page(
         )
         if counts["uncovered"]:
             default_label, default_count = "uncovered", counts["uncovered"]
-        elif counts["partially"]:
-            default_label, default_count = "partially", counts["partially"]
         elif counts["covered"]:
             default_label, default_count = "covered", counts["covered"]
         else:
@@ -646,9 +633,8 @@ def _render_index(
     tests: list[str] | None = None,
 ) -> str:
     total_c = sum(f.covered for f in files)
-    total_p = sum(f.partially for f in files)
     total_u = sum(f.uncovered for f in files)
-    total_i = total_c + total_p + total_u
+    total_i = total_c + total_u
     tree_html = _render_tree_node(tree, written_pages)
     run_meta = _render_run_meta(
         github_repo=github_repo,
@@ -676,7 +662,6 @@ def _render_index(
   <ul class="totals">
     <li>Instrumented lines: {total_i}</li>
     <li>Covered: {total_c} ({_pct(total_c, total_i)})</li>
-    <li>Partially: {total_p} ({_pct(total_p, total_i)})</li>
     <li>Uncovered: {total_u} ({_pct(total_u, total_i)})</li>
   </ul>
   <h2>Directory Tree</h2>

@@ -22,7 +22,7 @@ source "${SCRIPT_DIR}/lib/gap-filling.sh"
 usage() {
     cat <<EOF
 Usage: $(basename "$0") --output-dir <path> \\
-    --line-coverage-uncovered-csv <path> --llc-address-line-map-csv <path> \\
+    --line-coverage-uncovered-csv <path> --address-line-map-csv <path> \\
     --candidate-tests-dir <path> \\
     --llvm-repo <path> --llvm-bin <path> --instrumented-bin-dir <path> [options]
 
@@ -32,7 +32,7 @@ Artifacts are written under --output-dir/candidate_tests/ and --output-dir/incre
 Required:
   --output-dir <path>                   Output directory (created if missing)
   --line-coverage-uncovered-csv <path>  Uncovered-lines CSV (\`file\`, \`line\` columns)
-  --llc-address-line-map-csv <path>     LLC address-to-line map from the same baseline run
+  --address-line-map-csv <path>         Address-to-line map from the same baseline run
   --candidate-tests-dir <path>          Fuzz corpus root
 $(gap_filling_local_usage_llvm_options)
 
@@ -43,7 +43,7 @@ Examples:
   $(basename "$0") \\
       --output-dir ./gap-fill-out \\
       --line-coverage-uncovered-csv ./line_coverage_uncovered.csv \\
-      --llc-address-line-map-csv ./llc_address_line_map.csv \\
+      --address-line-map-csv ./llc_address_line_map.csv \\
       --candidate-tests-dir ./corpus \\
       --llvm-repo ./llvm-project \\
       --llvm-bin ./llvm-project/build/bin \\
@@ -53,7 +53,7 @@ Examples:
   $(basename "$0") \\
       --output-dir ./gap-fill-out \\
       --line-coverage-uncovered-csv ./target_lines_uncovered.csv \\
-      --llc-address-line-map-csv ./llc_address_line_map.csv \\
+      --address-line-map-csv ./llc_address_line_map.csv \\
       --candidate-tests-dir ./corpus \\
       -n 100 \\
       --llvm-repo ./llvm-project \\

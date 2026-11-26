@@ -21,7 +21,6 @@ class ClassifyChangedPathsTest(unittest.TestCase):
         self.assertEqual(scope.rule, 1)
         self.assertEqual(scope.action, "run")
         self.assertEqual(scope.backends, "X86;AMDGPU")
-        self.assertEqual(scope.tests, ("llvm/test",))
         self.assertEqual(scope.allowlist, str(ALLOWLIST_LLVM.resolve()))
 
     def test_rule1_multi_backend(self) -> None:
@@ -35,7 +34,6 @@ class ClassifyChangedPathsTest(unittest.TestCase):
         self.assertEqual(scope.rule, 1)
         self.assertEqual(scope.action, "run")
         self.assertEqual(scope.backends, "X86;AMDGPU;SPIRV")
-        self.assertEqual(scope.tests, ("llvm/test",))
         self.assertEqual(scope.allowlist, str(ALLOWLIST_LLVM.resolve()))
 
     def test_rule1_ignores_test_paths(self) -> None:
@@ -59,7 +57,6 @@ class ClassifyChangedPathsTest(unittest.TestCase):
         self.assertEqual(scope.rule, 2)
         self.assertEqual(scope.action, "run")
         self.assertEqual(scope.backends, "all")
-        self.assertEqual(scope.tests, ("clang/test",))
         self.assertEqual(scope.allowlist, str(ALLOWLIST_CLANG.resolve()))
 
     def test_rule3_llvm_lib_non_backend(self) -> None:
@@ -69,7 +66,6 @@ class ClassifyChangedPathsTest(unittest.TestCase):
         self.assertEqual(scope.rule, 3)
         self.assertEqual(scope.action, "run")
         self.assertEqual(scope.backends, "all")
-        self.assertEqual(scope.tests, ("llvm/test", "clang/test"))
         self.assertEqual(scope.allowlist, str(ALLOWLIST_LLVM_CLANG.resolve()))
 
     def test_rule3_mixed_backend_and_middle_end(self) -> None:
@@ -90,7 +86,6 @@ class ClassifyChangedPathsTest(unittest.TestCase):
             ]
         )
         self.assertEqual(scope.rule, 3)
-        self.assertEqual(scope.tests, ("llvm/test", "clang/test"))
         self.assertEqual(scope.allowlist, str(ALLOWLIST_LLVM_CLANG.resolve()))
 
     def test_rule4_test_only(self) -> None:
@@ -99,7 +94,6 @@ class ClassifyChangedPathsTest(unittest.TestCase):
         )
         self.assertEqual(scope.rule, 4)
         self.assertEqual(scope.action, "skip")
-        self.assertEqual(scope.tests, ())
         self.assertEqual(scope.allowlist, "")
 
     def test_rule4_docs_only(self) -> None:

@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 from coverage.analyser import CoverageAnalyzer
 from coverage.constants import (
-    DEFAULT_LLC_ADDRESS_LINE_MAP_FILE,
+    DEFAULT_ADDRESS_LINE_MAP_FILE,
+    DEFAULT_GAP_ADDRESS_LINE_MAP_FILE,
     DEFAULT_LINE_COVERAGE_UNCOVERED_FILE,
     DEFAULT_NEW_COVERAGE_CSV,
     DEFAULT_SOURCE_CODE_FILTER,
@@ -43,7 +44,7 @@ class DiffPartialBaselineTest(unittest.TestCase):
             (new_tests / NEW_TEST).mkdir()
 
             uncovered_csv = suite / DEFAULT_LINE_COVERAGE_UNCOVERED_FILE
-            map_csv = suite / DEFAULT_LLC_ADDRESS_LINE_MAP_FILE
+            map_csv = suite / DEFAULT_ADDRESS_LINE_MAP_FILE
 
             # Line 10: covered; line 20: partially; line 30: uncovered.
             _write_csv(
@@ -70,7 +71,7 @@ class DiffPartialBaselineTest(unittest.TestCase):
                 output_candidate_tests_dir=new_tests,
                 sancov=Path("/unused/sancov"),
                 line_coverage_uncovered_csv=uncovered_csv,
-                llc_address_line_map_csv=map_csv,
+                address_line_map_csv=map_csv,
                 new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,
             )
 
@@ -94,6 +95,16 @@ class DiffPartialBaselineTest(unittest.TestCase):
 
             self.assertEqual(rows[0]["covered-points"], "0x3001")
 
+            with (diff / DEFAULT_GAP_ADDRESS_LINE_MAP_FILE).open(
+                newline="", encoding="utf-8"
+            ) as gap_f:
+                gap_rows = list(csv.DictReader(gap_f))
+            # Only uncovered line 30 from the address map (not covered 10 / partial 20).
+            self.assertEqual(
+                {(r["file"], int(r["line"]), r["point"]) for r in gap_rows},
+                {(FILE, 30, "0x3001")},
+            )
+
     def test_reads_baseline_uncovered_csv(self) -> None:
         """Incremental uses ``line_coverage_uncovered.csv``."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -106,7 +117,7 @@ class DiffPartialBaselineTest(unittest.TestCase):
             (new_tests / NEW_TEST).mkdir()
 
             uncovered_csv = suite / DEFAULT_LINE_COVERAGE_UNCOVERED_FILE
-            map_csv = suite / DEFAULT_LLC_ADDRESS_LINE_MAP_FILE
+            map_csv = suite / DEFAULT_ADDRESS_LINE_MAP_FILE
 
             _write_csv(
                 uncovered_csv,
@@ -128,7 +139,7 @@ class DiffPartialBaselineTest(unittest.TestCase):
                 output_candidate_tests_dir=new_tests,
                 sancov=Path("/unused/sancov"),
                 line_coverage_uncovered_csv=uncovered_csv,
-                llc_address_line_map_csv=map_csv,
+                address_line_map_csv=map_csv,
                 new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,
             )
 
@@ -158,7 +169,7 @@ class DiffPartialBaselineTest(unittest.TestCase):
             (new_tests / NEW_TEST).mkdir()
 
             uncovered_csv = suite / DEFAULT_LINE_COVERAGE_UNCOVERED_FILE
-            map_csv = suite / DEFAULT_LLC_ADDRESS_LINE_MAP_FILE
+            map_csv = suite / DEFAULT_ADDRESS_LINE_MAP_FILE
 
             _write_csv(
                 uncovered_csv,
@@ -182,7 +193,7 @@ class DiffPartialBaselineTest(unittest.TestCase):
                 output_candidate_tests_dir=new_tests,
                 sancov=Path("/unused/sancov"),
                 line_coverage_uncovered_csv=uncovered_csv,
-                llc_address_line_map_csv=map_csv,
+                address_line_map_csv=map_csv,
                 new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,
             )
 

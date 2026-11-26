@@ -9,13 +9,12 @@ import pandas as pd
 
 from coverage.constants import (
     DEFAULT_LINE_COVERAGE_COVERED_FILE,
-    DEFAULT_LINE_COVERAGE_PARTIALLY_FILE,
     DEFAULT_LINE_COVERAGE_UNCOVERED_FILE,
 )
 
 _REQUIRED_COLUMNS = ("file", "line", "coverage")
 _SPLIT_COLUMNS = ("file", "line")
-_COVERAGE_STATUSES = ("covered", "partially", "uncovered")
+_COVERAGE_STATUSES = ("covered", "uncovered")
 
 
 def _load_split_line_keys(path: Path) -> frozenset[tuple[str, int]]:
@@ -45,10 +44,10 @@ def load_line_coverage_summary(
 
     Args:
         path: ``line_coverage_summary.csv`` (columns ``file``, ``line``, ``coverage``
-            with values ``covered`` | ``partially`` | ``uncovered``).
+            with values ``covered`` | ``uncovered``).
 
     Returns:
-        coverage_by_line: ``(file, line)`` -> ``"covered"`` | ``"partially"`` | ``"uncovered"``.
+        coverage_by_line: ``(file, line)`` -> ``"covered"`` | ``"uncovered"``.
         baseline_uncovered: keys where ``coverage == "uncovered"``.
     """
     if not path.is_file():
@@ -77,10 +76,10 @@ def load_line_coverage_summary(
 def write_line_coverage_summary_splits(
     coverage: pd.DataFrame,
     output_dir: Path,
-) -> dict[Literal["covered", "partially", "uncovered"], Path]:
+) -> dict[Literal["covered", "uncovered"], Path]:
     """Write per-status views of ``line_coverage_summary.csv``.
 
-    Produces three CSVs with columns ``file`` and ``line`` only (status is
+    Produces CSVs with columns ``file`` and ``line`` only (status is
     implied by the filename), each containing rows for one coverage class.
     """
     missing = set(_REQUIRED_COLUMNS) - set(coverage.columns)
@@ -93,10 +92,9 @@ def write_line_coverage_summary_splits(
     output_dir.mkdir(parents=True, exist_ok=True)
     filenames = {
         "covered": DEFAULT_LINE_COVERAGE_COVERED_FILE,
-        "partially": DEFAULT_LINE_COVERAGE_PARTIALLY_FILE,
         "uncovered": DEFAULT_LINE_COVERAGE_UNCOVERED_FILE,
     }
-    paths: dict[Literal["covered", "partially", "uncovered"], Path] = {}
+    paths: dict[Literal["covered", "uncovered"], Path] = {}
     for status in _COVERAGE_STATUSES:
         subset = coverage.loc[coverage["coverage"] == status, list(_SPLIT_COLUMNS)]
         path = output_dir / filenames[status]

@@ -10,7 +10,7 @@ from coverage.constants import DEFAULT_SOURCE_CODE_FILTER
 from coverage.line_rules import (
     filter_uncovered_lines,
     gap_address_line_map,
-    normalize_llc_address_line_map,
+    normalize_address_line_map,
 )
 
 FILE = "/build/llvm/llvm/lib/Foo.cpp"
@@ -21,7 +21,7 @@ LIBEXTRA_FILE = "/build/llvm/llvm/libextra/Baz.cpp"
 
 class GapAddressLineMapTest(unittest.TestCase):
     def test_keeps_only_baseline_uncovered_lines_with_all_points(self) -> None:
-        address_map = normalize_llc_address_line_map(
+        address_map = normalize_address_line_map(
             pd.DataFrame(
                 [
                     [FILE, 10, "0x1001"],
@@ -41,7 +41,7 @@ class GapAddressLineMapTest(unittest.TestCase):
         self.assertNotIn(10, set(gap["line"]))
 
     def test_empty_baseline_uncovered_returns_empty_frame(self) -> None:
-        address_map = normalize_llc_address_line_map(
+        address_map = normalize_address_line_map(
             pd.DataFrame([[FILE, 10, "0x1001"]], columns=["file", "line", "point"])
         )
         gap = gap_address_line_map(address_map, frozenset())
@@ -86,7 +86,7 @@ class FilterUncoveredLinesTest(unittest.TestCase):
 
     def test_gap_map_scopes_address_rows_to_filtered_uncovered(self) -> None:
         """Filtering uncovered lines is enough; gap merge excludes other paths."""
-        address_map = normalize_llc_address_line_map(
+        address_map = normalize_address_line_map(
             pd.DataFrame(
                 [
                     [FILE, 10, "0x1001"],

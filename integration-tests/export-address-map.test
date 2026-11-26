@@ -1,0 +1,9 @@
+# COM: Export a canonical source-relative address map for the sancov llc build.
+
+# RUN: rm -rf %t && mkdir -p %t
+# RUN: %coverage export-address-map --output-dir %t --tool %sancov-llc --sancov %sancov --llvm-src %llvm-repo --output %t/llc_address_line_map.csv
+# RUN: test -f %t/llc_address_line_map.csv
+# RUN: %FileCheck %s --input-file=%t/llc_address_line_map.csv --check-prefix=MAP
+# MAP: file,line,point
+# MAP: llvm/lib/Target/AMDGPU/{{.*}}.cpp,{{[0-9]+}},0x{{[0-9a-f]+}}
+# MAP-NOT: /llvm/lib/Target/AMDGPU/

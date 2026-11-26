@@ -5,7 +5,6 @@ from pathlib import Path
 
 from coverage.candidate_test_settings import load_llc_flag_variants
 from coverage.filepaths import Filepaths
-from coverage.lit_config import lit_suite_root_name, normalize_lit_suite_spec
 from coverage.test_runner import TestRunner
 from coverage.constants import (
     DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
@@ -17,23 +16,28 @@ from coverage.constants import (
     DEFAULT_SOURCE_CODE_FILTER,
     DEFAULT_TIMINGS_FILE,
 )
-
 from coverage.analyser import CoverageAnalyzer
+from coverage.export_address_map import (
+    default_address_map_output,
+    export_address_map,
+)
 from coverage.html_report import write_html_report
 from coverage.min_candidate_tests import MinCandidateTestsSelector
+from coverage.source_baseline import run_source_baseline
 from coverage.target_lines_check import run_target_lines_check
 from fuzz_fill.env import (
+    FUZZ_FILL_HOST_BIN,
+    FUZZ_FILL_COVERAGE_BUILD_DIR,
     FUZZ_FILL_LLC,
-    FUZZ_FILL_LLVM_LIT,
     FUZZ_FILL_LLVM_REPO,
-    FUZZ_FILL_OPT,
+    FUZZ_FILL_LLVM_SRC,
     FUZZ_FILL_SANCOV,
     existing_dir_path,
     existing_file_path,
     path_from_flag_or_env,
+    require_executable,
 )
 from fuzz_fill.llvm_tools import (
-    baseline_tools_from_args,
     candidate_test_tools_from_args,
     incremental_tools_from_args,
 )
@@ -51,41 +55,31 @@ from fuzz_fill.log import (
 logger = get_logger("coverage")
 
 
-class _AppendLitSuiteAction(argparse.Action):
-    """Append one ``--tests`` suite after checking it is ``<project>/test``."""
-
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: str | list[str] | None,
-        option_string: str | None = None,
-    ) -> None:
-        assert isinstance(values, str)
-        try:
-            lit_suite_root_name(values)
-        except ValueError as exc:
-            parser.error(str(exc))
-        suites: list[str] | None = getattr(namespace, self.dest, None)
-        if suites is None:
-            suites = []
-            setattr(namespace, self.dest, suites)
-        suites.append(normalize_lit_suite_spec(values))
-
-
 def main():
-
     parser = argparse.ArgumentParser()
 
     sub = parser.add_subparsers(
         dest="subcmd",
         metavar=(
-            "{baseline,candidate-test,incremental,min-candidate-tests,"
-            "target-lines,html-report}"
+            "{baseline,export-address-map,candidate-test,incremental,"
+            "min-candidate-tests,target-lines,html-report}"
         ),
         required=True,
     )
-    p_baseline = sub.add_parser("baseline")
+    p_baseline = sub.add_parser(
+        "baseline",
+        help=(
+            "Source-based coverage baseline: clear-profile-data → check-all → "
+            "merge → lcov → covered/uncovered CSVs."
+        ),
+    )
+    p_export_map = sub.add_parser(
+        "export-address-map",
+        help=(
+            "Run a sancov-instrumented tool once and write a PC→line address map "
+            "(default tool args: --version)."
+        ),
+    )
     p_candidate_test = sub.add_parser("candidate-test")
     p_incremental = sub.add_parser("incremental")
     p_min_candidate_tests = sub.add_parser(
@@ -106,11 +100,12 @@ def main():
         "html-report",
         help=(
             "Write a self-contained HTML coverage report from "
-            "``line_coverage_summary.csv`` (source pages with three-way coloring)."
+            "``line_coverage_summary.csv`` (source pages with covered/uncovered coloring)."
         ),
     )
 
     add_shared_arguments(p_baseline)
+    add_shared_arguments(p_export_map)
     add_shared_arguments(p_candidate_test)
     add_shared_arguments(p_incremental)
     add_shared_arguments(p_min_candidate_tests)
@@ -118,91 +113,114 @@ def main():
     add_shared_arguments(p_html_report)
 
     p_baseline.add_argument(
+        "--build-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Coverage-instrumented LLVM build directory (contains profiles/ and "
+            f"ninja targets; or set {FUZZ_FILL_COVERAGE_BUILD_DIR})."
+        ),
+    )
+    p_baseline.add_argument(
+        "--llvm-src",
+        type=Path,
+        default=None,
+        help=(
+            "llvm-project source root (for prepare-code-coverage-artifact.py, "
+            f"COMMIT, and canonical CSV paths; or set {FUZZ_FILL_LLVM_SRC})."
+        ),
+    )
+    p_baseline.add_argument(
+        "--host-bin",
+        type=Path,
+        default=None,
+        help=(
+            "Bootstrap bin with llvm-profdata and llvm-cov "
+            f"(or set {FUZZ_FILL_HOST_BIN})."
+        ),
+    )
+    p_baseline.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=None,
+        help=(
+            "Parallel jobs for ninja check-all / LIT_OPTS and "
+            "llvm-cov export --num-threads (default: core count, capped)."
+        ),
+    )
+    p_baseline.add_argument(
+        "--filter",
+        action="append",
+        dest="filters",
+        default=[],
+        metavar="REGEX",
+        help=(
+            "Lit --filter= regex OR'd into LIT_OPTS. Repeatable. "
+            "Omit to run check-all unfiltered."
+        ),
+    )
+    p_baseline.add_argument(
+        "--binary",
+        action="append",
+        dest="binaries",
+        default=[],
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Instrumented binary for llvm-cov export. Repeatable. "
+            "Default: all ELF executables under <build-dir>/bin."
+        ),
+    )
+    p_baseline.add_argument(
+        "--strict-check-all",
+        action="store_true",
+        help="Hard-fail on non-zero check-all (default: continue-on-failure).",
+    )
+    p_baseline.add_argument(
+        "--require-profiles",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Exit with an error when check-all produces no .profraw / usable "
+            "export (default: enabled). Use --no-require-profiles for an empty baseline."
+        ),
+    )
+
+    p_export_map.add_argument(
+        "--tool",
+        type=Path,
+        required=True,
+        help="Sancov-instrumented tool binary (e.g. llc).",
+    )
+    p_export_map.add_argument(
         "--sancov",
         type=Path,
         default=None,
         help=f"Path to the sancov executable (or set {FUZZ_FILL_SANCOV}).",
     )
-    p_baseline.add_argument(
-        "--llvm-lit",
+    p_export_map.add_argument(
+        "--llvm-src",
         type=Path,
         default=None,
-        help=f"Path to the llvm-lit executable (or set {FUZZ_FILL_LLVM_LIT}).",
+        help=(
+            "llvm-project source root for canonical file paths "
+            f"(or set {FUZZ_FILL_LLVM_SRC})."
+        ),
     )
-    p_baseline.add_argument(
-        "--llc",
+    p_export_map.add_argument(
+        "--output",
         type=Path,
         default=None,
-        help=f"Path to the instrumented llc executable (or set {FUZZ_FILL_LLC}).",
+        help=(
+            "Output CSV path (default: <tool>_address_line_map.csv in --output-dir)."
+        ),
     )
-    p_baseline.add_argument(
-        "--opt",
-        type=Path,
+    p_export_map.add_argument(
+        "--tool-args",
+        nargs=argparse.REMAINDER,
         default=None,
-        help=f"Path to the instrumented opt executable (or set {FUZZ_FILL_OPT}).",
-    )
-    p_baseline.add_argument(
-        "--tests",
-        action=_AppendLitSuiteAction,
-        dest="lit_suites",
-        default=None,
-        metavar="SUITE",
-        help=(
-            "Lit suite root or subdirectory to pass to llvm-lit, as "
-            "<project>/test or a path under it (for example "
-            "llvm/test/CodeGen/AMDGPU or lld/test/ELF). Repeatable and required. "
-            "Every suite is passed to one llvm-lit process."
-        ),
-    )
-    p_baseline.add_argument(
-        "--lit-filter",
-        action="append",
-        dest="lit_filters",
-        default=[],
-        metavar="REGEX",
-        help=(
-            "llvm-lit --filter= regex applied to every --tests suite. "
-            "Repeat to OR multiple fragments into that one filter. "
-            "Omit to run the suites unfiltered."
-        ),
-    )
-    p_baseline.add_argument("-j", "--jobs", type=int, default=None,
-        help=(
-            "Parallel jobs for llvm-lit and sancov merge/symbolize "
-            "(default: core count, capped at 384)."
-        ))
-    p_baseline.add_argument("--lit-verbose", action="store_true",
-        help="Forward -vv to llvm-lit for verbose test output.")
-    p_baseline.add_argument("--lit-allow-failures", action="store_true",
-        help="Continue baseline coverage even if llvm-lit exits non-zero.")
-    p_baseline.add_argument(
-        "--lit-priority-slow-tests",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Seed .lit_test_times.txt so known slow AMDGPU tests run first under "
-            "llvm-lit --order=smart (default: enabled). Use --no-lit-priority-slow-tests "
-            "to skip seeding."
-        ),
-    )
-    p_baseline.add_argument(
-        "--require-sancov",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Exit with an error when the lit run produces no raw .sancov files "
-            "(default: enabled). Use --no-require-sancov to allow an empty baseline."
-        ),
-    )
-    p_baseline.add_argument(
-        "--delete-raw-sancov",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Delete the raw_sancov directory after a successful merge and "
-            "symbolize, before writing address-line maps (default: enabled). "
-            "Use --no-delete-raw-sancov to keep the individual dumps."
-        ),
+        help="Arguments passed to --tool (default: --version). Use after other flags.",
     )
 
     p_candidate_test.add_argument(
@@ -211,8 +229,12 @@ def main():
         default=None,
         help=f"Path to the instrumented llc executable (or set {FUZZ_FILL_LLC}).",
     )
-    p_candidate_test.add_argument("--candidate-tests-dir", type=Path, required=True,
-        help="Directory containing the candidate tests (.ll/.bc).")
+    p_candidate_test.add_argument(
+        "--candidate-tests-dir",
+        type=Path,
+        required=True,
+        help="Directory containing the candidate tests (.ll/.bc).",
+    )
     p_candidate_test.add_argument(
         "--n",
         type=int,
@@ -223,12 +245,25 @@ def main():
             "Default: all tests under --candidate-tests-dir."
         ),
     )
-    p_candidate_test.add_argument("-j", "--jobs", type=int, default=None,
-        help="Number of parallel jobs for running candidate tests. Defaults to the "
-             "number of detected CPUs.")
-    p_candidate_test.add_argument("--timeout", type=int, default=5,
-        help="Per-test wall-clock timeout in seconds; the test is killed with "
-             "SIGKILL (timeout -s9) when exceeded. Default: 5.")
+    p_candidate_test.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=None,
+        help=(
+            "Number of parallel jobs for running candidate tests. Defaults to the "
+            "number of detected CPUs."
+        ),
+    )
+    p_candidate_test.add_argument(
+        "--timeout",
+        type=int,
+        default=5,
+        help=(
+            "Per-test wall-clock timeout in seconds; the test is killed with "
+            "SIGKILL (timeout -s9) when exceeded. Default: 5."
+        ),
+    )
     p_candidate_test.add_argument(
         "--settings-csv",
         type=Path,
@@ -255,12 +290,12 @@ def main():
         ),
     )
     p_incremental.add_argument(
-        "--llc-address-line-map-csv",
+        "--address-line-map-csv",
         type=existing_file_path,
         required=True,
         help=(
-            "Baseline llc address-to-line map (``file``, ``line``, ``point`` columns; "
-            "output of ``coverage baseline`` as ``llc_address_line_map.csv``)."
+            "Sancov tool address-to-line map (``file``, ``line``, ``point`` columns; "
+            "from ``coverage export-address-map``)."
         ),
     )
     p_incremental.add_argument(
@@ -406,8 +441,8 @@ def main():
         default=None,
         metavar="SUITE",
         help=(
-            "Lit suite used for this run (shown on the index). Repeatable, "
-            "e.g. --tests llvm/test --tests clang/test."
+            "Lit suite used for this run (shown on the index). Repeatable. "
+            "Optional metadata only."
         ),
     )
 
@@ -423,37 +458,64 @@ def main():
         logger.debug("debug mode enabled")
 
     if args.subcmd == "baseline":
-        if not args.lit_suites:
-            parser.error(
-                "--tests is required (<project>/test, optionally with a subdirectory)"
-            )
-        tools = baseline_tools_from_args(
-            sancov=args.sancov,
-            llvm_lit=args.llvm_lit,
-            llc=args.llc,
-            opt=args.opt,
+        build_dir = path_from_flag_or_env(
+            args.build_dir, FUZZ_FILL_COVERAGE_BUILD_DIR, flag_name="--build-dir"
         )
-        filepaths = get_filepaths(args, tools=tools)
-        logger.info("getting baseline coverage for the test suite")
+        llvm_src = path_from_flag_or_env(
+            args.llvm_src, FUZZ_FILL_LLVM_SRC, flag_name="--llvm-src"
+        )
+        host_bin = path_from_flag_or_env(
+            args.host_bin, FUZZ_FILL_HOST_BIN, flag_name="--host-bin"
+        )
+        if not build_dir.is_dir():
+            raise SystemExit(f"--build-dir is not a directory: {build_dir}")
+        if not llvm_src.is_dir():
+            raise SystemExit(f"--llvm-src is not a directory: {llvm_src}")
+        if not host_bin.is_dir():
+            raise SystemExit(f"--host-bin is not a directory: {host_bin}")
+        binaries = [p.resolve() for p in args.binaries] if args.binaries else None
+        logger.info("running source-based coverage baseline")
         with record_log_timings() as timings:
             with log_timing(logger, "baseline"):
-                test_runner = TestRunner(
-                    mode="lit",
-                    filepaths=filepaths,
-                    lit_suites=args.lit_suites,
-                    lit_filters=args.lit_filters,
+                run_source_baseline(
+                    build_dir=build_dir,
+                    llvm_src=llvm_src,
+                    host_bin=host_bin,
+                    output_dir=args.output_dir,
                     jobs=args.jobs,
-                    lit_verbose=args.lit_verbose,
-                    lit_allow_failures=args.lit_allow_failures,
-                    lit_priority_slow_tests=args.lit_priority_slow_tests,
-                    require_sancov=args.require_sancov,
-                    delete_raw_sancov=args.delete_raw_sancov,
-                    debug=args.debug,
+                    filters=args.filters or None,
+                    binaries=binaries,
+                    strict_check_all=args.strict_check_all,
+                    require_profiles=args.require_profiles,
                 )
-                test_runner.run()
             timings_path = args.output_dir / DEFAULT_TIMINGS_FILE
             write_timings_csv(timings_path, timings)
             logger.info("wrote baseline timings to %s", timings_path)
+
+    elif args.subcmd == "export-address-map":
+        llvm_src = path_from_flag_or_env(
+            args.llvm_src, FUZZ_FILL_LLVM_SRC, flag_name="--llvm-src"
+        )
+        sancov = path_from_flag_or_env(
+            args.sancov, FUZZ_FILL_SANCOV, flag_name="--sancov"
+        )
+        require_executable(sancov, flag_name="--sancov")
+        tool_args = args.tool_args
+        if tool_args is None:
+            tool_args = ["--version"]
+        elif tool_args and tool_args[0] == "--":
+            tool_args = tool_args[1:]
+        output = args.output
+        if output is None:
+            output = args.output_dir / default_address_map_output(args.tool)
+        with log_timing(logger, "export-address-map"):
+            export_address_map(
+                tool=args.tool,
+                sancov=sancov,
+                llvm_src=llvm_src,
+                output=output,
+                tool_args=tool_args,
+            )
 
     elif args.subcmd == "candidate-test":
         if args.n is not None and args.n < 1:
@@ -481,7 +543,7 @@ def main():
         )
         with log_timing(logger, "incremental"):
             filepaths.line_coverage_uncovered_csv = args.line_coverage_uncovered_csv
-            filepaths.llc_address_line_map_csv = args.llc_address_line_map_csv
+            filepaths.address_line_map_csv = args.address_line_map_csv
             filepaths.output_candidate_tests_dir = args.candidate_tests_output_dir
 
             coverage_analyzer = CoverageAnalyzer(
@@ -551,11 +613,13 @@ def main():
         logger.error("unknown subcommand: %s", args.subcmd)
         return 1
 
+
 def add_shared_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--debug", action="store_true", default=False)
     add_log_level_argument(parser)
     add_log_to_file_argument(parser)
+
 
 def get_filepaths(
     args: argparse.Namespace,
@@ -576,10 +640,12 @@ def get_filepaths(
         opt=opt,
         candidate_tests_dir=getattr(args, "candidate_tests_dir", None),
         line_coverage_uncovered_csv=getattr(args, "line_coverage_uncovered_csv", None),
-        llc_address_line_map_csv=getattr(args, "llc_address_line_map_csv", None),
+        address_line_map_csv=getattr(args, "address_line_map_csv", None),
         output_candidate_tests_dir=getattr(args, "candidate_tests_output_dir", None),
         line_coverage_summary_file=DEFAULT_LINE_COVERAGE_SUMMARY_FILE,
         new_coverage_csv=DEFAULT_NEW_COVERAGE_CSV,
     )
+
+
 if __name__ == "__main__":
     main()

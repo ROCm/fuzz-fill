@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: test.sh --venv <venv-dir> --llvm-build <bin-dir> --llvm-src <src-dir> [--llvm-sancov-build <bin-dir>] [lit args...]
+Usage: test.sh --venv <venv-dir> --llvm-build <bin-dir> --llvm-src <src-dir> [--llvm-coverage-build <build-dir>] [--llvm-sancov-build <bin-dir>] [--host-bin <bin-dir>] [lit args...]
 
 Required:
   --venv               Path to Python virtualenv directory.
@@ -11,9 +11,14 @@ Required:
   --llvm-src           Path to llvm-project checkout root (directory containing llvm/).
 
 Optional:
+  --llvm-coverage-build
+                       Path to source-coverage LLVM build dir for coverage baseline
+                       (or its bin dir; defaults to FUZZ_FILL_LLVM_COVERAGE_BIN_DIR
+                       / FUZZ_FILL_LLVM_COVERAGE_BUILD_DIR when set).
   --llvm-sancov-build  Path to SanitizerCoverage-instrumented LLVM build bin (llc, opt).
                        Required for the main suite under integration-tests/. Unused by
                        the e2e suite under integration-tests/e2e/.
+  --host-bin           Host LLVM bin directory for llvm-profdata/llvm-cov.
 
 Any additional arguments are forwarded to lit unchanged.
 If no extra arguments are provided, lit runs on ".".
@@ -22,8 +27,10 @@ EOF
 
 venv_dir=""
 llvm_build=""
+llvm_coverage_build=""
 llvm_sancov_build=""
 llvm_src=""
+host_bin=""
 lit_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -53,6 +60,24 @@ while [[ $# -gt 0 ]]; do
                 exit 2
             fi
             llvm_sancov_build="$2"
+            shift 2
+            ;;
+        --llvm-coverage-build)
+            if [[ $# -lt 2 ]]; then
+                echo "error: --llvm-coverage-build requires a value" >&2
+                usage
+                exit 2
+            fi
+            llvm_coverage_build="$2"
+            shift 2
+            ;;
+        --host-bin)
+            if [[ $# -lt 2 ]]; then
+                echo "error: --host-bin requires a value" >&2
+                usage
+                exit 2
+            fi
+            host_bin="$2"
             shift 2
             ;;
         --llvm-src)
@@ -108,6 +133,28 @@ if [[ -n "$llvm_sancov_build" && ! -d "$llvm_sancov_build" ]]; then
     exit 2
 fi
 
+if [[ -z "$llvm_coverage_build" ]]; then
+    llvm_coverage_build="${FUZZ_FILL_LLVM_COVERAGE_BUILD_DIR:-}"
+fi
+if [[ -z "$llvm_coverage_build" && -n "${FUZZ_FILL_LLVM_COVERAGE_BIN_DIR:-}" ]]; then
+    llvm_coverage_build="$(dirname "$FUZZ_FILL_LLVM_COVERAGE_BIN_DIR")"
+fi
+if [[ -n "$llvm_coverage_build" && "$(basename "$llvm_coverage_build")" == "bin" ]]; then
+    llvm_coverage_build="$(dirname "$llvm_coverage_build")"
+fi
+if [[ -n "$llvm_coverage_build" && ! -d "$llvm_coverage_build" ]]; then
+    echo "error: LLVM coverage build directory does not exist: $llvm_coverage_build" >&2
+    exit 2
+fi
+
+if [[ -z "$host_bin" ]]; then
+    host_bin="${FUZZ_FILL_HOST_BIN:-$llvm_build}"
+fi
+if [[ ! -d "$host_bin" ]]; then
+    echo "error: host bin directory does not exist: $host_bin" >&2
+    exit 2
+fi
+
 if [[ ! -d "$llvm_src/llvm" ]]; then
     echo "error: llvm-project checkout not found at: $llvm_src/llvm" >&2
     exit 2
@@ -116,6 +163,13 @@ fi
 export FUZZ_FILL_VENV_DIR="$venv_dir"
 export FUZZ_FILL_LLVM_BIN_DIR="$llvm_build"
 export FUZZ_FILL_LLVM_SRC_DIR="$llvm_src"
+export FUZZ_FILL_HOST_BIN="$host_bin"
+if [[ -n "$llvm_coverage_build" ]]; then
+    export FUZZ_FILL_LLVM_COVERAGE_BUILD_DIR="$llvm_coverage_build"
+    export FUZZ_FILL_LLVM_COVERAGE_BIN_DIR="$llvm_coverage_build/bin"
+else
+    unset FUZZ_FILL_LLVM_COVERAGE_BUILD_DIR FUZZ_FILL_LLVM_COVERAGE_BIN_DIR
+fi
 
 unset FUZZ_FILL_SANCOV FUZZ_FILL_LLVM_LIT FUZZ_FILL_LLC FUZZ_FILL_OPT \
       FUZZ_FILL_LLVM_REDUCE FUZZ_FILL_LLVM_DIS

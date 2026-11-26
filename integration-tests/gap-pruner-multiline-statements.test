@@ -2,11 +2,23 @@
 # COM: LLVM_DEBUG(), llvm_unreachable() or static_assert() call -- both
 # COM: multi-line and (for llvm_unreachable) single-line -- plus a multi-line
 # COM: if, else-if, while and for header.
-# COM: Every line here is part of one of those calls or control-flow headers,
-# COM: so all of them are pruned and only the CSV header row survives.
+# COM: Control-flow headers are kept by default and pruned only with
+# COM: --prune-control-flow.
 
 # RUN: rm -rf %t && mkdir -p %t
 # RUN: sed 's#@LLVM_REPO@#%llvm-repo#g' %S/fixtures/gap-pruner-real-multiline-lines.csv.tmpl > %t/input.csv
 # RUN: %gap-pruner %t/input.csv --output %t/out.csv
+# RUN: echo file,line,text > %t/expected-default.csv
+# RUN: echo '@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUAliasAnalysis.cpp,67,  if (asA == AMDGPUAS::FLAT_ADDRESS &&' | sed 's#@LLVM_REPO@#%llvm-repo#g' >> %t/expected-default.csv
+# RUN: echo '@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUAliasAnalysis.cpp,68,      (asB == AMDGPUAS::LOCAL_ADDRESS || asB == AMDGPUAS::PRIVATE_ADDRESS)) {' | sed 's#@LLVM_REPO@#%llvm-repo#g' >> %t/expected-default.csv
+# RUN: echo '@LLVM_REPO@/llvm/lib/Target/AMDGPU/SIInstrInfo.cpp,1077,    else if (RI.hasVGPRs(SrcRC) ||' | sed 's#@LLVM_REPO@#%llvm-repo#g' >> %t/expected-default.csv
+# RUN: echo '@LLVM_REPO@/llvm/lib/Target/AMDGPU/SIInstrInfo.cpp,1078,             (ST.hasGFX90AInsts() && RI.isSGPRClass(SrcRC)))' | sed 's#@LLVM_REPO@#%llvm-repo#g' >> %t/expected-default.csv
+# RUN: echo '@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUIGroupLP.cpp,364,    while (static_cast<size_t>(BeginSyncGroupIdx) < PipelineInstrs.size() &&' | sed 's#@LLVM_REPO@#%llvm-repo#g' >> %t/expected-default.csv
+# RUN: echo '@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUIGroupLP.cpp,365,           PipelineInstrs[BeginSyncGroupIdx].size() == 0)' | sed 's#@LLVM_REPO@#%llvm-repo#g' >> %t/expected-default.csv
+# RUN: echo '@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUISelDAGToDAG.cpp,1112,"  for (SDNode::user_iterator UI = N->user_begin(), E = N->user_end(); UI != E;"' | sed 's#@LLVM_REPO@#%llvm-repo#g' >> %t/expected-default.csv
+# RUN: echo '@LLVM_REPO@/llvm/lib/Target/AMDGPU/AMDGPUISelDAGToDAG.cpp,1113,       ++UI)' | sed 's#@LLVM_REPO@#%llvm-repo#g' >> %t/expected-default.csv
+# RUN: diff %t/expected-default.csv %t/out.csv
+
+# RUN: %gap-pruner %t/input.csv --output %t/out-pruned.csv --prune-control-flow
 # RUN: echo file,line,text > %t/expected.csv
-# RUN: diff %t/expected.csv %t/out.csv
+# RUN: diff %t/expected.csv %t/out-pruned.csv

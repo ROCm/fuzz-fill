@@ -37,14 +37,14 @@ Examples:
       --llvm-repo /path/llvm-project \\
       --llvm-bin /path/llvm-project/build/bin \\
       --instrumented-bin-dir /path/llvm-project/build-sancov/bin \\
-      --tests llvm/test/CodeGen/AMDGPU -j "\$(nproc)"
+      -j "\$(nproc)"
 
   $(basename "$0") \\
       --output-dir ./data/baseline-codegen \\
       --llvm-repo /path/llvm-project \\
       --llvm-bin /path/llvm-project/build/bin \\
       --instrumented-bin-dir /path/llvm-project/build-sancov/bin \\
-      --tests llvm/test --lit-filter CodeGen/AMDGPU -j "\$(nproc)"
+      --filter CodeGen/AMDGPU -j "\$(nproc)"
 EOF
 }
 
@@ -78,7 +78,7 @@ activate_venv_if_present "$REPO_ROOT"
 baseline_output_dir="${output_dir}/baseline"
 rm -rf "$baseline_output_dir"
 
-run_coverage_baseline "$baseline_output_dir" "${lit_filters[@]}"
+run_coverage_baseline "$baseline_output_dir" "${filters[@]}"
 
 echo "Uncovered baseline lines: ${baseline_output_dir}/line_coverage_uncovered.csv"
 echo "Uncovered baseline lines (pruned): ${baseline_output_dir}/line_coverage_uncovered_pruned.csv"

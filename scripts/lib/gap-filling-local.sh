@@ -64,8 +64,8 @@ gap_filling_local_parse_args() {
                 line_coverage_uncovered_csv="$2"
                 shift 2
                 ;;
-            --llc-address-line-map-csv)
-                [[ $# -ge 2 ]] || { echo "error: --llc-address-line-map-csv requires a value" >&2; exit 2; }
+            --address-line-map-csv)
+                [[ $# -ge 2 ]] || { echo "error: --address-line-map-csv requires a value" >&2; exit 2; }
                 llc_address_line_map_csv="$2"
                 shift 2
                 ;;
@@ -148,7 +148,7 @@ gap_filling_local_validate_required_paths() {
         missing=1
     fi
     if [[ -z "$llc_address_line_map_csv" ]]; then
-        echo "error: --llc-address-line-map-csv is required" >&2
+        echo "error: --address-line-map-csv is required" >&2
         missing=1
     fi
     if [[ -z "$candidate_tests_dir" ]]; then

@@ -3,6 +3,7 @@
 
 import os
 import shlex
+import shutil
 import sys
 
 import lit.formats
@@ -19,6 +20,14 @@ _llvm_sancov_bin_dir = lit_common.require_dir(
     "FUZZ_FILL_LLVM_SANCOV_BIN_DIR",
     "SanitizerCoverage-instrumented LLVM build bin directory (llc, opt)",
 )
+_llvm_coverage_build_dir = lit_common.require_dir(
+    "FUZZ_FILL_LLVM_COVERAGE_BUILD_DIR",
+    "source-coverage LLVM build directory",
+)
+_host_bin_dir = lit_common.require_dir(
+    "FUZZ_FILL_HOST_BIN",
+    "host LLVM bin directory (llvm-profdata, llvm-cov)",
+)
 _llvm_src_dir = lit_common.require_llvm_src_dir()
 _venv_dir = lit_common.require_venv_dir()
 
@@ -29,6 +38,9 @@ config.name = "fuzz-fill-integration-tests"
 config.suffixes = [".test"]
 config.test_format = lit.formats.ShTest()
 lit_common.apply_venv_environment(config, _venv_dir)
+if shutil.which("creduce"):
+    config.available_features.add("creduce")
+
 config.substitutions.extend(
     [
         ("%sancov-llc", lit_common.tool(_llvm_sancov_bin_dir, "llc")),
@@ -41,6 +53,8 @@ config.substitutions.extend(
         ("%FileCheck", lit_common.tool(_llvm_bin_dir, "FileCheck")),
         ("%not", lit_common.tool(_llvm_bin_dir, "not")),
         ("%llvm-build-dir", shlex.quote(_llvm_build_dir)),
+        ("%coverage-build", shlex.quote(_llvm_coverage_build_dir)),
+        ("%host-bin", shlex.quote(_host_bin_dir)),
         ("%llvm-repo", shlex.quote(_llvm_src_dir)),
         ("%repo-root", shlex.quote(_repo_root)),
     ]

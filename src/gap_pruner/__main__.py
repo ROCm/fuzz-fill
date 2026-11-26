@@ -9,13 +9,17 @@ from gap_pruner.noncoverable_spans import find_noncoverable_lines
 
 
 def prune_noncoverable_lines(
-    rows: list[dict[str, str]], llvm_src_dir: Path | None
+    rows: list[dict[str, str]],
+    llvm_src_dir: Path | None,
+    prune_control_flow: bool = False,
 ) -> list[dict[str, str]]:
     """Drop rows whose line is non-coverable per ``find_noncoverable_lines``.
 
     A relative ``file`` is resolved against ``llvm_src_dir``; an absolute one
     is used as-is and needs no ``llvm_src_dir`` at all. Each file is scanned
     once, however many rows point at it.
+
+    ``prune_control_flow`` opts into pruning if/while/for condition spans.
 
     Coverage gaps can land in files outside the llvm-project checkout entirely
     (e.g. libstdc++ headers pulled in by template instantiation), which may not
@@ -32,7 +36,9 @@ def prune_noncoverable_lines(
             if not path.is_absolute():
                 path = llvm_src_dir / path
             try:
-                pruned_lines_by_file[file] = find_noncoverable_lines(path)
+                pruned_lines_by_file[file] = find_noncoverable_lines(
+                    path, prune_control_flow=prune_control_flow
+                )
             except OSError as e:
                 print(f"warning: gap-pruner: skipping unreadable file {file}: {e}", file=sys.stderr)
                 pruned_lines_by_file[file] = set()
@@ -58,6 +64,11 @@ def main(argv: list[str] | None = None) -> int:
         help="LLVM project source checkout, required only if input_csv has relative file paths",
     )
     parser.add_argument("--output", required=True, type=Path, help="Where to write the pruned CSV")
+    parser.add_argument(
+        "--prune-control-flow",
+        action="store_true",
+        help="Also prune if/while/for condition spans.",
+    )
     args = parser.parse_args(argv)
 
     if args.llvm_src_dir is not None and not args.llvm_src_dir.is_dir():
@@ -77,7 +88,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.llvm_src_dir is None and any(not Path(r["file"]).is_absolute() for r in rows):
         parser.error("input_csv has relative file paths, --llvm-src-dir is required")
 
-    rows = prune_noncoverable_lines(rows, args.llvm_src_dir)
+    rows = prune_noncoverable_lines(
+        rows, args.llvm_src_dir, prune_control_flow=args.prune_control_flow
+    )
 
     with args.output.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, lineterminator="\n")
