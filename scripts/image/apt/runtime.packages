@@ -1,5 +1,7 @@
 binutils
+ca-certificates
 creduce
+curl
 git
 libgcc-s1
 libstdc++6
