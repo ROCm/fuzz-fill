@@ -1,4 +1,4 @@
-# REQUIRES: e2e, e2e-bootstrap
+# REQUIRES: e2e, e2e-bootstrap, gh-token
 # COM: End-to-end PR gap finding for llvm/llvm-project#230193 (rule 3).
 # COM: Clones the PR, classifies scope with --auto, builds SanitizerCoverage,
 # COM: runs gap finding once, and checks that the added SROA.cpp line is covered.
@@ -43,4 +43,4 @@
 
 # COM: Drop the llvm-project clone and sancov build after coverage runs to save disk space.
 # COM: Delete at the end so it is deleted only on success.
-# RUN rm -rf %t/llvm-project %t/build-sancov %t/build-sancov-helpers
+# RUN: rm -rf %t/llvm-project %t/build-sancov %t/build-sancov-helpers
