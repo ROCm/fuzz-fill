@@ -32,8 +32,9 @@ gap_finding_local_try_parse_extra() {
 gap_finding_local_usage_llvm_options() {
     cat <<EOF
   --llvm-repo <path>            llvm-project checkout (required)
-  --llvm-bin <path>             Coverage build bin dir with llvm-profdata/llvm-cov (required)
-  --instrumented-bin-dir <path> SanitizerCoverage bin dir for gap-fill tools (required)
+  --llvm-bin <path>             Source-coverage build bin dir (required; parent is --build-dir)
+  --instrumented-bin-dir <path> SanitizerCoverage bin dir (optional for baseline/PR finding;
+                                required by gap-fill / reduce entrypoints)
 EOF
 }
 
@@ -135,7 +136,7 @@ gap_finding_local_validate_required_paths() {
         echo "error: --llvm-bin is required" >&2
         missing=1
     fi
-    if [[ -z "$instrumented_bin_dir" ]]; then
+    if [[ "${REQUIRE_INSTRUMENTED_BIN_DIR:-0}" -eq 1 && -z "$instrumented_bin_dir" ]]; then
         echo "error: --instrumented-bin-dir is required" >&2
         missing=1
     fi

@@ -19,7 +19,7 @@ source "${SCRIPT_DIR}/lib/coverage-baseline.sh"
 usage() {
     cat <<EOF
 Usage: $(basename "$0") --output-dir <path> --llvm-repo <path> --llvm-bin <path> \\
-    --instrumented-bin-dir <path> [options]
+    [options]
 
 Run coverage baseline locally (no Docker).
 Artifacts are written under --output-dir/baseline/.
@@ -35,15 +35,13 @@ Examples:
   $(basename "$0") \\
       --output-dir ./data/baseline-run \\
       --llvm-repo /path/llvm-project \\
-      --llvm-bin /path/llvm-project/build/bin \\
-      --instrumented-bin-dir /path/llvm-project/build-sancov/bin \\
+      --llvm-bin /path/llvm-project/build-coverage/bin \\
       -j "\$(nproc)"
 
   $(basename "$0") \\
       --output-dir ./data/baseline-codegen \\
       --llvm-repo /path/llvm-project \\
-      --llvm-bin /path/llvm-project/build/bin \\
-      --instrumented-bin-dir /path/llvm-project/build-sancov/bin \\
+      --llvm-bin /path/llvm-project/build-coverage/bin \\
       --filter CodeGen/AMDGPU -j "\$(nproc)"
 EOF
 }

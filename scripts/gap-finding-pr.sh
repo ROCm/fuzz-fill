@@ -55,7 +55,7 @@ gap_finding_local_try_parse_extra() {
 usage() {
     cat <<EOF
 Usage: $(basename "$0") --output-dir <path> --llvm-repo <path> --llvm-bin <path> \\
-    --instrumented-bin-dir <path> (--commit <rev> | --pr-id <n>) [options]
+    (--commit <rev> | --pr-id <n>) [options]
 
 Run PR gap finding locally (no Docker): baseline, added_lines, target-lines.
 Artifacts are written under --output-dir/.
@@ -76,7 +76,6 @@ Examples:
       --output-dir ./data/gap-finding-pr \\
       --llvm-repo /path/llvm-project \\
       --llvm-bin /path/llvm-project/build-coverage/bin \\
-      --instrumented-bin-dir /path/llvm-project/build-sancov/bin \\
       --commit HEAD \\
       --auto -j "\$(nproc)"
 
@@ -84,7 +83,6 @@ Examples:
       --output-dir ./data/gap-finding-pr-214457 \\
       --llvm-repo /path/llvm-project \\
       --llvm-bin /path/to/pr-tree/build-coverage/bin \\
-      --instrumented-bin-dir /path/to/pr-tree/build-sancov/bin \\
       --pr-id 214457 \\
       --auto -j "\$(nproc)"
 EOF

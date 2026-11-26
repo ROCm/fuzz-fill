@@ -126,11 +126,10 @@ ARG USERNAME=developer
 COPY scripts/image/install-apt-packages.sh /usr/local/lib/fuzz-fill-image/
 COPY scripts/image/apt/ /usr/local/lib/fuzz-fill-image/apt/
 COPY scripts/image/install-llvm-apt.sh /usr/local/lib/fuzz-fill-image/
+COPY scripts/image/install-cmake.sh /usr/local/lib/fuzz-fill-image/
 RUN /usr/local/lib/fuzz-fill-image/install-apt-packages.sh runtime \
     && /usr/local/lib/fuzz-fill-image/install-llvm-apt.sh "${LLVM_APT_MAJOR}" \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends "llvm-${LLVM_APT_MAJOR}" \
-    && rm -rf /var/lib/apt/lists/* \
+    && /usr/local/lib/fuzz-fill-image/install-cmake.sh \
     && groupadd -g "${GID}" "${USERNAME}" \
     && useradd -l -m -u "${UID}" -g "${GID}" -s /bin/bash "${USERNAME}"
 

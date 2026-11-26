@@ -1,8 +1,8 @@
 # REQUIRES: e2e, e2e-bootstrap, gh-token
 # COM: End-to-end PR gap finding for llvm/llvm-project#214457.
-# COM: Clones llvm-project, classifies scope with --auto, builds SanitizerCoverage,
-# COM: runs gap finding, and checks that the PR's added line in SIFoldOperands.cpp
-# COM: is reported as uncovered.
+# COM: Clones llvm-project, classifies scope with --auto, builds source-coverage
+# COM: and SanitizerCoverage trees, runs gap finding / fill / reduce, and checks
+# COM: that the PR's added line in SIFoldOperands.cpp is reported as uncovered.
 
 # RUN: rm -rf %t && mkdir -p %t
 # RUN: bash -c 'echo "pr-214457 CLONE $(date -u +%H:%M:%%S)" >> /work/e2e-progress.log || true'
@@ -15,14 +15,13 @@
 # SCOPE: rule=1
 # SCOPE: backends=X86;AMDGPU
 # SCOPE: allowlist={{.*}}allowlist-llvm.txt
-# COM: Read backends with command substitution. eval splits X86;AMDGPU on the semicolon.
 # COM: FUZZ_FILL_E2E_JOBS (set by CI) caps ninja and the later lit/merge -j.
-# RUN: bash -c 'set -o pipefail; echo "pr-214457 BUILD $(date -u +%H:%M:%%S)" >> /work/e2e-progress.log || true; BACKENDS=$(sed -n "s/^backends=//p" %t/scope.txt); ALLOWLIST=$(sed -n "s/^allowlist=//p" %t/scope.txt); REPO_ROOT=%repo-root; source "$REPO_ROOT/scripts/lib/gap-scope.sh"; if test -x %t/build-sancov/bin/llvm-lit; then echo "pr-214457 BUILD skipped" >> /work/e2e-progress.log || true; else projects="$(gap_scope_enable_projects_for_allowlist "$ALLOWLIST")"; build_args=("$REPO_ROOT/scripts/build-llvm-sancov.sh" "$ALLOWLIST" %t/llvm-project %t/build-sancov --bootstrap-bin %e2e-bootstrap-bin --targets "$BACKENDS"); if [[ -n "$projects" ]]; then build_args+=(--enable-projects "$projects"); fi; if [[ "${FUZZ_FILL_E2E_CCACHE:-}" == 1 ]]; then build_args+=(--enable-ccache); fi; if [[ "${FUZZ_FILL_E2E_CCACHE_COMPILER_CHECK_VERSION:-}" == 1 ]]; then build_args+=(--ccache-compiler-check-version); fi; if [[ -n "${FUZZ_FILL_E2E_JOBS:-}" ]]; then build_args+=("${FUZZ_FILL_E2E_JOBS}"); fi; if [[ -w /work ]]; then stdbuf -oL -eL "${build_args[@]}" 2>&1 | stdbuf -oL tee -a /work/e2e-progress.log; else "${build_args[@]}"; fi; fi'
-# RUN: grep '^LLVM_TARGETS_TO_BUILD:' %t/build-sancov/CMakeCache.txt | %FileCheck %s --check-prefix=TARGETS
+# RUN: bash -c 'set -o pipefail; echo "pr-214457 BUILD $(date -u +%H:%M:%%S)" >> /work/e2e-progress.log || true; BACKENDS=$(sed -n "s/^backends=//p" %t/scope.txt); ALLOWLIST=$(sed -n "s/^allowlist=//p" %t/scope.txt); %repo-root/scripts/e2e-build-pr-llvm.sh %t/llvm-project %t/build-coverage "$ALLOWLIST" "$BACKENDS" %e2e-bootstrap-bin --sancov-build %t/build-sancov'
+# RUN: grep '^LLVM_TARGETS_TO_BUILD:' %t/build-coverage/CMakeCache.txt | %FileCheck %s --check-prefix=TARGETS
 # TARGETS: LLVM_TARGETS_TO_BUILD:STRING=X86;AMDGPU
 # COM: setarch -R: GlobalISel CSE hashes block pointers, so coverage bits change with ASLR.
-# RUN: setarch x86_64 -R bash -c 'set -o pipefail; echo "pr-214457 GAP-FINDING-PR $(date -u +%H:%M:%%S)" >> /work/e2e-progress.log || true; args=("%repo-root/scripts/gap-finding-pr.sh" --output-dir %t/out --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin --commit "$(cat %t/squash-commit)" --auto); if [[ -n "${FUZZ_FILL_E2E_JOBS:-}" ]]; then args+=(-j "${FUZZ_FILL_E2E_JOBS}"); fi; if [[ -w /work ]]; then stdbuf -oL -eL "${args[@]}" 2>&1 | stdbuf -oL tee -a /work/e2e-progress.log; else "${args[@]}"; fi'
-# RUN: setarch x86_64 -R bash -c 'set -o pipefail; echo "pr-214457 GAP-FINDING-BASELINE $(date -u +%H:%M:%%S)" >> /work/e2e-progress.log || true; args=("%repo-root/scripts/gap-finding-baseline.sh" --output-dir %t/out-direct --llvm-repo %t/llvm-project --llvm-bin %t/build-sancov/bin --instrumented-bin-dir %t/build-sancov/bin); if [[ -n "${FUZZ_FILL_E2E_JOBS:-}" ]]; then args+=(-j "${FUZZ_FILL_E2E_JOBS}"); fi; if [[ -w /work ]]; then stdbuf -oL -eL "${args[@]}" 2>&1 | stdbuf -oL tee -a /work/e2e-progress.log; else "${args[@]}"; fi'
+# RUN: setarch x86_64 -R bash -c 'set -o pipefail; echo "pr-214457 GAP-FINDING-PR $(date -u +%H:%M:%%S)" >> /work/e2e-progress.log || true; export FUZZ_FILL_HOST_BIN=%e2e-bootstrap-bin; args=("%repo-root/scripts/gap-finding-pr.sh" --output-dir %t/out --llvm-repo %t/llvm-project --llvm-bin %t/build-coverage/bin --commit "$(cat %t/squash-commit)" --auto); if [[ -n "${FUZZ_FILL_E2E_JOBS:-}" ]]; then args+=(-j "${FUZZ_FILL_E2E_JOBS}"); fi; if [[ -w /work ]]; then stdbuf -oL -eL "${args[@]}" 2>&1 | stdbuf -oL tee -a /work/e2e-progress.log; else "${args[@]}"; fi'
+# RUN: setarch x86_64 -R bash -c 'set -o pipefail; echo "pr-214457 GAP-FINDING-BASELINE $(date -u +%H:%M:%%S)" >> /work/e2e-progress.log || true; export FUZZ_FILL_HOST_BIN=%e2e-bootstrap-bin; args=("%repo-root/scripts/gap-finding-baseline.sh" --output-dir %t/out-direct --llvm-repo %t/llvm-project --llvm-bin %t/build-coverage/bin); if [[ -n "${FUZZ_FILL_E2E_JOBS:-}" ]]; then args+=(-j "${FUZZ_FILL_E2E_JOBS}"); fi; if [[ -w /work ]]; then stdbuf -oL -eL "${args[@]}" 2>&1 | stdbuf -oL tee -a /work/e2e-progress.log; else "${args[@]}"; fi'
 # RUN: %coverage export-address-map --output-dir %t/out/baseline --tool %t/build-sancov/bin/llc --sancov %t/build-sancov/bin/sancov --llvm-src %t/llvm-project --output %t/out/baseline/llc_address_line_map.csv
 
 # RUN: test -f %t/out/baseline/line_coverage_uncovered.csv
@@ -86,6 +85,6 @@
 # RUN: setarch x86_64 -R %t/gap-fill-baseline/reduced/t-00001-test_0_0/interesting_ir.sh %t/gap-fill-baseline/reduced/t-00001-test_0_0/reduced/reduced.ll 2>&1 | %FileCheck %s --check-prefix=REDUCED_COVERAGE
 # REDUCED_COVERAGE: COVERED (0x{{[0-9a-fA-F]+}}) is present in sancov --print output
 
-# COM: Drop the llvm-project clone and sancov build after coverage runs to save disk space.
+# COM: Drop the llvm-project clone and builds after coverage runs to save disk space.
 # COM: Delete at the end so it is deleted only on success.
-# RUN: rm -rf %t/llvm-project %t/build-sancov %t/build-sancov-helpers
+# RUN: rm -rf %t/llvm-project %t/build-coverage %t/build-sancov %t/build-sancov-helpers
