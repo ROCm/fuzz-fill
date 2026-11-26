@@ -68,16 +68,10 @@ docker_image_validate_build_flags() {
         exit 1
     fi
     if [[ "${auto_scope:-0}" -eq 1 ]]; then
-        if [[ -n "${backends:-}" || ${#tests[@]} -gt 0 || -n "${allowlist:-}" ]]; then
-            echo "error: --auto cannot be combined with --backends, --tests, or --allowlist" >&2
+        if [[ -n "${backends:-}" || -n "${allowlist:-}" ]]; then
+            echo "error: --auto cannot be combined with --backends or --allowlist" >&2
             exit 1
         fi
-    fi
-}
-
-docker_image_read_test_suites() {
-    if ! docker run --rm --entrypoint cat "${image_ref}" /work/.gap-test-suites 2>/dev/null; then
-        printf '%s\n' "llvm/test"
     fi
 }
 
@@ -96,7 +90,7 @@ docker_image_ensure() {
                 echo "=== build PR image ==="
             fi
 
-            local build_args build_rc suite
+            local build_args build_rc
             build_args=(
                 --llvm-repo "$llvm_repo"
                 --pr-id "$pr_id"
@@ -110,9 +104,6 @@ docker_image_ensure() {
                 if [[ -n "${allowlist:-}" ]]; then
                     build_args+=(--allowlist "$allowlist")
                 fi
-                for suite in "${tests[@]}"; do
-                    build_args+=(--tests "$suite")
-                done
             fi
             if [[ -n "${github_repo:-}" ]]; then
                 build_args+=(--github-repo "$github_repo")

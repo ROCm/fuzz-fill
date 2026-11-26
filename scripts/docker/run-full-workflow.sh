@@ -106,8 +106,7 @@ echo "=== gap finding (baseline) ==="
 "${SCRIPT_DIR}/gap-finding-baseline.sh" \
     "${BIND_REPO[@]}" \
     --output-dir "$GAP_FINDING_OUT" \
-    --tests llvm/test \
-    --lit-filter CodeGen/AMDGPU/loop \
+    --filter CodeGen/AMDGPU/loop \
     -j "$J"
 
 echo "=== gap filling (corpus=${CORPUS}, n=${GAP_FILL_N}) ==="
@@ -115,7 +114,7 @@ echo "=== gap filling (corpus=${CORPUS}, n=${GAP_FILL_N}) ==="
     "${BIND_REPO[@]}" \
     --output-dir "$GAP_FILL_OUT" \
     --line-coverage-uncovered-csv "$UNCOVERED_CSV" \
-    --llc-address-line-map-csv "$LLC_MAP_CSV" \
+    --address-line-map-csv "$LLC_MAP_CSV" \
     --candidate-tests-dir "$CORPUS" \
     -n "$GAP_FILL_N" \
     -j "$J"

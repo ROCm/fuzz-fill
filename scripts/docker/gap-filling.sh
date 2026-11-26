@@ -16,11 +16,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 if [[ "${IN_CONTAINER:-}" == 1 ]]; then
+    # shellcheck source=scripts/lib/docker-coverage-env.sh
+    source "${REPO_ROOT}/scripts/lib/docker-coverage-env.sh"
     # shellcheck source=scripts/lib/gap-filling.sh
     source "${REPO_ROOT}/scripts/lib/gap-filling.sh"
 
     : "${UNCOVERED_CSV:?UNCOVERED_CSV is required}"
     : "${LLC_MAP_CSV:?LLC_MAP_CSV is required}"
+
+    docker_export_coverage_env
 
     run_candidate_test /mounted-output/candidate_tests /mounted-candidate-tests "${CANDIDATE_N:-}"
 
@@ -69,8 +73,8 @@ Required:
   --output-dir <path>           Host output directory (created if missing)
   --line-coverage-uncovered-csv <path>
                                 Uncovered-lines CSV (``file``, ``line`` columns)
-  --llc-address-line-map-csv <path>
-                                LLC address-to-line map CSV from the same baseline run
+  --address-line-map-csv <path>
+                                Address-to-line map CSV from the same baseline run
   --candidate-tests-dir <path>  Host corpus root (bind-mounted read-only by default)
 
 Image (one of):
@@ -82,9 +86,8 @@ Image build (optional; reuses existing image when omitted):
   --force-build                 Rebuild PR image even when the tag already exists
   --keep-image                  Keep PR image after run (default: remove when --build-image)
   --llvm-repo <path>            Local llvm-project clone (required with --build-image)
-  --auto                        Derive backends, tests, and allowlist from the PR
+  --auto                        Derive backends and allowlist from the PR
   --backends <list>             LLVM_TARGETS_TO_BUILD for --build-image
-  --tests <suite>               Lit suite for --build-image (repeatable)
   --allowlist <path|preset>     Allowlist for --build-image
   --github-repo <owner/repo>    GitHub repo hosting the PR (default: llvm/llvm-project)
   --image-name <name>           Image name when using --pr-id (default: fuzz-fill-test)
@@ -101,17 +104,17 @@ Options:
 Examples:
   $(basename "$0") --output-dir ./data \\
       --line-coverage-uncovered-csv line_coverage_uncovered.csv \\
-      --llc-address-line-map-csv llc_address_line_map.csv \\
+      --address-line-map-csv llc_address_line_map.csv \\
       --candidate-tests-dir /path/to/corpus -j "\$(nproc)"
 
   $(basename "$0") --output-dir ./data \\
       --line-coverage-uncovered-csv line_coverage_uncovered.csv \\
-      --llc-address-line-map-csv llc_address_line_map.csv \\
+      --address-line-map-csv llc_address_line_map.csv \\
       --candidate-tests-dir /path/to/corpus -n 100 -j "\$(nproc)"
 
   $(basename "$0") --pr-id 203468 --output-dir ./data \\
       --line-coverage-uncovered-csv line_coverage_uncovered.csv \\
-      --llc-address-line-map-csv llc_address_line_map.csv \\
+      --address-line-map-csv llc_address_line_map.csv \\
       --candidate-tests-dir /path/to/corpus -n 100 -j "\$(nproc)"
 EOF
 }
@@ -143,8 +146,8 @@ while [[ $# -gt 0 ]]; do
             line_coverage_uncovered_csv="$2"
             shift 2
             ;;
-        --llc-address-line-map-csv)
-            [[ $# -ge 2 ]] || { echo "error: --llc-address-line-map-csv requires a value" >&2; exit 2; }
+        --address-line-map-csv)
+            [[ $# -ge 2 ]] || { echo "error: --address-line-map-csv requires a value" >&2; exit 2; }
             llc_address_line_map_csv="$2"
             shift 2
             ;;
@@ -210,7 +213,7 @@ fi
 resolve_gap_profile_csv_paths line_coverage_uncovered_csv llc_address_line_map_csv
 validate_jobs "$jobs"
 
-DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --auto (or --backends/--tests/--allowlist)"
+DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --auto (or --backends/--allowlist)"
 docker_image_cli_prepare
 
 container_uncovered_csv="/mounted-profile/line_coverage_uncovered.csv"

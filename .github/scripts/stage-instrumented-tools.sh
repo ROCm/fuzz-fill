@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Stage instrumented opt/llc (and clang/clang++ plus their resource headers
-# when built) and Release helpers (sancov, FileCheck).
+# Stage coverage opt/llc (and clang/clang++ plus their resource headers when built).
 # Usage:
 #   stage-instrumented-tools.sh \
 #     --bin-dir <build/bin> \
@@ -8,10 +7,8 @@
 #     --commit-file <path> \
 #     --out-dir <staging dir> \
 #     [--github-repo <owner/name>] \
-#     [--allowlist <path or name>] \
 #     [--targets <list>] \
 #     [--enable-projects <list>] \
-#     [--allow-inline true|false] \
 #     [--pr-id <n>] \
 #     [--pr-head-file <path>]
 
@@ -22,10 +19,8 @@ LLVM_DIR=""
 COMMIT_FILE=""
 OUT_DIR=""
 GITHUB_REPO=""
-ALLOWLIST=""
 TARGETS=""
 ENABLE_PROJECTS=""
-ALLOW_INLINE=""
 PR_ID=""
 PR_HEAD_FILE=""
 
@@ -33,8 +28,8 @@ usage() {
     cat <<EOF
 Usage:
   $(basename "$0") --bin-dir <path> --llvm-dir <path> --commit-file <path> --out-dir <path>
-                 [--github-repo <owner/name>] [--allowlist <path>] [--targets <list>]
-                 [--enable-projects <list>] [--allow-inline true|false]
+                 [--github-repo <owner/name>] [--targets <list>]
+                 [--enable-projects <list>]
                  [--pr-id <n>] [--pr-head-file <path>]
 EOF
 }
@@ -46,10 +41,8 @@ while [[ $# -gt 0 ]]; do
         --commit-file) COMMIT_FILE="$2"; shift 2 ;;
         --out-dir) OUT_DIR="$2"; shift 2 ;;
         --github-repo) GITHUB_REPO="$2"; shift 2 ;;
-        --allowlist) ALLOWLIST="$2"; shift 2 ;;
         --targets) TARGETS="$2"; shift 2 ;;
         --enable-projects) ENABLE_PROJECTS="$2"; shift 2 ;;
-        --allow-inline) ALLOW_INLINE="$2"; shift 2 ;;
         --pr-id) PR_ID="$2"; shift 2 ;;
         --pr-head-file) PR_HEAD_FILE="$2"; shift 2 ;;
         --help|-h) usage; exit 0 ;;
@@ -105,7 +98,7 @@ rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR/bin"
 
 # Preserve symlinks (clang++ is often a symlink to clang).
-for tool in opt llc sancov FileCheck; do
+for tool in opt llc; do
     if [[ ! -x "$BIN_DIR/$tool" ]]; then
         echo "error: missing executable: $BIN_DIR/$tool" >&2
         exit 1
@@ -157,33 +150,22 @@ if [[ -n "$pr_head" ]]; then
     printf '%s\n' "$pr_head" > "$OUT_DIR/pr-head.txt"
 fi
 
-allowlist_name=""
-if [[ -n "$ALLOWLIST" ]]; then
-    allowlist_name="$(basename "$ALLOWLIST")"
-fi
-
-no_inline="enabled"
-if [[ "$ALLOW_INLINE" == "true" ]]; then
-    no_inline="omitted"
-fi
-
 {
-    echo "Instrumented LLVM tools for fuzz-fill SanitizerCoverage"
+    echo "Coverage LLVM tools for fuzz-fill source-based coverage"
     echo
     echo "Contents:"
-    echo "  bin/opt, bin/llc  RelWithDebInfo, SanitizerCoverage (bb,trace-pc-guard)"
+    echo "  bin/opt, bin/llc  Release, source coverage instrumentation"
     if [[ "$staged_clang" -eq 1 ]]; then
-        echo "  bin/clang, bin/clang++  RelWithDebInfo, SanitizerCoverage (bb,trace-pc-guard)"
+        echo "  bin/clang, bin/clang++  Release, source coverage instrumentation"
         echo "  $clang_resource_rel  Clang builtin headers (resource dir) for bin/clang"
     fi
-    echo "  bin/sancov, bin/FileCheck  Release helpers without SanitizerCoverage"
     echo "  LICENSE.TXT       License of the llvm-project revision that produced these binaries"
     if [[ -n "$pr_head" ]]; then
         echo "  pr-head.txt       GitHub PR head SHA these binaries were built from"
     fi
     echo
     echo "These are not unmodified upstream release binaries. opt, llc, and (when present)"
-    echo "clang/clang++ were compiled with SanitizerCoverage for coverage measurement."
+    echo "clang/clang++ were compiled with LLVM source-based coverage instrumentation."
     echo "System libraries they link (libstdc++, zlib, zstd, lzma, …) are not included."
     echo
     if [[ -n "$GITHUB_REPO" ]]; then
@@ -198,20 +180,13 @@ fi
     else
         echo "commit: $commit"
     fi
-    if [[ -n "$allowlist_name" ]]; then
-        echo "allowlist: $allowlist_name"
-    fi
     if [[ -n "$TARGETS" ]]; then
         echo "targets: $TARGETS"
     fi
     echo "enable_projects: ${ENABLE_PROJECTS:-<none>}"
-    if [[ -n "$ALLOW_INLINE" ]]; then
-        echo "allow_inline: $ALLOW_INLINE"
-        echo "-fno-inline: $no_inline"
-    fi
 } > "$OUT_DIR/README.txt"
 
-echo "Instrumented tools staged at $OUT_DIR:"
+echo "Coverage tools staged at $OUT_DIR:"
 find "$OUT_DIR" \( -type f -o -type l \) -not -path "$OUT_DIR/lib/clang/*" | LC_ALL=C sort
 if [[ -n "$clang_resource_rel" ]]; then
     n_headers="$(find "$OUT_DIR/$clang_resource_rel" -type f | wc -l)"

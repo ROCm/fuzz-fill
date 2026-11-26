@@ -12,18 +12,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 if [[ "${IN_CONTAINER:-}" == 1 ]]; then
+    # shellcheck source=scripts/lib/docker-coverage-env.sh
+    source "${REPO_ROOT}/scripts/lib/docker-coverage-env.sh"
     # shellcheck source=scripts/lib/coverage-baseline.sh
     source "${REPO_ROOT}/scripts/lib/coverage-baseline.sh"
 
-    mapfile -t lit_filters < /mounted-output/.lit-filters
-    if [[ -s /mounted-output/.gap-test-suites ]]; then
-        mapfile -t tests < /mounted-output/.gap-test-suites
-    fi
+    docker_export_coverage_env
+    mapfile -t filters < /mounted-output/.filters
 
-    export LIT_ALLOW_FAILURES=1
-
-    echo "=== coverage baseline (${#lit_filters[@]} lit-filter prefix(es)) ==="
-    run_coverage_baseline /mounted-output/baseline "${lit_filters[@]}"
+    echo "=== coverage baseline (${#filters[@]} filter(s)) ==="
+    run_coverage_baseline /mounted-output/baseline "${filters[@]}"
     exit 0
 fi
 
@@ -48,9 +46,8 @@ $(docker_gap_finding_usage_image_build_options)
 
 Options:
   --bind-repo                   Mount the local fuzz-fill checkout at ${CONTAINER_WORKDIR}
-  --tests <suite>               Lit suite (<project>/test or a subdirectory; default: image /work/.gap-test-suites)
-  --lit-filter <regex>          llvm-lit --filter= regex for every suite; repeatable
-  -j <n>, --jobs <n>            Parallel jobs for llvm-lit and ninja (build)
+  --filter <regex>              Lit --filter= regex for check-all; repeatable
+  -j <n>, --jobs <n>            Parallel jobs for check-all and ninja (build)
   --help, -h                    Show this help
 
 Examples:
@@ -71,10 +68,8 @@ if ! docker_gap_finding_validate_host_prerequisites; then
     exit 1
 fi
 
-DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --auto (or --backends/--tests/--allowlist)"
+DOCKER_IMAGE_MISSING_HINT="build with ${SCRIPT_DIR}/build-image.sh, or pass --build-image with --llvm-repo and --auto (or --backends/--allowlist)"
 docker_image_cli_prepare
-
-docker_gap_default_lit_suites_from_image
 
 docker_gap_finding_prepare_output_dir
 docker_gap_finding_write_scope_files
@@ -84,9 +79,8 @@ docker_env=(-e "IN_CONTAINER=1")
 docker_gap_finding_prepare_and_run docker_env
 
 echo "Image: ${image_ref}"
-echo "LIT suites: ${tests[*]}"
-if [[ ${#lit_filters[@]} -gt 0 ]]; then
-    echo "LIT filters: ${lit_filters[*]}"
+if [[ ${#filters[@]} -gt 0 ]]; then
+    echo "Filters: ${filters[*]}"
 fi
 echo "Wrote ${output_dir}/baseline/"
 

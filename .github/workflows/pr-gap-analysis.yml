@@ -22,16 +22,9 @@ on:
         required: false
         type: string
         default: llvm/llvm-project
-      allow_inline:
-        description: >-
-          Allow inlining in the instrumented LLVM build (passes --allow-inline
-          to build-llvm-sancov.sh). Off by default so the build keeps -fno-inline.
-        required: false
-        type: boolean
-        default: false
       build_only:
         description: >-
-          Only build the instrumented LLVM tools and upload them as an
+          Only build the coverage LLVM tools and upload them as an
           artifact; skip gap finding, reports, and issue filing.
         required: false
         type: boolean
@@ -43,9 +36,8 @@ on:
         default: false
       upload_tools:
         description: >-
-          Upload instrumented opt/llc (and clang/clang++ when built) plus
-          Release sancov/FileCheck as a .tar.xz (large; ~1.2 GB uncompressed,
-          off by default)
+          Upload coverage opt/llc (and clang/clang++ with resource headers when
+          built) as a .tar.xz (large; off by default)
         required: false
         type: boolean
         default: false
@@ -79,8 +71,8 @@ env:
   LLVM_RELEASE_BIN: /usr/lib/llvm-24/bin
   LLVM_MIRROR_DIR: /work/llvm-mirror
   PR_LLVM_DIR: /work/pr-llvm
-  PR_BUILD_DIR: /work/build-sancov
-  PR_BUILD_BIN: /work/build-sancov/bin
+  PR_BUILD_DIR: /work/build-coverage
+  PR_BUILD_BIN: /work/build-coverage/bin
   OUT_DIR: /work/out
   SQUASH_COMMIT_FILE: /work/squash-commit
   VENV_DIR: /work/fuzz-fill-venv
@@ -115,7 +107,10 @@ jobs:
         run: ./scripts/image/install-cmake.sh
 
       - name: Install apt.llvm.org bootstrap
-        run: ./scripts/image/install-llvm-apt.sh "${LLVM_APT_MAJOR}"
+        run: |
+          ./scripts/image/install-llvm-apt.sh "${LLVM_APT_MAJOR}"
+          apt-get update
+          apt-get install -y --no-install-recommends "llvm-${LLVM_APT_MAJOR}"
 
       - name: Install gh
         run: |
@@ -220,54 +215,45 @@ jobs:
         id: cache-ccache
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: fuzz-fill-llvm-sancov-ccache-pr-${{ env.LLVM_APT_MAJOR }}-${{ github.run_id }}
+          key: fuzz-fill-llvm-coverage-ccache-pr-${{ env.LLVM_APT_MAJOR }}-${{ github.run_id }}
           restore-keys: |
-            fuzz-fill-llvm-sancov-ccache-pr-${{ env.LLVM_APT_MAJOR }}-
+            fuzz-fill-llvm-coverage-ccache-pr-${{ env.LLVM_APT_MAJOR }}-
 
       - name: Reset ccache stats for this run
         if: steps.scope.outputs.action == 'run'
         run: ccache --zero-stats
 
-      - name: Build instrumented LLVM for PR
+      - name: Build coverage LLVM for PR
         if: steps.scope.outputs.action == 'run'
         env:
           SCOPE_BACKENDS: ${{ steps.scope.outputs.backends }}
           SCOPE_ALLOWLIST: ${{ steps.scope.outputs.allowlist }}
-          ALLOW_INLINE: ${{ inputs.allow_inline }}
         run: |
+          export REPO_ROOT="${GITHUB_WORKSPACE}"
+          source ./scripts/lib/gap-scope.sh
+          enable_projects="$(gap_scope_enable_projects_for_allowlist "${SCOPE_ALLOWLIST}")"
           build_args=(
-            "${SCOPE_ALLOWLIST}"
             "${PR_LLVM_DIR}"
             "${PR_BUILD_DIR}"
             --bootstrap-bin "${LLVM_RELEASE_BIN}"
             --targets "${SCOPE_BACKENDS}"
+            --enable-projects "${enable_projects}"
+            --disable-clangir
             --enable-ccache
             --ccache-compiler-check-version
           )
-          case "$(basename "${SCOPE_ALLOWLIST}")" in
-            allowlist-clang.txt|allowlist-llvm-clang.txt)
-              build_args+=(--enable-projects clang)
-              ;;
-          esac
-          if [[ "${ALLOW_INLINE}" == "true" ]]; then
-            build_args+=(--allow-inline)
-          fi
           build_args+=("$(nproc)")
-          ./scripts/build-llvm-sancov.sh "${build_args[@]}"
+          ./scripts/build-llvm-coverage.sh "${build_args[@]}"
 
-      - name: Stage instrumented tools artifact
+      - name: Stage coverage tools artifact
         if: (inputs.upload_tools || inputs.build_only) && steps.scope.outputs.action == 'run'
         env:
           SCOPE_BACKENDS: ${{ steps.scope.outputs.backends }}
           SCOPE_ALLOWLIST: ${{ steps.scope.outputs.allowlist }}
-          ALLOW_INLINE: ${{ inputs.allow_inline }}
         run: |
-          enable_projects=""
-          case "$(basename "${SCOPE_ALLOWLIST}")" in
-            allowlist-clang.txt|allowlist-llvm-clang.txt)
-              enable_projects="clang"
-              ;;
-          esac
+          export REPO_ROOT="${GITHUB_WORKSPACE}"
+          source ./scripts/lib/gap-scope.sh
+          enable_projects="$(gap_scope_enable_projects_for_allowlist "${SCOPE_ALLOWLIST}")"
           chmod +x .github/scripts/stage-instrumented-tools.sh
           .github/scripts/stage-instrumented-tools.sh \
             --bin-dir "${PR_BUILD_BIN}" \
@@ -275,10 +261,8 @@ jobs:
             --commit-file "${SQUASH_COMMIT_FILE}" \
             --out-dir "${INSTRUMENTED_TOOLS_DIR}" \
             --github-repo "${INPUT_GITHUB_REPO}" \
-            --allowlist "${SCOPE_ALLOWLIST}" \
             --targets "${SCOPE_BACKENDS}" \
             --enable-projects "${enable_projects}" \
-            --allow-inline "${ALLOW_INLINE}" \
             --pr-id "${INPUT_PR_ID}" \
             --pr-head-file /work/pr-head/pr-head.txt
 
@@ -326,10 +310,11 @@ jobs:
           LIT_ALLOW_FAILURES: "1"
         run: |
           source "${VENV_DIR}/bin/activate"
+          export FUZZ_FILL_COVERAGE_BUILD_DIR="${PR_BUILD_DIR}"
           ./scripts/gap-finding-pr.sh \
             --output-dir "${OUT_DIR}" \
             --llvm-repo "${PR_LLVM_DIR}" \
-            --llvm-bin "${PR_BUILD_BIN}" \
+            --llvm-bin "${LLVM_RELEASE_BIN}" \
             --instrumented-bin-dir "${PR_BUILD_BIN}" \
             --commit "$(cat "${SQUASH_COMMIT_FILE}")" \
             --auto \
@@ -339,17 +324,14 @@ jobs:
         if: ${{ inputs.generate_html && !inputs.build_only && steps.scope.outputs.action == 'run' }}
         env:
           SCOPE_BACKENDS: ${{ steps.scope.outputs.backends }}
-          SCOPE_TESTS: ${{ steps.scope.outputs.tests }}
           SCOPE_ALLOWLIST: ${{ steps.scope.outputs.allowlist }}
         run: |
           source "${VENV_DIR}/bin/activate"
+          export REPO_ROOT="${GITHUB_WORKSPACE}"
+          source ./scripts/lib/gap-scope.sh
           pr_head_ref="$(gh api "repos/${INPUT_GITHUB_REPO}/pulls/${INPUT_PR_ID}" --jq '.head.ref')"
-          projects="none"
-          case "$(basename "${SCOPE_ALLOWLIST}")" in
-            allowlist-clang.txt|allowlist-llvm-clang.txt)
-              projects="clang"
-              ;;
-          esac
+          projects="$(gap_scope_enable_projects_for_allowlist "${SCOPE_ALLOWLIST}")"
+          projects="${projects:-none}"
           html_args=(
             --summary "${OUT_DIR}/commit_lines_report/target_lines_coverage_summary.csv"
             --output-dir "${OUT_DIR}/commit_lines_report/html"
@@ -360,13 +342,6 @@ jobs:
             --projects "${projects}"
             --backends "${SCOPE_BACKENDS}"
           )
-          if [[ -n "${SCOPE_TESTS}" ]]; then
-            IFS=',' read -r -a suites <<< "${SCOPE_TESTS}"
-            for suite in "${suites[@]}"; do
-              [[ -n "${suite}" ]] || continue
-              html_args+=(--tests "${suite}")
-            done
-          fi
           python -m coverage html-report "${html_args[@]}"
 
       - name: Write finding README
@@ -382,10 +357,8 @@ jobs:
             echo "gap_scope_action: ${{ steps.scope.outputs.action }}"
             echo "gap_scope_rule: ${{ steps.scope.outputs.rule }}"
             echo "gap_scope_backends: ${{ steps.scope.outputs.backends }}"
-            echo "gap_scope_tests: ${{ steps.scope.outputs.tests }}"
             echo "gap_scope_allowlist: ${{ steps.scope.outputs.allowlist }}"
             echo "gap_scope_reason: ${{ steps.scope.outputs.reason }}"
-            echo "allow_inline: ${{ inputs.allow_inline }}"
             echo "upload_raw: ${{ inputs.upload_raw }}"
             echo "upload_tools: ${{ inputs.upload_tools }}"
             echo "generate_html: ${{ inputs.generate_html }}"
